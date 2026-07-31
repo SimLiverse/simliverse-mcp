@@ -28,7 +28,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Callable
 
 if TYPE_CHECKING:
-    from mcp.server.fastmcp import FastMCP
+    try:
+        from mcp.server.fastmcp import FastMCP
+    except ImportError:
+        from fastmcp import FastMCP
 
     from isaac_mcp.connection import IsaacConnection
 

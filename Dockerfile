@@ -16,7 +16,7 @@ COPY isaac_mcp/__init__.py /app/isaac_mcp/
 
 # Install python dependencies
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
-    pip install --no-cache-dir "mcp[cli]>=1.2.0" httpx uvicorn starlette
+    pip install --no-cache-dir "mcp[cli]>=1.2.0" fastmcp httpx uvicorn starlette
 
 # Copy application source
 COPY . /app

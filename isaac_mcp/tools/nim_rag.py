@@ -20,7 +20,10 @@ import os
 from typing import TYPE_CHECKING, Callable, Optional
 
 import httpx
-from mcp.server.fastmcp import FastMCP
+try:
+    from mcp.server.fastmcp import FastMCP
+except ImportError:
+    from fastmcp import FastMCP
 
 if TYPE_CHECKING:
     from isaac_mcp.connection import IsaacConnection

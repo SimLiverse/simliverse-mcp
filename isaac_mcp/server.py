@@ -12,7 +12,10 @@ import os
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Dict
 
-from mcp.server.fastmcp import FastMCP
+try:
+    from mcp.server.fastmcp import FastMCP
+except ImportError:
+    from fastmcp import FastMCP
 
 from isaac_mcp.connection import get_isaac_connection, reset_isaac_connection
 from isaac_mcp.tools import register_all_tools
