@@ -53,10 +53,11 @@ def register_all_tools(mcp: FastMCP, get_connection: Callable[[], IsaacConnectio
       - search_isaac_sim_code_examples
       - search_isaac_sim_settings
     """
-    from . import nim_rag, scene, robots, simulation
+    from . import nim_rag, scene, robots, simulation, assets
 
     nim_rag.register_tools(mcp, get_connection)
     scene.register_tools(mcp, get_connection)
     robots.register_tools(mcp, get_connection)
     simulation.register_tools(mcp, get_connection)
+    assets.register_tools(mcp, get_connection)
 
