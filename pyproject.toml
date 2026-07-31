@@ -1,0 +1,55 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "isaacsim-mcp-server"
+dynamic = ["version"]
+description = "Control NVIDIA Isaac Sim robotics simulator through MCP -- 41 tools for scene management, robot control, sensors, and simulation"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    { name = "omni-mcp" },
+    { name = "whats2000" },
+]
+keywords = ["mcp", "isaac-sim", "robotics", "simulation", "nvidia"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries",
+]
+dependencies = [
+    "mcp[cli]",
+]
+
+[dependency-groups]
+dev = [
+    "pre-commit",
+    "ruff",
+    "pytest",
+]
+
+[project.urls]
+Homepage = "https://github.com/whats2000/isaacsim-mcp-server"
+Repository = "https://github.com/whats2000/isaacsim-mcp-server"
+Issues = "https://github.com/whats2000/isaacsim-mcp-server/issues"
+
+[project.scripts]
+isaacsim-mcp-server = "isaac_mcp.server:main"
+
+[tool.hatch.version]
+path = "isaac_mcp/__init__.py"
+
+[tool.hatch.build.targets.sdist]
+include = ["isaac_mcp/"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["isaac_mcp"]
