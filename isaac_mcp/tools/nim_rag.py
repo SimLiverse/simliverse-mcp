@@ -41,12 +41,17 @@ _NVIDIA_API_KEY = os.environ.get("NVIDIA_API_KEY", "")
 _NIM_RAG_ENDPOINT = "https://integrate.api.nvidia.com/v1/chat/completions"
 
 
+_NIM_SESSION_ID: str = ""
+
+
 async def _call_nvidia_mcp_tool(tool_name: str, params: dict) -> str:
     """
     Forward a tool call to the NVIDIA isaacsim_mcp server running as a local
     Docker sidecar on port 9904 (same VM). Falls back to a helpful error if
     the sidecar is not available.
     """
+    global _NIM_SESSION_ID
+
     if not _NVIDIA_API_KEY:
         return json.dumps({
             "status": "error",
@@ -56,19 +61,46 @@ async def _call_nvidia_mcp_tool(tool_name: str, params: dict) -> str:
             ),
         })
 
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream",
+    }
+    if _NIM_SESSION_ID:
+        headers["Mcp-Session-Id"] = _NIM_SESSION_ID
+
     payload = {
         "jsonrpc": "2.0",
         "id": "1",
         "method": "tools/call",
         "params": {"name": tool_name, "arguments": params},
     }
-    headers = {
-        "Content-Type": "application/json",
-        "Accept": "application/json, text/event-stream",
-    }
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(_NIM_TOOLS_URL, json=payload, headers=headers)
+            
+            # If FastMCP requires initialization, initialize first then retry
+            if resp.status_code in (400, 404, 405) and not _NIM_SESSION_ID:
+                init_payload = {
+                    "jsonrpc": "2.0",
+                    "id": "1",
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {},
+                        "clientInfo": {"name": "simliverse-mcp", "version": "1.0"},
+                    },
+                }
+                init_resp = await client.post(_NIM_TOOLS_URL, json=init_payload, headers=headers)
+                sess = (
+                    init_resp.headers.get("mcp-session-id")
+                    or init_resp.headers.get("x-mcp-session-id")
+                    or init_resp.headers.get("mcp-session")
+                )
+                if sess:
+                    _NIM_SESSION_ID = sess
+                    headers["Mcp-Session-Id"] = sess
+                resp = await client.post(_NIM_TOOLS_URL, json=payload, headers=headers)
+
             resp.raise_for_status()
             text = resp.text.strip()
             # Handle SSE format
