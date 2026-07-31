@@ -11,16 +11,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Copy dependency files
 COPY pyproject.toml /app/
+COPY README.md /app/
+COPY isaac_mcp/__init__.py /app/isaac_mcp/
 
 # Install python dependencies
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir mcp httpx uvicorn starlette
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir "mcp[cli]>=1.2.0" httpx uvicorn starlette
 
 # Copy application source
 COPY . /app
 
 # Install package locally
-RUN pip install --no-cache-dir -e .
+RUN pip install --no-cache-dir --no-deps -e .
 
 EXPOSE 9905
 
