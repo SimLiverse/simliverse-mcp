@@ -740,7 +740,9 @@ class IsaacAdapterV6(IsaacAdapterBase):
             raise ValueError(f"Target prim not found: {target_prim_path}. You MUST use list_prims to find exact paths.")
             
         material = UsdShade.Material(material_prim)
-        UsdShade.MaterialBindingAPI(target).Bind(material)
+        # Modern USD requires .Apply() for MaterialBindingAPI
+        binding_api = UsdShade.MaterialBindingAPI.Apply(target)
+        binding_api.Bind(material)
 
     # ── Lighting ───────────────────────────────────────────
 
