@@ -477,22 +477,55 @@ class AssetIndexCache:
                 except Exception as e:
                     carb.log_warn(f"Background index local scan error {base_dir}: {e}")
 
-            # 2. Crawl Omniverse S3 Bucket via omni.client
+            # 2. Add Standard Isaac Sim Asset Catalog via get_assets_root_path()
             try:
-                import omni.client
+                from isaacsim.storage.native import get_assets_root_path
+                assets_root = get_assets_root_path()
+            except Exception:
                 try:
-                    from isaacsim.storage.native import get_assets_root_path
+                    from omni.isaac.core.utils.nucleus import get_assets_root_path
                     assets_root = get_assets_root_path()
                 except Exception:
-                    try:
-                        from omni.isaac.core.utils.nucleus import get_assets_root_path
-                        assets_root = get_assets_root_path()
-                    except Exception:
-                        assets_root = "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/6.0"
+                    assets_root = "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/6.0"
 
+            standard_assets = [
+                # Robots & Arms
+                {"name": "Franka Emika Panda", "path": f"{assets_root}/Isaac/Robots/FrankaRobotics/FrankaPanda/franka.usd", "keywords": ["franka", "panda"]},
+                {"name": "Factory Franka", "path": f"{assets_root}/Isaac/Robots/FactoryFranka/factory_franka.usd", "keywords": ["factory", "franka"]},
+                {"name": "Universal Robots UR10", "path": f"{assets_root}/Isaac/Robots/UniversalRobots/ur10/ur10.usd", "keywords": ["ur10", "universal", "arm"]},
+                {"name": "Universal Robots UR5", "path": f"{assets_root}/Isaac/Robots/UniversalRobots/ur5/ur5.usd", "keywords": ["ur5", "universal"]},
+                {"name": "Carter V2 Mobile Robot", "path": f"{assets_root}/Isaac/Robots/Carter/carter_v2.usd", "keywords": ["carter", "amr", "mobile"]},
+                # Humanoids & Quadrupeds
+                {"name": "Unitree H1 Humanoid Robot", "path": f"{assets_root}/Isaac/Robots/Unitree/H1/h1.usd", "keywords": ["humanoid", "h1", "unitree"]},
+                {"name": "Unitree G1 Humanoid Robot", "path": f"{assets_root}/Isaac/Robots/Unitree/G1/g1.usd", "keywords": ["humanoid", "g1", "unitree"]},
+                {"name": "Robotis OP3 Humanoid", "path": f"{assets_root}/Isaac/Robots/Robotis/OP3/op3.usd", "keywords": ["humanoid", "op3", "robotis"]},
+                {"name": "Unitree Go1 Quadruped", "path": f"{assets_root}/Isaac/Robots/Unitree/Go1/go1.usd", "keywords": ["quadruped", "go1", "unitree", "dog"]},
+                {"name": "ANYbotics ANYmal C", "path": f"{assets_root}/Isaac/Robots/ANYbotics/anymal_c.usd", "keywords": ["quadruped", "anymal"]},
+                # End Effectors & Hands
+                {"name": "Allegro Hand", "path": f"{assets_root}/Isaac/Robots/AllegroHand/allegro_hand.usd", "keywords": ["allegro", "hand", "gripper"]},
+                {"name": "Shadow Hand", "path": f"{assets_root}/Isaac/Robots/ShadowHand/shadow_hand.usd", "keywords": ["shadow", "hand", "gripper"]},
+                # Environments & Scenes
+                {"name": "Full Warehouse Environment", "path": f"{assets_root}/Isaac/Environments/Simple_Warehouse/full_warehouse.usd", "keywords": ["warehouse", "environment", "factory"]},
+                {"name": "Simple Room Environment", "path": f"{assets_root}/Isaac/Environments/Simple_Room/simple_room.usd", "keywords": ["room", "simple", "environment"]},
+                {"name": "Hospital Environment", "path": f"{assets_root}/Isaac/Environments/Hospital/hospital.usd", "keywords": ["hospital", "environment"]},
+                {"name": "Office Environment", "path": f"{assets_root}/Isaac/Environments/Office/office.usd", "keywords": ["office", "environment"]},
+                {"name": "Grid Room Environment", "path": f"{assets_root}/Isaac/Environments/Grid/default_environment.usd", "keywords": ["gridroom", "stage", "default", "grid"]},
+            ]
+
+            for item in standard_assets:
+                new_index.append({
+                    "name": item["name"],
+                    "path": item["path"],
+                    "type": "usd",
+                    "source": "isaac_sim_catalog"
+                })
+
+            # 3. Crawl Omniverse Nucleus Server (if available) via omni.client
+            try:
+                import omni.client
                 categories = ["/Isaac/Robots", "/Isaac/Environments", "/Isaac/Props"]
 
-                def _crawl(url_dir: str, depth: int = 0, max_depth: int = 3):
+                def _crawl(url_dir: str, depth: int = 0, max_depth: int = 2):
                     if depth > max_depth:
                         return
                     try:
@@ -510,13 +543,14 @@ class AssetIndexCache:
                                     "name": Path(rel).stem,
                                     "path": child_url,
                                     "type": rel.split(".")[-1],
-                                    "source": "omni_client_catalog"
+                                    "source": "omni_client_nucleus"
                                 })
                     except Exception as e:
                         carb.log_warn(f"Background index crawl error {url_dir}: {e}")
 
-                for cat in categories:
-                    _crawl(f"{assets_root}{cat}")
+                if assets_root.startswith("omniverse://"):
+                    for cat in categories:
+                        _crawl(f"{assets_root}{cat}")
             except Exception as e:
                 carb.log_warn(f"Background omni.client index error: {e}")
 
