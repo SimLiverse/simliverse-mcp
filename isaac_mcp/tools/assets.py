@@ -66,7 +66,7 @@ def register_tools(mcp: FastMCP, get_connection: "Callable[[], IsaacConnection]"
         """Load a USD asset from a URL or file path into the scene.
 
         Args:
-            usd_url: URL or local path to the USD file.
+            usd_url: EXACT URL returned by discover_assets. Do NOT guess or hallucinate paths (e.g. omni:/... is FORBIDDEN).
             prim_path: Prim path for the loaded asset.
             position: [x, y, z] world position.
             scale: [sx, sy, sz] scale factors.

@@ -509,7 +509,7 @@ class AssetIndexCache:
                 {"name": "Simple Room Environment", "path": f"{assets_root}/Isaac/Environments/Simple_Room/simple_room.usd", "keywords": ["room", "simple", "environment"]},
                 {"name": "Hospital Environment", "path": f"{assets_root}/Isaac/Environments/Hospital/hospital.usd", "keywords": ["hospital", "environment"]},
                 {"name": "Office Environment", "path": f"{assets_root}/Isaac/Environments/Office/office.usd", "keywords": ["office", "environment"]},
-                {"name": "Grid Room Environment", "path": f"{assets_root}/Isaac/Environments/Grid/default_environment.usd", "keywords": ["gridroom", "stage", "default", "grid"]},
+                {"name": "Grid Room Environment", "path": f"{assets_root}/Isaac/Environments/Grid/default_environment.usd", "keywords": ["gridroom", "stage", "default", "grid", "floor", "ground", "flat"]},
             ]
 
             for item in standard_assets:

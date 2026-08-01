@@ -77,6 +77,8 @@ def load_usd(
             matches = searcher.discover_assets(clean_query)
             if matches:
                 usd_url = matches[0]["path"]
+            else:
+                return {"status": "error", "message": f"Asset not found for hallucinated path '{usd_url}'. You MUST use discover_assets first!"}
 
         loader = USDLoader()
         result_path = loader.load_usd_from_url(url_path=usd_url, target_path=prim_path, location=position, scale=scale)
