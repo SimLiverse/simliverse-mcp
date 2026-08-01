@@ -37,6 +37,7 @@ def register(registry: Dict[str, Any], adapter: IsaacAdapterBase) -> None:
     registry["assets.import_urdf"] = lambda **p: import_urdf(adapter, **p)
     registry["assets.load_usd"] = lambda **p: load_usd(adapter, **p)
     registry["assets.search_usd"] = lambda **p: search_usd(adapter, **p)
+    registry["assets.discover_assets"] = lambda **p: discover_assets(adapter, **p)
     registry["assets.generate_3d"] = lambda **p: generate_3d(adapter, **p)
 
 
@@ -131,3 +132,24 @@ def generate_3d(
         return {"status": "success", "message": "3D generation started", "task_id": task_id}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+
+def discover_assets(
+    adapter: IsaacAdapterBase,
+    query: Optional[str] = None,
+    search_paths: Optional[Sequence[str]] = None,
+) -> Dict[str, Any]:
+    try:
+        if not query:
+            return {"status": "error", "message": "query is required"}
+        searcher = USDSearch3d()
+        matches = searcher.discover_assets(query, list(search_paths) if search_paths else None)
+        return {
+            "status": "success",
+            "query": query,
+            "count": len(matches),
+            "matches": matches,
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+

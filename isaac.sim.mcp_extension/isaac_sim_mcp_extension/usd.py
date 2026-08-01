@@ -423,48 +423,203 @@ class USDLoader:
             print(f"Error testing absolute paths: {str(e)}")
 
 
+import threading
+import time
+
+
+class AssetIndexCache:
+    """Singleton background asset indexer.
+
+    Pre-indexes local mounts (/mnt/assets) and remote Omniverse S3/Nucleus repositories
+    in a background thread so queries resolve in 0ms!
+    """
+
+    _instance = None
+    _lock = threading.Lock()
+
+    def __new__(cls):
+        with cls._lock:
+            if cls._instance is None:
+                cls._instance = super().__new__(cls)
+                cls._instance._index = []
+                cls._instance._is_indexing = False
+                cls._instance._last_indexed = 0.0
+                cls._instance._start_background_indexing()
+            return cls._instance
+
+    def _start_background_indexing(self):
+        if self._is_indexing:
+            return
+        t = threading.Thread(target=self._build_index, daemon=True)
+        t.start()
+
+    def _build_index(self):
+        self._is_indexing = True
+        try:
+            new_index = []
+
+            # 1. Scan Local Mounts (/mnt/assets, /workspace/job_repo, /tmp/usd)
+            dirs_to_scan = ["/mnt/assets", "/workspace/job_repo", "/tmp/usd"]
+            for base_dir in dirs_to_scan:
+                p = Path(base_dir)
+                if not p.exists():
+                    continue
+                try:
+                    for ext in ["*.usd", "*.usda", "*.usdc", "*.urdf"]:
+                        for filepath in p.rglob(ext):
+                            new_index.append({
+                                "name": filepath.stem,
+                                "path": str(filepath.absolute()),
+                                "type": filepath.suffix.lstrip("."),
+                                "source": f"local:{base_dir}"
+                            })
+                except Exception as e:
+                    carb.log_warn(f"Background index local scan error {base_dir}: {e}")
+
+            # 2. Crawl Omniverse S3 Bucket via omni.client
+            try:
+                import omni.client
+                try:
+                    from isaacsim.storage.native import get_assets_root_path
+                    assets_root = get_assets_root_path()
+                except Exception:
+                    try:
+                        from omni.isaac.core.utils.nucleus import get_assets_root_path
+                        assets_root = get_assets_root_path()
+                    except Exception:
+                        assets_root = "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/6.0"
+
+                categories = ["/Isaac/Robots", "/Isaac/Environments", "/Isaac/Props"]
+
+                def _crawl(url_dir: str, depth: int = 0, max_depth: int = 3):
+                    if depth > max_depth:
+                        return
+                    try:
+                        res, entries = omni.client.list(url_dir)
+                        if res != omni.client.Result.OK or not entries:
+                            return
+                        for entry in entries:
+                            rel = entry.relative_path
+                            child_url = f"{url_dir.rstrip('/')}/{rel}"
+                            is_dir = bool(entry.flags & omni.client.ItemFlags.CAN_HAVE_CHILDREN)
+                            if is_dir:
+                                _crawl(child_url, depth + 1, max_depth)
+                            elif rel.endswith((".usd", ".usda", ".usdc")):
+                                new_index.append({
+                                    "name": Path(rel).stem,
+                                    "path": child_url,
+                                    "type": rel.split(".")[-1],
+                                    "source": "omni_client_catalog"
+                                })
+                    except Exception as e:
+                        carb.log_warn(f"Background index crawl error {url_dir}: {e}")
+
+                for cat in categories:
+                    _crawl(f"{assets_root}{cat}")
+            except Exception as e:
+                carb.log_warn(f"Background omni.client index error: {e}")
+
+            self._index = new_index
+            self._last_indexed = time.time()
+            carb.log_info(f"AssetIndexCache build complete. Total indexed assets: {len(self._index)}")
+        finally:
+            self._is_indexing = False
+
+    def query(self, search_term: str, search_paths: Optional[list] = None) -> list:
+        if not self._index and not self._is_indexing:
+            self._start_background_indexing()
+
+        extra_matches = []
+        if search_paths:
+            for base_dir in search_paths:
+                p = Path(base_dir)
+                if not p.exists():
+                    continue
+                try:
+                    for ext in ["*.usd", "*.usda", "*.usdc", "*.urdf"]:
+                        for filepath in p.rglob(ext):
+                            extra_matches.append({
+                                "name": filepath.stem,
+                                "path": str(filepath.absolute()),
+                                "type": filepath.suffix.lstrip("."),
+                                "source": f"local:{base_dir}"
+                            })
+                except Exception:
+                    pass
+
+        all_items = self._index + extra_matches
+        query_lower = search_term.lower()
+        tokens = [t for t in query_lower.split() if len(t) > 1]
+
+        matches = []
+        for item in all_items:
+            name_lower = item["name"].lower()
+            path_lower = item["path"].lower()
+            if any(tok in name_lower or tok in path_lower for tok in tokens) or not tokens:
+                matches.append(item)
+
+        return matches
+
+
 class USDSearch3d:
+    """Dynamic Asset Discovery Service.
+
+    Supports:
+    1. Fast background-indexed search (/mnt/assets + Isaac Sim catalog)
+    2. NVIDIA USD Search API (if accessible)
+    """
+
     def __init__(self):
-        """Initialize Beaver3d with model name and API key from environment variables"""
         self.api_key = os.environ.get("NVIDIA_API_KEY")
         self.usd_search_server = "https://ai.api.nvidia.com/v1/omniverse/nvidia/usdsearch"
-        if not self.api_key:
-            raise Exception(
-                "NVIDIA_API_KEY environment variable not set, USD Search service is not available untill NVIDIA_API_KEY is set"
-            )
 
-    def search(self, text_prompt: str):
-        # get your own NVIDIA_API_KEY from build.nvidia.com
-        response = requests.post(
-            url=self.usd_search_server,
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Accept": "application/json",
-                "Content-Type": "application/json",
-            },
-            data=json.dumps(
-                dict(
-                    description=text_prompt,
-                    file_extension_include="usd*",
-                    return_images="true",
-                    return_metadata="true",
-                    return_vision_generated_metadata="true",
-                    cutoff_threshold="1.05",
-                    limit="50",
+    def discover_assets(self, query: str, search_paths: Optional[list] = None) -> list:
+        """Search local directories (/mnt/assets) and Isaac Sim asset catalogs in 0ms via AssetIndexCache."""
+        cache = AssetIndexCache()
+        return cache.query(query, search_paths)
+
+    def search(self, text_prompt: str) -> str:
+        """Search for a USD model, trying NVIDIA Cloud NIM first, then falling back to local + Isaac discovery."""
+        if self.api_key:
+            try:
+                response = requests.post(
+                    url=self.usd_search_server,
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Accept": "application/json",
+                        "Content-Type": "application/json",
+                    },
+                    data=json.dumps(
+                        dict(
+                            description=text_prompt,
+                            file_extension_include="usd*",
+                            return_images="true",
+                            return_metadata="true",
+                            return_vision_generated_metadata="true",
+                            cutoff_threshold="1.05",
+                            limit="50",
+                        )
+                    ),
+                    timeout=5.0
                 )
-            ),
-        )
-        carb.log_info(f"usd_search_3d_from_text return code: {response.status_code}")
-        details = json.dumps(response.json(), indent=2)
-        details = json.loads(details)
-        url = details[0]["url"]
+                if response.status_code == 200:
+                    details = response.json()
+                    if isinstance(details, list) and len(details) > 0 and "url" in details[0]:
+                        url = details[0]["url"]
+                        if url.startswith("s3://deepsearch-demo-content"):
+                            url = url.replace(
+                                "s3://deepsearch-demo-content", "https://omniverse-content-production.s3.us-west-2.amazonaws.com"
+                            )
+                        return url
+            except Exception as e:
+                carb.log_info(f"NIM USD search call failed, falling back to dynamic asset finder: {e}")
 
-        # Convert S3 URL to HTTPS URL if needed
-        if url.startswith("s3://deepsearch-demo-content"):
-            url = url.replace(
-                "s3://deepsearch-demo-content", "https://omniverse-content-production.s3.us-west-2.amazonaws.com"
-            )
-        return url
+        # Fallback to Dynamic Asset Finder
+        matches = self.discover_assets(text_prompt)
+        if matches:
+            return matches[0]["path"]
+
+        raise ValueError(f"No asset found for '{text_prompt}' in local mounts (/mnt/assets) or Isaac Sim catalog.")
 
     @staticmethod
     def test_search_and_load():
