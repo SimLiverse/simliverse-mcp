@@ -53,6 +53,10 @@ def register_tools(mcp: FastMCP, get_connection: "Callable[[], IsaacConnection]"
         (min/max corners in world coordinates) so you can accurately place other
         objects relative to this one (e.g. placing a cube on top of a table).
 
+        CRITICAL: The returned `prim_path` is the exact path where the object was created.
+        You MUST save and use this exact string for any future operations on this object.
+        DO NOT GUESS OR MODIFY IT.
+
         Args:
             object_type: Type of primitive — Cube, Sphere, Cylinder, Cone, Capsule, or Plane.
             position: [x, y, z] world position.
@@ -84,6 +88,9 @@ def register_tools(mcp: FastMCP, get_connection: "Callable[[], IsaacConnection]"
     def delete_object(prim_path: str) -> str:
         """Delete an object from the scene.
 
+        CRITICAL: `prim_path` must be an exact match to a known path in the scene.
+        Do not guess. Use the exact string returned by `create_object` or `get_scene_info`.
+
         Args:
             prim_path: The prim path of the object to delete.
         """
@@ -102,6 +109,9 @@ def register_tools(mcp: FastMCP, get_connection: "Callable[[], IsaacConnection]"
         scale: Optional[List[float]] = None,
     ) -> str:
         """Set the transform (position, rotation, scale) of an existing object.
+
+        CRITICAL: `prim_path` must be an exact match to a known path in the scene.
+        Do not guess. Use the exact string returned by `create_object` or `get_scene_info`.
 
         Args:
             prim_path: The prim path of the object to transform.

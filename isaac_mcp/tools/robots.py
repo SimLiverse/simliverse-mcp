@@ -50,6 +50,10 @@ def register_tools(mcp: FastMCP, get_connection: "Callable[[], IsaacConnection]"
         Returns prim_path, robot_key, joint_names, and num_dof so you can
         immediately use set_joint_positions without a follow-up get_robot_info call.
 
+        CRITICAL: The returned `prim_path` is the exact path where the robot was created.
+        You MUST save and use this exact string for any future operations on this robot.
+        DO NOT GUESS OR MODIFY IT.
+
         Args:
             robot_type: Robot name or search term. Fuzzy matched against available robots.
             position: [x, y, z] world position.
@@ -100,6 +104,9 @@ def register_tools(mcp: FastMCP, get_connection: "Callable[[], IsaacConnection]"
         Returns joint names ordered by DOF index, joint types (revolute/prismatic),
         and joint limits (degrees for revolute, meters for prismatic).
 
+        CRITICAL: `prim_path` must be an exact match to a known path in the scene.
+        Do not guess. Use the exact string returned by `create_robot` or `get_scene_info`.
+
         Args:
             prim_path: The prim path of the robot.
         """
@@ -118,8 +125,11 @@ def register_tools(mcp: FastMCP, get_connection: "Callable[[], IsaacConnection]"
 
         Units: radians for revolute joints, meters for prismatic joints (e.g. gripper fingers).
         Use get_robot_info to discover joint names, types, and limits first.
-        After calling this, use step_simulation to advance and observe the result —
-        do not use play_simulation + sleep.
+        If you only want to set a subset of joints, provide joint_indices.
+        Wait for a few steps after spawning before setting targets.
+
+        CRITICAL: `prim_path` must be an exact match to a known path in the scene.
+        Do not guess. Use the exact string returned by `create_robot` or `get_scene_info`.
 
         Args:
             prim_path: The prim path of the robot.
