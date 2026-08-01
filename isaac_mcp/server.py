@@ -94,10 +94,14 @@ Prefer named tools over execute_script: get_joint_positions, get_prim_info, get_
 get_joint_config, get_isaac_logs, create_action_graph, edit_action_graph.
 """
 
+import os
+
 mcp = FastMCP(
     "IsaacSimMCP",
     instructions=_INSTRUCTIONS,
     lifespan=server_lifespan,
+    host=os.environ.get("MCP_HOST", "0.0.0.0"),
+    port=int(os.environ.get("MCP_PORT", "9905")),
 )
 
 register_all_tools(mcp, get_isaac_connection)
