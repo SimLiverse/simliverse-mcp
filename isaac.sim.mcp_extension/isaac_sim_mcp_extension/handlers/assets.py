@@ -68,6 +68,16 @@ def load_usd(
     try:
         if not usd_url:
             return {"status": "error", "message": "usd_url is required"}
+
+        # Safety net: If LLM passes a guessed short name or invalid omni: path, resolve it via discover_assets
+        if not (usd_url.startswith("http://") or usd_url.startswith("https://") or usd_url.startswith("file://") or (usd_url.startswith("/") and not usd_url.startswith("/World"))):
+            searcher = USDSearch3d()
+            # Clean up hallucinated omni: prefixes
+            clean_query = usd_url.replace("omni:/", "").replace("omni://", "").split("/")[0] or usd_url
+            matches = searcher.discover_assets(clean_query)
+            if matches:
+                usd_url = matches[0]["path"]
+
         loader = USDLoader()
         result_path = loader.load_usd_from_url(url_path=usd_url, target_path=prim_path, location=position, scale=scale)
         return {"status": "success", "message": f"Loaded USD from {usd_url}", "prim_path": result_path}
