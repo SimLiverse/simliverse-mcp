@@ -332,6 +332,7 @@ class IsaacAdapterV6(IsaacAdapterBase):
         joint_names: List[str] = []
         num_dof = 0
         try:
+            from isaacsim.core.experimental.prims import Articulation
             art = Articulation(prim_paths=[prim_path])
             if not art.initialized:
                 art.initialize()
