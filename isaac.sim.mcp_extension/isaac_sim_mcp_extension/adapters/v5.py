@@ -346,8 +346,8 @@ class IsaacAdapterV5(IsaacAdapterBase):
         # Try to get joint info via articulation API (requires running sim)
         joint_names: List[str] = []
         num_dof = 0
-        art = SingleArticulation(prim_path=prim_path)
         try:
+            art = SingleArticulation(prim_path=prim_path)
             art.initialize()
             joint_names = list(art.dof_names) if art.dof_names else []
             num_dof = art.num_dof if art.num_dof else 0
@@ -404,8 +404,8 @@ class IsaacAdapterV5(IsaacAdapterBase):
         from isaacsim.core.prims import SingleArticulation
         from isaacsim.core.utils.types import ArticulationAction
 
-        art = SingleArticulation(prim_path=prim_path)
         try:
+            art = SingleArticulation(prim_path=prim_path)
             art.initialize()
             action = ArticulationAction(
                 joint_positions=np.array(positions),
@@ -462,8 +462,8 @@ class IsaacAdapterV5(IsaacAdapterBase):
         from isaacsim.core.prims import SingleArticulation
 
         self._ensure_physics_world()
-        art = SingleArticulation(prim_path=prim_path)
         try:
+            art = SingleArticulation(prim_path=prim_path)
             art.initialize()
             if art.dof_names:
                 return list(art.dof_names)
@@ -489,8 +489,8 @@ class IsaacAdapterV5(IsaacAdapterBase):
         # Ensure physics is initialized so SingleArticulation.initialize() works
         self._ensure_physics_world()
 
-        art = SingleArticulation(prim_path=prim_path)
         try:
+            art = SingleArticulation(prim_path=prim_path)
             art.initialize()
             positions = art.get_joint_positions()
             if positions is not None:
@@ -540,10 +540,9 @@ class IsaacAdapterV5(IsaacAdapterBase):
         joint_names = self._get_joint_names(prim_path)
         current_pos_list = self.get_joint_positions(prim_path)
 
-        # Get runtime target positions (from applied actions, not USD defaults)
-        art = SingleArticulation(prim_path=prim_path)
         runtime_targets: List[float] = []
         try:
+            art = SingleArticulation(prim_path=prim_path)
             art.initialize()
             applied_action = art.get_applied_action()
             if applied_action and applied_action.joint_positions is not None:
