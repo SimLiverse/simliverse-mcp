@@ -104,7 +104,7 @@ register_all_tools(mcp, get_isaac_connection)
 
 
 def main():
-    mcp.run(transport="sse", host="0.0.0.0", port=9905)
+    mcp.run(transport="streamable-http")
 
 
 if __name__ == "__main__":
