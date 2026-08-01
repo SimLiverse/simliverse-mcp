@@ -389,9 +389,9 @@ class IsaacAdapterV6(IsaacAdapterBase):
         positions: Sequence[float],
         joint_indices: Optional[List[int]] = None,
     ) -> None:
-        from isaacsim.core.experimental.prims import Articulation
-        import warp as wp
         try:
+            from isaacsim.core.experimental.prims import Articulation
+            import warp as wp
             art = Articulation(prim_paths=[prim_path])
             if not art.initialized:
                 art.initialize()
@@ -447,8 +447,8 @@ class IsaacAdapterV6(IsaacAdapterBase):
                 drive.GetTargetPositionAttr().Set(float(value * 100.0))
 
     def _get_joint_names(self, prim_path: str) -> List[str]:
-        from isaacsim.core.experimental.prims import Articulation
         try:
+            from isaacsim.core.experimental.prims import Articulation
             art = Articulation(prim_paths=[prim_path])
             if not art.initialized:
                 art.initialize()
@@ -470,8 +470,8 @@ class IsaacAdapterV6(IsaacAdapterBase):
         return names
 
     def get_joint_positions(self, prim_path: str) -> List[float]:
-        from isaacsim.core.experimental.prims import Articulation
         try:
+            from isaacsim.core.experimental.prims import Articulation
             art = Articulation(prim_paths=[prim_path])
             if not art.initialized:
                 art.initialize()
@@ -520,6 +520,7 @@ class IsaacAdapterV6(IsaacAdapterBase):
 
         runtime_targets: List[float] = []
         try:
+            from isaacsim.core.experimental.prims import Articulation
             art = Articulation(prim_paths=[prim_path])
             if not art.initialized:
                 art.initialize()
