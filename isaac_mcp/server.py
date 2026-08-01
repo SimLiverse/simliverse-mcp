@@ -93,11 +93,13 @@ See demo/franka_pick_place.py for a complete working example.
 Prefer named tools over execute_script: get_joint_positions, get_prim_info, get_physics_state,
 get_joint_config, get_isaac_logs, create_action_graph, edit_action_graph.
 
-### Critical Rules for Prim Paths (Anti-Hallucination)
+### Critical Rules for Prim Paths & Arguments (Anti-Hallucination)
 1. **NEVER guess or hallucinate `prim_path`**. Paths in Isaac Sim are exact.
-2. When you use `create_robot` or `create_object`, it returns the exact `prim_path` that was created. **You MUST use this exact string** for all subsequent calls (like `get_robot_info`, `set_joint_positions`).
-3. If you lose track of the path, DO NOT GUESS. Use `get_scene_info` or `list_prims` to find the exact path currently in the scene.
-4. If an error says "Prim path expression... is invalid", it means you used the wrong path. Stop and use `get_scene_info` to find the correct path.
+2. Before interacting with any robot or object, you MUST verify it exists in the scene using `get_scene_info` or `list_prims`. If it doesn't exist, you MUST create it first.
+3. When you use `create_robot` or `create_object`, it returns the exact `prim_path` that was created. **You MUST use this exact string** for all subsequent calls.
+4. If you lose track of the path, DO NOT GUESS. Use `get_scene_info` or `list_prims` to find the exact path currently in the scene.
+5. If an error says "Prim path expression... is invalid", it means you used the wrong path. Stop and use `get_scene_info` to find the correct path.
+6. **JSON TYPES:** When an argument expects a `List[float]`, you MUST provide a raw JSON array of actual numbers (e.g. `[0.1, 0.2, -0.3]`). NEVER pass Python code, list comprehensions, strings, or `"[random.uniform(...)]"`.
 """
 
 import os

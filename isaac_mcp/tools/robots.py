@@ -130,11 +130,14 @@ def register_tools(mcp: FastMCP, get_connection: "Callable[[], IsaacConnection]"
 
         CRITICAL: `prim_path` must be an exact match to a known path in the scene.
         Do not guess. Use the exact string returned by `create_robot` or `get_scene_info`.
+        CRITICAL JSON FORMAT: `joint_positions` MUST be a real JSON array of numbers (e.g. `[0.1, 0.2]`).
+        NEVER pass a string containing Python code like `"[random.uniform(...)]"`. You must
+        evaluate any logic yourself and pass only the final raw numerical values.
 
         Args:
             prim_path: The prim path of the robot.
-            joint_positions: List of target joint position values.
-            joint_indices: Optional list of joint indices to set. Sets all joints if not provided.
+            joint_positions: List of joint target values. MUST be actual numbers, not Python code.
+            joint_indices: Optional subset of joint indices to control.
         """
         try:
             conn = get_connection()
