@@ -145,7 +145,7 @@ def create(
         asset_path = assets_root + match["asset_path"]
         if prim_path is None:
             prim_name = name or match["key"].capitalize()
-            prim_path = f"/{prim_name}"
+            prim_path = f"/World/{prim_name}"
         adapter.add_reference_to_stage(asset_path, prim_path)
         if position:
             xform = adapter.create_xform_prim(prim_path)

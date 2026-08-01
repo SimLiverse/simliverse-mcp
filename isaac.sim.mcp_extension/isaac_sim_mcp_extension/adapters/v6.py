@@ -340,7 +340,7 @@ class IsaacAdapterV6(IsaacAdapterBase):
             if names and len(names) > 0:
                 joint_names = list(names[0])
                 num_dof = len(joint_names)
-        except Exception:
+        except BaseException:
             pass
 
         stage = self.get_stage()
@@ -406,7 +406,7 @@ class IsaacAdapterV6(IsaacAdapterBase):
                 art.set_joint_positions(
                     positions=wp.array([positions], dtype=wp.float32)
                 )
-        except Exception:
+        except BaseException:
             self._set_joint_drive_targets(prim_path, positions, joint_indices)
 
     def _set_joint_drive_targets(
@@ -455,7 +455,7 @@ class IsaacAdapterV6(IsaacAdapterBase):
             names = art.get_dof_names()
             if names and len(names) > 0:
                 return list(names[0])
-        except Exception:
+        except BaseException:
             pass
 
         from pxr import Usd, UsdPhysics
@@ -478,7 +478,7 @@ class IsaacAdapterV6(IsaacAdapterBase):
             positions = art.get_joint_positions()
             if positions is not None and len(positions) > 0:
                 return positions.numpy()[0].tolist()
-        except Exception:
+        except BaseException:
             pass
 
         from pxr import Usd, UsdPhysics
@@ -526,7 +526,7 @@ class IsaacAdapterV6(IsaacAdapterBase):
             targets = art.get_joint_position_targets()
             if targets is not None and len(targets) > 0:
                 runtime_targets = targets.numpy()[0].tolist()
-        except Exception:
+        except BaseException:
             pass 
 
         joints_info = []
