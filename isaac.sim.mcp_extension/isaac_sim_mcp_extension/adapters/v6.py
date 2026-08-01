@@ -327,7 +327,6 @@ class IsaacAdapterV6(IsaacAdapterBase):
         return Articulation(prim_paths=[prim_path])
 
     def get_robot_joint_info(self, prim_path: str) -> Dict[str, Any]:
-        from isaacsim.core.experimental.prims import Articulation
         from pxr import Usd, UsdPhysics
 
         joint_names: List[str] = []
@@ -507,7 +506,6 @@ class IsaacAdapterV6(IsaacAdapterBase):
         return positions_list
 
     def get_joint_config(self, prim_path: str) -> Dict[str, Any]:
-        from isaacsim.core.experimental.prims import Articulation
         from pxr import Usd, UsdPhysics
 
         stage = self.get_stage()
