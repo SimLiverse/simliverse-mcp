@@ -30,6 +30,6 @@ def get_adapter():
     Currently only supports Isaac Sim 5.1.0.
     Future versions will detect the runtime version and return the matching adapter.
     """
-    from .v5 import IsaacAdapterV5
+    from .v6 import IsaacAdapterV6
 
-    return IsaacAdapterV5()
+    return IsaacAdapterV6()

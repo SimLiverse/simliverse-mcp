@@ -36,7 +36,7 @@ if TYPE_CHECKING:
     from pxr import Usd
 
 
-class IsaacAdapterV5(IsaacAdapterBase):
+class IsaacAdapterV6(IsaacAdapterBase):
     """Adapter for Isaac Sim 5.1.0 (isaacsim.* namespace)."""
 
     # ── Scene ──────────────────────────────────────────────

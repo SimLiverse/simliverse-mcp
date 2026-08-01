@@ -26,11 +26,8 @@
 import json
 from typing import TYPE_CHECKING, Callable, List, Optional
 
-try:
-    from mcp.server.fastmcp import FastMCP
-except ImportError:
-    from fastmcp import FastMCP
-    
+from mcp.server.fastmcp import FastMCP
+
 if TYPE_CHECKING:
     from isaac_mcp.connection import IsaacConnection
 
@@ -66,7 +63,7 @@ def register_tools(mcp: FastMCP, get_connection: "Callable[[], IsaacConnection]"
         """Load a USD asset from a URL or file path into the scene.
 
         Args:
-            usd_url: EXACT URL returned by discover_assets. Do NOT guess or hallucinate paths (e.g. omni:/... is FORBIDDEN).
+            usd_url: URL or local path to the USD file.
             prim_path: Prim path for the loaded asset.
             position: [x, y, z] world position.
             scale: [sx, sy, sz] scale factors.
@@ -140,25 +137,3 @@ def register_tools(mcp: FastMCP, get_connection: "Callable[[], IsaacConnection]"
             return json.dumps(result, indent=2)
         except Exception as e:
             return json.dumps({"status": "error", "message": str(e)})
-
-    @mcp.tool("discover_assets")
-    def discover_assets(
-        query: str,
-        search_paths: Optional[List[str]] = None,
-    ) -> str:
-        """Search local mounts (/mnt/assets) and Isaac Sim asset catalogs dynamically to discover 3D models and robots.
-
-        Args:
-            query: Name, keyword, or description of the asset (e.g. 'humanoid', 'franka', 'warehouse', 'table').
-            search_paths: Optional list of additional local filesystem directories to search.
-        """
-        try:
-            conn = get_connection()
-            params = {"query": query}
-            if search_paths:
-                params["search_paths"] = search_paths
-            result = conn.send_command("assets.discover_assets", params)
-            return json.dumps(result, indent=2)
-        except Exception as e:
-            return json.dumps({"status": "error", "message": str(e)})
-

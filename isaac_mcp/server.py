@@ -1,89 +1,110 @@
 # MIT License
-# Copyright (c) 2026 SimLiverse
+#
+# Copyright (c) 2023-2025 omni-mcp
+# Copyright (c) 2026 whats2000
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
 
-"""SimLiverse MCP Server — Entry Point.
+"""Isaac Sim MCP Server — entry point.
 
-Unified 10-Tool Server (5 Execution + 5 NVIDIA NIM RAG Proxy Tools).
-Runs as an HTTP Streamable MCP server on port 9905 inside the worker VM.
+Registers all tools from tools/ submodules and starts the FastMCP server.
 """
 
 import logging
-import os
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Dict
 
-try:
-    from mcp.server.fastmcp import FastMCP
-except ImportError:
-    from fastmcp import FastMCP
+from mcp.server.fastmcp import FastMCP
 
 from isaac_mcp.connection import get_isaac_connection, reset_isaac_connection
 from isaac_mcp.tools import register_all_tools
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-logger = logging.getLogger("SimLiverseMCPServer")
-
-MCP_HOST = os.environ.get("MCP_HOST", "0.0.0.0")
-MCP_PORT = int(os.environ.get("MCP_PORT", "9905"))
+logger = logging.getLogger("IsaacMCPServer")
 
 
 @asynccontextmanager
 async def server_lifespan(server: FastMCP) -> AsyncIterator[Dict[str, Any]]:
     """Manage server startup and shutdown lifecycle."""
     try:
-        logger.info(f"SimLiverse MCP server starting on {MCP_HOST}:{MCP_PORT}")
+        logger.info("IsaacMCP server starting up")
         try:
             get_isaac_connection()
-            logger.info("Successfully connected to Isaac Sim extension socket on startup")
+            logger.info("Successfully connected to Isaac on startup")
         except Exception as e:
-            logger.warning(f"Could not connect to Isaac Sim extension socket on startup: {e}")
+            logger.warning(f"Could not connect to Isaac on startup: {e}")
         yield {}
     finally:
         reset_isaac_connection()
-        logger.info("SimLiverse MCP server shut down")
+        logger.info("IsaacMCP server shut down")
 
 
 _INSTRUCTIONS = """\
-SimLiverse Physical AI Copilot — Unified Isaac Sim Interface.
+Isaac Sim integration through the Model Context Protocol.
 
-## Available Capabilities (10 Tools):
+## MCP Tools vs Scripts / Action Graphs
 
-1. **RAG Knowledge Base (NVIDIA NIM)**:
-   - `get_isaac_sim_instructions`: Read official developer instruction guides.
-   - `search_isaac_sim_code_examples`: Search version-correct Python code examples.
-   - `search_isaac_sim_extensions`: Discover available Isaac Sim extensions.
-   - `get_isaac_sim_extension_details`: Get extension API details.
-   - `search_isaac_sim_settings`: Search physics & renderer settings.
+MCP tools operate BETWEEN frames (editor-level): scene setup, inspection, stepping, joint control, diagnostics.
+Scripts/Action Graphs operate WITHIN frames (runtime-level): control loops, IK, state machines.
 
-2. **Execution & Control**:
-   - `execute_script`: Run Python code inside the live Isaac Sim runtime stage.
-   - `set_simulation_state`: Control physics playback (play, pause, stop, step).
-   - `reset_scene`: Clear the USD stage and reset physics to initial state.
+## Workflow
 
-3. **Telemetry & Feedback**:
-   - `get_scene_info`: Inspect USD stage prims, asset root, and scene count.
-   - `get_joint_states`: Read robot joint positions, velocities, and limits.
+### Scene Setup
+1. get_scene_info → 2. create_physics_scene → 3. create_robot / create_object → 4. get_prim_info (verify sizes)
+- create_robot: call list_available_robots first for exact keys (lowercase, no spaces, e.g. "frankafr3")
+- Always get_prim_info to query actual positions/sizes BEFORE writing controller scripts
 
-## Recommended Workflow:
-1. Call `get_isaac_sim_instructions` or `search_isaac_sim_code_examples` to lookup exact code syntax.
-2. Call `execute_script` to run the code in Isaac Sim.
-3. Call `get_scene_info` or `get_joint_states` to verify the execution result.
+### Debug Loop
+step_simulation with observe_prims/observe_joints. If issues: get_joint_config, get_physics_state, get_isaac_logs.
+Do NOT use play_simulation + sleep + execute_script as a debug loop.
+
+### Controller Development
+Write .py file → reload_script → step_simulation to debug → edit & reload → play_simulation when ready.
+
+### ScriptNode (Action Graph)
+create_action_graph(script_file="/path/to/controller.py") wires OnPlaybackTick → ScriptNode.
+
+**ScriptNode rules:**
+1. MUST define setup(db) and compute(db) — never use legacy mode (no compute = broken exec scoping)
+2. Use module-level globals + `global` keyword in compute() for persistent state
+3. Subscribe to timeline STOP event to reset state (or Stop→Play leaves stale objects)
+4. WARMUP pattern: skip ~30 frames in compute() before calling World.initialize_physics() + robot.initialize()
+5. ScriptNode fires once during create_action_graph — objects created then go stale at Play
+
+See demo/franka_pick_place.py for a complete working example.
+
+### Tool Priority
+Prefer named tools over execute_script: get_joint_positions, get_prim_info, get_physics_state,
+get_joint_config, get_isaac_logs, create_action_graph, edit_action_graph.
 """
 
 mcp = FastMCP(
-    "SimLiverseMCP",
+    "IsaacSimMCP",
     instructions=_INSTRUCTIONS,
     lifespan=server_lifespan,
-    host=MCP_HOST,
-    port=MCP_PORT,
 )
 
 register_all_tools(mcp, get_isaac_connection)
 
 
 def main():
-    logger.info(f"Starting SimLiverse FastMCP HTTP server on {MCP_HOST}:{MCP_PORT}...")
-    mcp.run(transport="streamable-http")
+    mcp.run(transport="sse", host="0.0.0.0", port=9905)
 
 
 if __name__ == "__main__":
