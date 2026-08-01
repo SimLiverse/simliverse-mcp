@@ -731,8 +731,15 @@ class IsaacAdapterV6(IsaacAdapterBase):
         from pxr import UsdShade
 
         stage = self.get_stage()
-        material = UsdShade.Material(stage.GetPrimAtPath(material_path))
+        material_prim = stage.GetPrimAtPath(material_path)
+        if not material_prim.IsValid():
+            raise ValueError(f"Material prim not found: {material_path}. Did you create it first?")
+            
         target = stage.GetPrimAtPath(target_prim_path)
+        if not target.IsValid():
+            raise ValueError(f"Target prim not found: {target_prim_path}. You MUST use list_prims to find exact paths.")
+            
+        material = UsdShade.Material(material_prim)
         UsdShade.MaterialBindingAPI(target).Bind(material)
 
     # ── Lighting ───────────────────────────────────────────
