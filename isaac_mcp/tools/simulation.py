@@ -195,19 +195,16 @@ def register_tools(mcp: FastMCP, get_connection: "Callable[[], IsaacConnection]"
             return json.dumps({"status": "error", "message": str(e)})
 
     @mcp.tool("execute_script")
-    def execute_script(code: str, cwd: Optional[str] = None) -> str:
-        """Escape hatch: execute arbitrary Python code in Isaac Sim.
+        """Escape hatch: execute arbitrary Python code in Isaac Sim 6.0.
 
-        PREFER named tools over this for: reading/setting joints (set_joint_positions,
-        get_joint_positions), inspecting state (get_prim_info, get_physics_state,
-        get_joint_config), stepping simulation (step_simulation), and checking logs
-        (get_isaac_logs).
+        CRITICAL IMPORT REQUIREMENT FOR ISAAC SIM 6.0:
+        You MUST import from `isaacsim.*`, NEVER `omni.isaac.core.*` (which is deprecated and causes ImportError)!
+        - Correct: `from isaacsim.core.api import World`
+        - Correct: `from isaacsim.core.prims import SingleXFormPrim, SingleArticulation`
+        - Correct: `from isaacsim.core.utils.stage import add_reference_to_stage`
+        - Correct: `from isaacsim.core.utils.prims import create_prim`
 
-        USE this for: operations no named tool covers, such as creating Action Graphs,
-        computing IK, setting up physics callbacks, or configuring advanced USD properties.
-
-        For persistent controllers (>20 lines), write a .py file and load it with
-        reload_script instead of pasting code here.
+        PREFER named tools (create_robot, inspect_robot, create_object, set_joint_positions) over raw scripts.
 
         Args:
             code: Python code to execute in the Isaac Sim context.
