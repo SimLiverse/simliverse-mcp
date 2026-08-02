@@ -930,7 +930,40 @@ class IsaacAdapterV6(IsaacAdapterBase):
         if cwd and cwd not in sys.path:
             sys.path.insert(0, cwd)
 
-        local_ns = {"omni": omni, "carb": carb, "Usd": Usd, "UsdGeom": UsdGeom, "Sdf": Sdf, "Gf": Gf}
+        # Alias deprecated omni.isaac -> isaacsim for seamless backwards compatibility
+        if "omni.isaac" not in sys.modules:
+            try:
+                import isaacsim
+                import isaacsim.core as isaac_core
+                sys.modules["omni.isaac"] = isaacsim
+                sys.modules["omni.isaac.core"] = isaac_core
+                sys.modules["omni.isaac.core.api"] = isaac_core.api
+                sys.modules["omni.isaac.core.prims"] = isaac_core.prims
+                sys.modules["omni.isaac.core.utils"] = getattr(isaac_core, "utils", isaac_core)
+            except Exception:
+                pass
+
+        isaacsim_mod = sys.modules.get("isaacsim")
+        usd_utils_mod = None
+        prim_utils_mod = None
+        try:
+            import isaacsim.core.utils.stage as usd_utils_mod
+            import isaacsim.core.utils.prims as prim_utils_mod
+        except Exception:
+            pass
+
+        local_ns = {
+            "omni": omni,
+            "carb": carb,
+            "Usd": Usd,
+            "UsdGeom": UsdGeom,
+            "Sdf": Sdf,
+            "Gf": Gf,
+            "isaacsim": isaacsim_mod,
+            "usd_utils": usd_utils_mod,
+            "prim_utils": prim_utils_mod,
+            "prims": prim_utils_mod,
+        }
 
         old_stdout, old_stderr = sys.stdout, sys.stderr
         sys.stdout = captured_out = io.StringIO()
