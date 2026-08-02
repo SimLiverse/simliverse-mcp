@@ -195,6 +195,7 @@ def register_tools(mcp: FastMCP, get_connection: "Callable[[], IsaacConnection]"
             return json.dumps({"status": "error", "message": str(e)})
 
     @mcp.tool("execute_script")
+    def execute_script(code: str, cwd: Optional[str] = None) -> str:
         """Escape hatch: execute arbitrary Python code in Isaac Sim 6.0.
 
         CRITICAL IMPORT REQUIREMENT FOR ISAAC SIM 6.0:
