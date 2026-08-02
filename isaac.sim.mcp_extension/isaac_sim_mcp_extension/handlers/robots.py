@@ -39,6 +39,36 @@ FALLBACK_ROBOT_LIBRARY: Dict[str, Dict[str, str]] = {
         "description": "FrankaRobotics FrankaPanda",
         "manufacturer": "FrankaRobotics",
     },
+    "fr3": {
+        "asset_path": "/Isaac/Robots/Franka/fr3.usd",
+        "description": "Franka Research 3 (FR3)",
+        "manufacturer": "FrankaRobotics",
+    },
+    "kuka_iiwa": {
+        "asset_path": "/Isaac/Robots/Kuka/iiwa/kuka_iiwa.usd",
+        "description": "KUKA LBR iiwa 7-DOF Robotic Arm",
+        "manufacturer": "KUKA",
+    },
+    "kuka_kr210": {
+        "asset_path": "/Isaac/Robots/Kuka/kr210/kr210.usd",
+        "description": "KUKA KR210 Heavy Industrial Arm",
+        "manufacturer": "KUKA",
+    },
+    "ur10": {
+        "asset_path": "/Isaac/Robots/UniversalRobots/ur10/ur10.usd",
+        "description": "Universal Robots UR10",
+        "manufacturer": "UniversalRobots",
+    },
+    "ur5": {
+        "asset_path": "/Isaac/Robots/UniversalRobots/ur5/ur5.usd",
+        "description": "Universal Robots UR5",
+        "manufacturer": "UniversalRobots",
+    },
+    "kinova_gen3": {
+        "asset_path": "/Isaac/Robots/Kinova/Gen3/gen3.usd",
+        "description": "Kinova Gen3 7-DOF Arm",
+        "manufacturer": "Kinova",
+    },
     "jetbot": {
         "asset_path": "/Isaac/Robots/NVIDIA/Jetbot/jetbot.usd",
         "description": "NVIDIA Jetbot",
@@ -56,6 +86,21 @@ FALLBACK_ROBOT_LIBRARY: Dict[str, Dict[str, str]] = {
     },
     "g1": {"asset_path": "/Isaac/Robots/Unitree/G1/g1.usd", "description": "Unitree G1", "manufacturer": "Unitree"},
     "go1": {"asset_path": "/Isaac/Robots/Unitree/Go1/go1.usd", "description": "Unitree Go1", "manufacturer": "Unitree"},
+    "unitree_go2": {
+        "asset_path": "/Isaac/Robots/Unitree/Go2/go2.usd",
+        "description": "Unitree Go2 Quadruped",
+        "manufacturer": "Unitree",
+    },
+    "unitree_h1": {
+        "asset_path": "/Isaac/Robots/Unitree/H1/h1.usd",
+        "description": "Unitree H1 Humanoid",
+        "manufacturer": "Unitree",
+    },
+    "anymal_c": {
+        "asset_path": "/Isaac/Robots/ANYbotics/anymal_c.usd",
+        "description": "ANYbotics ANYmal C Quadruped",
+        "manufacturer": "ANYbotics",
+    },
     "spot": {
         "asset_path": "/Isaac/Robots/BostonDynamics/spot/spot.usd",
         "description": "BostonDynamics spot",

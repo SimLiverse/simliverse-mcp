@@ -96,6 +96,64 @@ def register_tools(mcp: FastMCP, get_connection: "Callable[[], IsaacConnection]"
         except Exception as e:
             return json.dumps({"status": "error", "message": str(e)})
 
+    @mcp.tool("inspect_robot")
+    def inspect_robot(prim_path: str) -> str:
+        """Inspect any robot in the scene (KUKA, Franka, Universal Robots, Boston Dynamics, Unitree, etc.)
+        to dynamically discover its kinematics, joint names, degrees of freedom, gripper/finger joints,
+        and end-effector links without assuming a specific robot brand.
+
+        Use this tool whenever you interact with a robot to understand how to drive its joints.
+
+        Args:
+            prim_path: The prim path of the robot (e.g. '/World/kuka', '/World/Franka', '/World/ur10').
+        """
+        try:
+            conn = get_connection()
+            info_res = conn.send_command("robots.get_info", {"prim_path": prim_path})
+            
+            joint_names = info_res.get("joint_names", [])
+            num_dof = info_res.get("num_dof", len(joint_names))
+            joint_types = info_res.get("joint_types", {})
+            joint_limits = info_res.get("joint_limits", {})
+
+            # Dynamically detect arm vs mobile base vs quadruped vs humanoid
+            finger_joints = [
+                j for j in joint_names
+                if any(k in j.lower() for k in ["finger", "gripper", "knuckle", "thumb", "jaw"])
+            ]
+            arm_joints = [
+                j for j in joint_names
+                if j not in finger_joints and any(k in j.lower() for k in ["joint", "shoulder", "elbow", "wrist", "arm", "a1", "a2", "a3", "a4", "a5", "a6", "a7"])
+            ]
+            wheel_joints = [
+                j for j in joint_names
+                if any(k in j.lower() for k in ["wheel", "steer", "drive"])
+            ]
+
+            category = "manipulator"
+            if len(wheel_joints) >= 2 and len(arm_joints) == 0:
+                category = "wheeled_vehicle"
+            elif num_dof >= 12 and any(k in prim_path.lower() for k in ["dog", "go1", "go2", "spot", "anymal", "quad"]):
+                category = "quadruped"
+            elif num_dof >= 16 and any(k in prim_path.lower() for k in ["h1", "g1", "humanoid"]):
+                category = "humanoid"
+
+            result = {
+                "status": "success",
+                "prim_path": prim_path,
+                "category": category,
+                "num_dof": num_dof,
+                "arm_joints": arm_joints,
+                "finger_joints": finger_joints,
+                "has_gripper": len(finger_joints) > 0,
+                "joint_types": joint_types,
+                "joint_limits": joint_limits,
+                "raw_info": info_res,
+            }
+            return json.dumps(result, indent=2)
+        except Exception as e:
+            return json.dumps({"status": "error", "message": str(e)})
+
     @mcp.tool("get_robot_info")
     def get_robot_info(prim_path: str) -> str:
         """Get robot joint information including names, DOF count, joint types, and limits.
