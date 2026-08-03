@@ -81,12 +81,23 @@ class MCPExtension(omni.ext.IExt):
                 result = handler(**params)
                 if result and result.get("status") == "success":
                     return {"status": "success", "result": result}
-                else:
-                    return {
-                        "status": "error",
-                        "message": result.get("message", "Unknown error") if result else "No result",
-                    }
+                # Preserve the whole error payload. Collapsing it to `message`
+                # discarded the traceback, stdout and stderr that a caller needs
+                # to actually fix the failing code.
+                error: Dict[str, Any] = {"status": "error", "message": "No result"}
+                if result:
+                    error = {**result, "status": "error"}
+                    error.setdefault("message", "Unknown error")
+                return error
             except Exception as e:
                 traceback.print_exc()
-                return {"status": "error", "message": str(e)}
-        return {"status": "error", "message": f"Unknown command: {cmd_type}"}
+                return {
+                    "status": "error",
+                    "message": f"{type(e).__name__}: {e}",
+                    "traceback": traceback.format_exc(),
+                }
+        known = ", ".join(sorted(self._registry)) or "none"
+        return {
+            "status": "error",
+            "message": f"Unknown command: {cmd_type}. Registered commands: {known}",
+        }

@@ -40,7 +40,29 @@ def register_all_tools(mcp: FastMCP, get_connection: Callable[[], IsaacConnectio
         mcp: FastMCP server instance.
         get_connection: Callable that returns an IsaacConnection.
     """
-    from . import assets, graphs, lighting, materials, objects, robots, scene, sensors, simulation
+    from . import (
+        assets,
+        control,
+        graphs,
+        lighting,
+        materials,
+        objects,
+        robots,
+        scene,
+        sensors,
+        simulation,
+    )
 
-    for module in [scene, objects, lighting, robots, sensors, materials, assets, simulation, graphs]:
+    for module in [
+        scene,
+        objects,
+        lighting,
+        robots,
+        sensors,
+        materials,
+        assets,
+        simulation,
+        graphs,
+        control,
+    ]:
         module.register_tools(mcp, get_connection)
