@@ -215,6 +215,18 @@ def attach(script_path: str, *, graph_path: str = "/World/TaskGraph") -> str:
     """
     import omni.graph.core as og
 
+    from ._compat import get_stage
+
+    # Re-wiring an existing graph fails with "Failed to wrap graph in node",
+    # which names neither the graph nor the cause. Any second delivery in a
+    # session hits it -- a corrected controller, a second task, a re-run -- so
+    # replace rather than edit in place. The graph is cheap to rebuild and this
+    # makes attach() idempotent.
+    stage = get_stage()
+    if stage.GetPrimAtPath(graph_path).IsValid():
+        logger.info("Replacing existing action graph at %s", graph_path)
+        stage.RemovePrim(graph_path)
+
     keys = og.Controller.Keys
     graph, nodes, _, _ = og.Controller.edit(
         {"graph_path": graph_path, "evaluator_name": "push"},
