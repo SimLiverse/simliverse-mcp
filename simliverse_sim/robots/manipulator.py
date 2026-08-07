@@ -186,16 +186,76 @@ class SuctionGripper:
         return f"<SuctionGripper {self.prim_path} holding={self.gripped_objects}>"
 
     @classmethod
-    def create(cls, parent_prim_path: str, *, scene: Any = None, **kwargs: Any) -> "SuctionGripper":
-        """Author a surface gripper prim under `parent_prim_path` and wrap it."""
+    def create(
+        cls,
+        parent_prim_path: str,
+        *,
+        scene: Any = None,
+        offset: Any = (0.0, 0.0, -0.02),
+        forward_axis: str = "Z",
+        clearance_offset: float = 0.01,
+        **kwargs: Any,
+    ) -> "SuctionGripper":
+        """Author a surface gripper on `parent_prim_path` and wrap it.
+
+        Two things here are not obvious and are not optional, both from the
+        Isaac Sim 6.0 surface-gripper documentation:
+
+        An attachment point is a **D6 joint**, not an Xform. The gripper casts a
+        ray from the joint's world position along its `isaac:forwardAxis` and
+        latches onto the first rigid body within `maxGripDistance`. A plain Xform
+        target leaves the gripper with nothing to cast from, so it sits in
+        "Closing" forever and never reports an error. The joint must have Body 0
+        set to the mounting body, be enabled, and be excluded from the
+        articulation.
+
+        The timeline must be **stopped** while this is authored. Physics entities
+        created mid-play are never registered, and the gripper then ignores every
+        action — measured: status stayed 0 when authored during play, and moved
+        to 1 (Closing) when authored stopped and then played.
+
+        KNOWN INCOMPLETE: with all of the above correct, the gripper reaches
+        Closing but has not been observed to latch. See the class docstring.
+        """
         from isaacsim.robot.surface_gripper import create_surface_gripper
+        from pxr import Gf, UsdPhysics
+        from usd.schema.isaac import robot_schema
 
         from ..scene import Scene as _Scene
 
         scene = scene or _Scene.get()
+        if scene.is_playing():
+            logger.warning(
+                "Authoring a surface gripper while the timeline is playing; it "
+                "will not register with physics. Call scene.stop() first."
+            )
+
+        attach_path = f"{parent_prim_path}/SuctionAttachPoint"
+        joint = UsdPhysics.Joint.Define(scene.stage, attach_path)
+        joint.CreateBody0Rel().SetTargets([parent_prim_path])
+        joint.CreateLocalPos0Attr().Set(Gf.Vec3f(*as_vec3(offset, name="offset")))
+        joint.CreateJointEnabledAttr().Set(True)
+        joint.CreateExcludeFromArticulationAttr().Set(True)
+
+        joint_prim = joint.GetPrim()
+        robot_schema.ApplyAttachmentPointAPI(joint_prim)
+        joint_prim.GetAttribute("isaac:forwardAxis").Set(forward_axis)
+        joint_prim.GetAttribute("isaac:clearanceOffset").Set(float(clearance_offset))
+
         prim = create_surface_gripper(scene.stage, parent_prim_path)
-        path = prim.GetPath().pathString if hasattr(prim, "GetPath") else str(prim)
-        return cls(path, scene=scene, **kwargs)
+        prim.GetRelationship("isaac:attachmentPoints").SetTargets([attach_path])
+
+        gripper = cls(prim.GetPath().pathString, scene=scene, **kwargs)
+        # Author the schema attributes directly as well as through the view: the
+        # view sets them per-instance, the prim carries them across a stop/play.
+        for attr, value in (
+            ("isaac:maxGripDistance", gripper._settings["max_grip_distance"]),
+            ("isaac:coaxialForceLimit", gripper._settings["coaxial_force_limit"]),
+            ("isaac:shearForceLimit", gripper._settings["shear_force_limit"]),
+            ("isaac:retryInterval", gripper._settings["retry_interval"]),
+        ):
+            prim.GetAttribute(attr).Set(float(value))
+        return gripper
 
     def _ensure_view(self) -> Any:
         """Build the GripperView lazily.
