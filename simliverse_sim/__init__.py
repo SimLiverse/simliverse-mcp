@@ -76,6 +76,7 @@ from .robots import (
     SuctionGripper,
     WheeledRobot,
     list_robots,
+    spawn_robot,
 )
 from .scene import PhysicsConfig, Scene
 
@@ -106,6 +107,7 @@ __all__ = [
     "grasped",
     "isaac_version",
     "list_robots",
+    "spawn_robot",
     "not_teleported",
     "physics_running",
     "reached_height",

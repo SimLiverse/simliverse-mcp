@@ -76,6 +76,12 @@ def _fresh_namespace(adapter: IsaacAdapterBase) -> Dict[str, Any]:
                 "Robot": sls.Robot,
                 "RigidObject": sls.RigidObject,
                 "PhysicsConfig": sls.PhysicsConfig,
+                # Bound directly because control code reaches for them first.
+                # `Robot` alone is a probe; `spawn_robot` is what returns a
+                # handle with the right control surface for the morphology.
+                "spawn_robot": sls.spawn_robot,
+                "list_robots": sls.list_robots,
+                "Manipulator": sls.Manipulator,
                 "verify_grasp": sls.verify_grasp,
                 "verify_throw": sls.verify_throw,
                 "grasped": sls.grasped,
