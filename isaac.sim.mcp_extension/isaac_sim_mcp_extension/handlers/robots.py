@@ -169,3 +169,84 @@ def get_joints(adapter: IsaacAdapterBase, prim_path: Optional[str] = None) -> Di
         return {"status": "success", "joint_positions": positions}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+
+def _find_robot(adapter: IsaacAdapterBase, query: str) -> Optional[Dict[str, Any]]:
+    """Find a robot by key, then by partial match on key/description/manufacturer."""
+    library = _get_robot_library(adapter)
+    q = query.lower().strip()
+
+    if q in library:
+        return {"key": q, **library[q]}
+
+    matches = []
+    for key, info in library.items():
+        searchable = f"{key} {info.get('description', '')} {info.get('manufacturer', '')}".lower()
+        if q in searchable:
+            matches.append({"key": key, **info})
+
+    if not matches:
+        return None
+    # Shortest key containing the query is the closest match.
+    matches.sort(key=lambda m: len(m["key"]))
+    return matches[0]
+
+
+def create(
+    adapter: IsaacAdapterBase,
+    robot_type: str = "franka",
+    position: Optional[Sequence[float]] = None,
+    name: Optional[str] = None,
+    prim_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    try:
+        match = _find_robot(adapter, robot_type)
+        if not match:
+            available = list(_get_robot_library(adapter).keys())[:20]
+            return {
+                "status": "error",
+                "message": (
+                    f"Robot '{robot_type}' not found. Try robots.list to see available "
+                    f"robots. Some options: {available}"
+                ),
+            }
+
+        asset_path = adapter.get_assets_root_path() + match["asset_path"]
+        if prim_path is None:
+            prim_path = f"/World/{name or match['key'].capitalize()}"
+        adapter.add_reference_to_stage(asset_path, prim_path)
+        if position:
+            adapter.create_xform_prim(prim_path).set_world_pose(position=np.array(position))
+
+        result = {
+            "status": "success",
+            "message": f"Created {match['description']} robot",
+            "prim_path": prim_path,
+            "robot_key": match["key"],
+        }
+        try:
+            info = adapter.get_robot_joint_info(prim_path)
+            result["joint_names"] = info.get("joint_names", [])
+            result["num_dof"] = info.get("num_dof", 0)
+        except Exception:
+            pass
+        try:
+            # Zero stiffness and zero damping means the drive is off and the
+            # joint will silently ignore every command. Report, never repair.
+            warnings = adapter.get_joint_config(prim_path).get("warnings", [])
+            if warnings:
+                result["warnings"] = warnings
+        except Exception:
+            pass
+        return result
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+def register(registry: Dict[str, Any], adapter: IsaacAdapterBase) -> None:
+    registry["robots.create"] = lambda **p: create(adapter, **p)
+    registry["robots.list"] = lambda **p: list_robots(adapter, **p)
+    registry["robots.refresh"] = lambda **p: refresh_robots(adapter, **p)
+    registry["robots.get_info"] = lambda **p: get_info(adapter, **p)
+    registry["robots.set_joints"] = lambda **p: set_joints(adapter, **p)
+    registry["robots.get_joints"] = lambda **p: get_joints(adapter, **p)
