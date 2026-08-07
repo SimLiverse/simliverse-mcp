@@ -37,6 +37,36 @@ def register(registry: Dict[str, Any], adapter: IsaacAdapterBase) -> None:
     registry["objects.clone"] = lambda **p: clone(adapter, **p)
 
 
+def _apply_contact_properties(stage, prim, prim_path, mass, friction, restitution) -> None:
+    """Give a dynamic object friction, bounce and mass it can be grasped by.
+
+    Objects created here used to get RigidBodyAPI and nothing else — no physics
+    material and no mass — so they inherited whatever the physics scene
+    defaulted to. At the default friction a cube slides straight out of a
+    closed parallel gripper: a measured run grasped the same cube four times
+    and dropped it every time, while every diagnostic reported the grasp as
+    real, because it was. The object was simply too slippery to hold.
+    """
+    from pxr import PhysxSchema, UsdPhysics, UsdShade
+
+    material_path = f"{prim_path}/PhysicsMaterial"
+    material = UsdShade.Material.Define(stage, material_path)
+    physics_material = UsdPhysics.MaterialAPI.Apply(material.GetPrim())
+    physics_material.CreateStaticFrictionAttr().Set(float(friction))
+    physics_material.CreateDynamicFrictionAttr().Set(float(friction))
+    physics_material.CreateRestitutionAttr().Set(float(restitution))
+    UsdShade.MaterialBindingAPI.Apply(prim).Bind(
+        material, UsdShade.Tokens.weakerThanDescendants, "physics"
+    )
+
+    if mass is not None:
+        UsdPhysics.MassAPI.Apply(prim).CreateMassAttr().Set(float(mass))
+
+    # Without this the body publishes no contacts, so a grasp cannot be
+    # verified even when it is holding.
+    PhysxSchema.PhysxContactReportAPI.Apply(prim).CreateThresholdAttr().Set(0.0)
+
+
 def create(
     adapter: IsaacAdapterBase,
     object_type: str = "Cube",
@@ -46,6 +76,9 @@ def create(
     color: Optional[Sequence[float]] = None,
     physics_enabled: bool = False,
     prim_path: Optional[str] = None,
+    mass: Optional[float] = None,
+    friction: float = 0.9,
+    restitution: float = 0.0,
 ) -> Dict[str, Any]:
     try:
         if not prim_path:
@@ -67,6 +100,8 @@ def create(
                 UsdPhysics.CollisionAPI.Apply(prim)
             if physics_enabled and not prim.HasAPI(UsdPhysics.RigidBodyAPI):
                 UsdPhysics.RigidBodyAPI.Apply(prim)
+            if physics_enabled:
+                _apply_contact_properties(stage, prim, prim_path, mass, friction, restitution)
 
         response: Dict[str, Any] = {"status": "success", "message": f"Created {object_type}", "prim_path": prim_path}
         try:

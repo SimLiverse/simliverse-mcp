@@ -43,6 +43,9 @@ def register_tools(mcp: FastMCP, get_connection: "Callable[[], IsaacConnection]"
         color: Optional[List[float]] = None,
         physics_enabled: bool = False,
         prim_path: Optional[str] = None,
+        mass: Optional[float] = None,
+        friction: float = 0.9,
+        restitution: float = 0.0,
     ) -> str:
         """Create a primitive object (Cube, Sphere, Cylinder, Cone, Capsule, Plane).
 
@@ -68,10 +71,24 @@ def register_tools(mcp: FastMCP, get_connection: "Callable[[], IsaacConnection]"
             color: [r, g, b] color values (0-1). MUST be actual numbers.
             physics_enabled: Enable physics on this object.
             prim_path: Custom prim path. Auto-generated if not provided.
+            mass: Mass in kg. Defaults to whatever PhysX derives from the volume,
+                which for a small primitive is often far heavier than intended.
+            friction: Surface friction, applied to a physics material bound to the
+                object. The default of 0.9 is deliberately high: at PhysX's own
+                default a cube slides straight out of a closed parallel gripper,
+                and the grasp reads as real the whole way down.
+            restitution: Bounciness, 0 for objects meant to be stacked.
         """
         try:
             conn = get_connection()
-            params = {"object_type": object_type, "physics_enabled": physics_enabled}
+            params = {
+                "object_type": object_type,
+                "physics_enabled": physics_enabled,
+                "friction": friction,
+                "restitution": restitution,
+            }
+            if mass is not None:
+                params["mass"] = mass
             if position:
                 params["position"] = position
             if rotation:

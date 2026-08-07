@@ -281,6 +281,45 @@ def specialize(probe: Robot, **kwargs: Any) -> Robot:
     return controller(probe.prim_path, scene=probe.scene, **kwargs)
 
 
+def _register_articulation(scene: Any, prim_path: str) -> None:
+    """Make PhysX parse a robot that was added while the timeline was running.
+
+    PhysX builds its articulation metadata when the timeline starts. A robot
+    referenced onto the stage mid-play is never parsed, so the prim looks
+    perfectly healthy in USD while every handle built from it dies on
+
+        AttributeError: 'NoneType' object has no attribute 'link_names'
+
+    raised several frames inside isaacsim.core, naming nothing the caller did.
+    A stop/play cycle is the only thing that fixes it, and an agent that has to
+    discover that empirically spends its whole budget doing so — one measured
+    run burned six turns and a failed subagent on exactly this.
+
+    Only runs when the timeline is playing, so the ordinary build-then-play
+    flow pays nothing. Note the cycle resets dynamic bodies to their spawn
+    poses; that is why this is loud rather than silent, and why robots belong
+    at the start of a scene rather than in the middle of a task.
+    """
+    from .._compat import get_timeline
+
+    try:
+        if not get_timeline().is_playing():
+            return
+    except Exception:  # noqa: BLE001 — no timeline is not a reason to fail a spawn
+        logger.debug("Could not read timeline state", exc_info=True)
+        return
+
+    logger.warning(
+        "Spawned %s while the simulation was playing. PhysX only parses "
+        "articulations at play time, so the timeline is being cycled to "
+        "register it — dynamic objects will reset to their spawn poses.",
+        prim_path,
+    )
+    scene.stop()
+    scene.play()
+    scene.step(2)
+
+
 def spawn_robot(
     robot_type: str,
     *,
@@ -304,6 +343,8 @@ def spawn_robot(
     xform = UsdGeom.Xformable(get_stage().GetPrimAtPath(prim_path))
     xform.ClearXformOpOrder()
     xform.AddTranslateOp().Set(Gf.Vec3d(*as_vec3(position, name="position")))
+
+    _register_articulation(scene, prim_path)
 
     if asset.morphology is Morphology.AERIAL:
         from .aerial import AerialRobot

@@ -114,10 +114,33 @@ class RigidObject:
 
     @property
     def mass(self) -> float:
+        """Mass in kg, as PhysX actually simulates it.
+
+        The authored `UsdPhysics.MassAPI` attribute is only the override. A body
+        created without one still has a real mass, derived from its volume and
+        density — so reading the attribute alone reported 0.0 for every object
+        that did not set it explicitly, which reads as "massless" rather than
+        "not overridden". The simulation view is asked first and the attribute
+        is the fallback.
+        """
+        view = self._rigid_view()
+        # SingleRigidPrim exposes get_mass(); the batched RigidPrim view
+        # exposes get_masses(). Which one is here depends on the backend.
+        for method in ("get_mass", "get_masses"):
+            getter = getattr(view, method, None)
+            if getter is None:
+                continue
+            try:
+                value = float(np.asarray(getter()).reshape(-1)[0])
+            except Exception:
+                logger.debug("%s() failed on %s", method, self.prim_path, exc_info=True)
+                continue
+            if value > 0.0:
+                return value
+
         from pxr import UsdPhysics
 
-        api = UsdPhysics.MassAPI(self.prim)
-        attr = api.GetMassAttr()
+        attr = UsdPhysics.MassAPI(self.prim).GetMassAttr()
         return float(attr.Get()) if attr and attr.Get() is not None else 0.0
 
     def set_pose(self, position: Any = None, orientation: Any = None) -> None:

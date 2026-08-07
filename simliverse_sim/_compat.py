@@ -134,7 +134,25 @@ def get_timeline() -> Any:
 def single_articulation(prim_path: str, name: str | None = None) -> Any:
     from isaacsim.core.prims import SingleArticulation
 
-    return SingleArticulation(prim_path=prim_path, name=name or prim_path.rsplit("/", 1)[-1])
+    try:
+        return SingleArticulation(prim_path=prim_path, name=name or prim_path.rsplit("/", 1)[-1])
+    except AttributeError as exc:
+        if "link_names" not in str(exc):
+            raise
+        # PhysX has no articulation metadata for this prim. Raised from deep
+        # inside isaacsim.core as a bare AttributeError on None, which says
+        # nothing about the cause and reads as a corrupted robot.
+        raise IsaacSimUnavailable(
+            f"PhysX has no articulation registered for {prim_path!r}. The prim "
+            f"exists, but physics never parsed it — which happens when a robot is "
+            f"added to the stage while the timeline is already playing, or after a "
+            f"stop that did not fully tear down.\n\n"
+            f"Fix: cycle the timeline so PhysX re-parses the stage —\n"
+            f"    scene.stop(); scene.play(); scene.step(2)\n"
+            f"then rebuild the handle. Dynamic objects reset to their spawn poses.\n\n"
+            f"spawn_robot() does this for you; a robot referenced onto the stage by "
+            f"hand does not."
+        ) from exc
 
 
 def articulation_action(**kwargs: Any) -> Any:
