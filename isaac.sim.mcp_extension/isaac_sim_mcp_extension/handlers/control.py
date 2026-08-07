@@ -218,28 +218,56 @@ def capture_view(
         annotator = rep.AnnotatorRegistry.get_annotator("rgb")
         annotator.attach([render_product])
 
-        # Replicator needs a few app updates before the first frame is valid.
+        def _release() -> None:
+            """Drop the render product on every path, including failure.
+
+            This used to run only after a successful encode, so each failed
+            capture stranded a render product and, when no camera_path was
+            given, a `/Replicator/Camera_Xform*` prim as well. Three empty-frame
+            errors left three orphan cameras on the stage.
+            """
+            try:
+                annotator.detach([render_product])
+                render_product.destroy()
+            except Exception:
+                pass
+
+        # NOTE: this path is known broken inside the extension and is why
+        # capture_view returns an empty frame. Two mechanisms were ruled out:
+        # `app.update()` ticks Kit but never asks Replicator to produce a frame,
+        # and `rep.orchestrator.step()` raises "Synchronous call to `step` can
+        # only be performed in a standalone workflow" — Kit owns the loop here,
+        # exactly as it does for World.step().
+        #
+        # The fix is to stop using Replicator and capture the existing viewport
+        # instead, which is what the older `capture_image` verb does and why it
+        # still works. Left in place rather than silently half-changed: the
+        # failure is now reported accurately and no longer leaks a render
+        # product on the way out.
         import omni.kit.app
 
         app = omni.kit.app.get_app()
         for _ in range(4):
             app.update()
 
-        frame = annotator.get_data()
-        array = np.asarray(frame)
+        array = np.asarray(annotator.get_data())
+
         if array.size == 0:
-            return {"status": "error", "message": "Renderer returned an empty frame."}
+            _release()
+            return {
+                "status": "error",
+                "message": (
+                    "Renderer returned an empty frame after 8 render steps. The "
+                    "viewport may have no render product attached."
+                ),
+            }
         if array.ndim == 3 and array.shape[2] == 4:
             array = array[:, :, :3]
 
         buffer = io.BytesIO()
         PILImage.fromarray(array.astype("uint8")).save(buffer, format="PNG")
 
-        try:
-            annotator.detach([render_product])
-            render_product.destroy()
-        except Exception:
-            pass
+        _release()
 
         return {
             "status": "success",
