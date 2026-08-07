@@ -207,9 +207,28 @@ def capture_view(
 
         width, height = (resolution or [1280, 720])[:2]
 
+        import omni.usd
+        from pxr import UsdGeom
+
+        stage = omni.usd.get_context().get_stage()
+
+        def _replicator_cameras() -> set:
+            return {
+                prim.GetPath().pathString
+                for prim in stage.Traverse()
+                if prim.IsA(UsdGeom.Camera) and "/Replicator" in prim.GetPath().pathString
+            }
+
         if camera_path:
             camera = camera_path
+            authored_before = None
         else:
+            # `rep.create.camera()` authors a camera prim that
+            # `render_product.destroy()` does not remove, so snapshot what
+            # existed and delete whatever this call added. Without this the
+            # stage accumulates one /Replicator/Camera_Xform per capture — a
+            # live session had six after a handful of failed renders.
+            authored_before = _replicator_cameras()
             eye = position or [2.2, -2.2, 1.6]
             target = look_at or [0.0, 0.0, 0.3]
             camera = rep.create.camera(position=tuple(eye), look_at=tuple(target))
@@ -231,6 +250,16 @@ def capture_view(
                 render_product.destroy()
             except Exception:
                 pass
+            if authored_before is not None:
+                for path in _replicator_cameras() - authored_before:
+                    try:
+                        # Remove the Xform wrapper too, not just the camera.
+                        stage.RemovePrim(path)
+                        parent = path.rsplit("/", 1)[0]
+                        if parent.startswith("/Replicator/"):
+                            stage.RemovePrim(parent)
+                    except Exception:
+                        pass
 
         # NOTE: this path is known broken inside the extension and is why
         # capture_view returns an empty frame. Two mechanisms were ruled out:
