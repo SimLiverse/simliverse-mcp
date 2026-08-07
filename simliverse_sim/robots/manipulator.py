@@ -142,6 +142,120 @@ class Gripper:
         return float(np.mean([positions[i] for i in self.joint_indices]))
 
 
+class SuctionGripper:
+    """A surface (suction) gripper — grips by contact, not by squeezing.
+
+    Deliberately the same shape as `Gripper`: `open()`, `close()`, and a way to
+    ask what is held. Control code should not have to branch on which kind of
+    end effector it has.
+
+    Suction is worth reaching for on stacking and pick-and-place. A friction
+    pinch depends on finger drive gains, contact patches and material friction
+    all being right at once — and when any of them is not, the failure is a
+    silent slip that looks exactly like bad IK. Suction reports whether it
+    latched, which turns that class of failure into a fact you can read.
+    """
+
+    # Isaac's action convention: 1.0 closes (grips), -1.0 opens (releases).
+    CLOSE = 1.0
+    OPEN = -1.0
+
+    def __init__(
+        self,
+        prim_path: str,
+        *,
+        scene: Any = None,
+        max_grip_distance: float = 0.02,
+        coaxial_force_limit: float = 200.0,
+        shear_force_limit: float = 200.0,
+        retry_interval: float = 0.05,
+    ) -> None:
+        from ..scene import Scene as _Scene
+
+        self.prim_path = prim_path
+        self.scene = scene or _Scene.get()
+        self._settings = dict(
+            max_grip_distance=max_grip_distance,
+            coaxial_force_limit=coaxial_force_limit,
+            shear_force_limit=shear_force_limit,
+            retry_interval=retry_interval,
+        )
+        self._view: Any = None
+
+    def __repr__(self) -> str:
+        return f"<SuctionGripper {self.prim_path} holding={self.gripped_objects}>"
+
+    @classmethod
+    def create(cls, parent_prim_path: str, *, scene: Any = None, **kwargs: Any) -> "SuctionGripper":
+        """Author a surface gripper prim under `parent_prim_path` and wrap it."""
+        from isaacsim.robot.surface_gripper import create_surface_gripper
+
+        from ..scene import Scene as _Scene
+
+        scene = scene or _Scene.get()
+        prim = create_surface_gripper(scene.stage, parent_prim_path)
+        path = prim.GetPath().pathString if hasattr(prim, "GetPath") else str(prim)
+        return cls(path, scene=scene, **kwargs)
+
+    def _ensure_view(self) -> Any:
+        """Build the GripperView lazily.
+
+        It reads physics state, so it cannot be constructed before the scene has
+        played and stepped — the same constraint articulations have.
+        """
+        if self._view is not None:
+            return self._view
+        import numpy as np
+        from isaacsim.robot.surface_gripper import GripperView
+
+        self.scene.play()
+        self.scene.step(2)
+        self._view = GripperView(
+            paths=self.prim_path,
+            max_grip_distance=np.array([self._settings["max_grip_distance"]]),
+            coaxial_force_limit=np.array([self._settings["coaxial_force_limit"]]),
+            shear_force_limit=np.array([self._settings["shear_force_limit"]]),
+            retry_interval=np.array([self._settings["retry_interval"]]),
+        )
+        return self._view
+
+    def _act(self, value: float, settle_steps: int) -> None:
+        self._ensure_view().apply_gripper_action([value])
+        if settle_steps:
+            self.scene.step(settle_steps)
+
+    def close(self, *, settle_steps: int = 30) -> None:
+        """Engage suction. Latches onto whatever is within `max_grip_distance`."""
+        self._act(self.CLOSE, settle_steps)
+
+    def open(self, *, settle_steps: int = 15) -> None:
+        """Release."""
+        self._act(self.OPEN, settle_steps)
+
+    @property
+    def gripped_objects(self) -> list[str]:
+        """Prim paths currently held. Empty means nothing latched."""
+        try:
+            return list(self._ensure_view().get_gripped_objects()[0] or [])
+        except Exception:
+            logger.debug("get_gripped_objects failed", exc_info=True)
+            return []
+
+    @property
+    def status(self) -> str:
+        try:
+            return str(self._ensure_view().get_surface_gripper_status()[0])
+        except Exception:
+            return "unknown"
+
+    @property
+    def holding(self) -> bool:
+        return bool(self.gripped_objects)
+
+    def is_holding(self, prim_path: str) -> bool:
+        return any(prim_path in held for held in self.gripped_objects)
+
+
 class Manipulator(Robot):
     """A robot arm with an end effector."""
 
@@ -162,6 +276,19 @@ class Manipulator(Robot):
         self._policy: Any = None
         self._ik: Any = None
         self.gripper = Gripper(self, self.groups.gripper)
+
+    def attach_suction_gripper(
+        self, parent_prim_path: str | None = None, **kwargs: Any
+    ) -> "SuctionGripper":
+        """Fit a suction gripper to this arm and use it as the end effector.
+
+        Defaults to authoring it under the arm's own prim. The finger `gripper`
+        stays available, so an arm can have both and control code chooses.
+        """
+        self.suction = SuctionGripper.create(
+            parent_prim_path or self.prim_path, scene=self.scene, **kwargs
+        )
+        return self.suction
 
     @property
     def arm_joint_indices(self) -> list[int]:

@@ -19,7 +19,14 @@ from .aerial import AerialRobot, FlightError
 from .base import JointGroups, Morphology, Robot, classify_morphology
 from .legged import Humanoid, LeggedRobot, LocomotionError
 from .library import CATALOGUE, RobotAsset, list_robots, resolve, spawn_robot
-from .manipulator import DexterousHand, Gripper, Manipulator, MotionError, MotionResult
+from .manipulator import (
+    DexterousHand,
+    Gripper,
+    Manipulator,
+    MotionError,
+    MotionResult,
+    SuctionGripper,
+)
 from .mobile import MobileManipulator, NavigationError, WheeledRobot
 
 __all__ = [
@@ -28,6 +35,7 @@ __all__ = [
     "DexterousHand",
     "FlightError",
     "Gripper",
+    "SuctionGripper",
     "Humanoid",
     "JointGroups",
     "LeggedRobot",

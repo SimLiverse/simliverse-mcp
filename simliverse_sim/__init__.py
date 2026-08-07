@@ -73,6 +73,7 @@ from .robots import (
     MotionResult,
     NavigationError,
     Robot,
+    SuctionGripper,
     WheeledRobot,
     list_robots,
 )
@@ -84,6 +85,7 @@ __all__ = [
     "DexterousHand",
     "FlightError",
     "Gripper",
+    "SuctionGripper",
     "Humanoid",
     "IsaacSimUnavailable",
     "LeggedRobot",
