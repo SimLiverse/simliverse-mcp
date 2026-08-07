@@ -75,13 +75,34 @@ def register_tools(mcp: FastMCP, get_connection: "Callable[[], IsaacConnection]"
             return json.dumps({"status": "error", "message": str(e)})
 
     @mcp.tool("list_available_robots")
-    def list_available_robots() -> str:
-        """List all available robots discovered from the Isaac Sim asset server.
-        Returns robot keys, descriptions, manufacturers, and asset paths.
-        The list is auto-discovered at startup and reflects the actual assets available in your Isaac Sim version."""
+    def list_available_robots(
+        search: Optional[str] = None,
+        manufacturer: Optional[str] = None,
+    ) -> str:
+        """List robots available on the Isaac Sim asset server.
+
+        Around 200 robots are discovered, so an unfiltered call returns an index
+        of keys plus manufacturer counts rather than full descriptions. Pass
+        `search` or `manufacturer` to narrow it, and a small result comes back
+        in full with asset paths and descriptions.
+
+        Search matches the key, description and manufacturer, so
+        `search="franka"`, `search="humanoid"` and `manufacturer="Unitree"` all
+        work. Prefer searching to listing everything — the full list is several
+        thousand tokens and stays in the conversation afterwards.
+
+        Args:
+            search: Substring to match against key, description or manufacturer.
+            manufacturer: Restrict to one vendor, e.g. "FrankaRobotics".
+        """
         try:
             conn = get_connection()
-            result = conn.send_command("robots.list")
+            params = {}
+            if search:
+                params["search"] = search
+            if manufacturer:
+                params["manufacturer"] = manufacturer
+            result = conn.send_command("robots.list", params)
             return json.dumps(result, indent=2)
         except Exception as e:
             return json.dumps({"status": "error", "message": str(e)})

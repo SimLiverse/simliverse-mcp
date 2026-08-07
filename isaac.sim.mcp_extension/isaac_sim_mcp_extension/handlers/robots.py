@@ -220,9 +220,65 @@ def create(
         return {"status": "error", "message": str(e)}
 
 
-def list_robots(adapter: IsaacAdapterBase) -> Dict[str, Any]:
+_DETAIL_THRESHOLD = 25
+
+
+def list_robots(
+    adapter: IsaacAdapterBase,
+    search: Optional[str] = None,
+    manufacturer: Optional[str] = None,
+) -> Dict[str, Any]:
+    """List available robots, compactly unless the query is already narrow.
+
+    Discovery finds ~200 robots on the 6.0 asset server. Returning all of them
+    with a path, a description and a manufacturer each is several thousand
+    tokens, resent on every subsequent turn because it lands in the transcript —
+    for a question usually answered by one key.
+
+    So: a narrow result comes back in full, a broad one comes back as an index
+    of keys plus manufacturer counts, and the caller narrows. `search` matches
+    the key, description or manufacturer.
+    """
     library = _get_robot_library(adapter)
-    return {"status": "success", "robot_count": len(library), "robots": library}
+
+    def matches(key: str, spec: Dict[str, str]) -> bool:
+        if manufacturer and manufacturer.lower() not in str(spec.get("manufacturer", "")).lower():
+            return False
+        if not search:
+            return True
+        needle = search.lower().replace("_", "").replace("-", "")
+        haystack = " ".join(
+            [key, str(spec.get("description", "")), str(spec.get("manufacturer", ""))]
+        ).lower().replace("_", "").replace("-", "")
+        return needle in haystack
+
+    selected = {k: v for k, v in library.items() if matches(k, v)}
+
+    if len(selected) <= _DETAIL_THRESHOLD:
+        return {
+            "status": "success",
+            "robot_count": len(selected),
+            "total_available": len(library),
+            "robots": selected,
+        }
+
+    by_maker: Dict[str, int] = {}
+    for spec in selected.values():
+        maker = str(spec.get("manufacturer") or "unknown")
+        by_maker[maker] = by_maker.get(maker, 0) + 1
+
+    return {
+        "status": "success",
+        "robot_count": len(selected),
+        "total_available": len(library),
+        "keys": sorted(selected),
+        "manufacturers": dict(sorted(by_maker.items(), key=lambda kv: -kv[1])),
+        "hint": (
+            "Too many to describe in full. Re-call with search= or "
+            "manufacturer= to get asset paths and descriptions, e.g. "
+            "list_available_robots(search='franka')."
+        ),
+    }
 
 
 def refresh_robots(adapter: IsaacAdapterBase) -> Dict[str, Any]:
