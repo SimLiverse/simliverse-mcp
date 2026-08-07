@@ -144,25 +144,62 @@ class RigidObject:
     # ── Contacts ──────────────────────────────────────────────────────────────
 
     def contacts(self) -> list[dict[str, Any]]:
-        """Current contacts on this body: [{"body": path, "force": float}, ...]."""
+        """Current contacts on this body: [{"body": path, "force": float}, ...].
+
+        `force` is in newtons, averaged over the last physics step.
+
+        Three things about the PhysX contact report are easy to get wrong, and
+        this function got all three wrong until a grasp that visibly worked kept
+        reporting itself as a failure:
+
+          * `header.actor0` is an **encoded int**, not a path string. Comparing
+            it against `self.prim_path` therefore never matches, and every body
+            in the scene reports zero contacts — silently, because an empty list
+            is also the correct answer for a body that is genuinely untouched.
+            `PhysicsSchemaTools.intToSdfPath` is what turns it back into a path.
+          * There is no `total_normal_impulse` on the header. The impulses live
+            in the *second* element of the returned tuple, in the slice
+            `[contact_data_offset : contact_data_offset + num_contact_data]`.
+          * `CONTACT_LOST` headers are published for the step on which a contact
+            *ends*, so counting them reports contact with everything the body
+            has recently let go of.
+        """
         try:
             from omni.physx import get_physx_simulation_interface
+            from pxr import PhysicsSchemaTools
 
-            raw = get_physx_simulation_interface().get_contact_report()
+            headers, points = get_physx_simulation_interface().get_contact_report()
         except Exception:
             logger.debug("Contact report unavailable", exc_info=True)
             return []
 
+        dt = self._scene.dt if self._scene is not None else 1.0 / 60.0
         out: list[dict[str, Any]] = []
-        headers = raw[0] if isinstance(raw, tuple) and raw else raw
         for header in headers or []:
-            actor0 = str(getattr(header, "actor0", ""))
-            actor1 = str(getattr(header, "actor1", ""))
-            if self.prim_path not in (actor0, actor1):
+            if str(getattr(header, "type", "")).endswith("CONTACT_LOST"):
                 continue
-            other = actor1 if actor0 == self.prim_path else actor0
-            impulse = float(getattr(header, "total_normal_impulse", 0.0) or 0.0)
-            out.append({"body": other, "force": impulse})
+            try:
+                actor0 = str(PhysicsSchemaTools.intToSdfPath(header.actor0))
+                actor1 = str(PhysicsSchemaTools.intToSdfPath(header.actor1))
+            except Exception:
+                logger.debug("Could not decode contact actors", exc_info=True)
+                continue
+
+            if self.prim_path == actor0:
+                other = actor1
+            elif self.prim_path == actor1:
+                other = actor0
+            else:
+                continue
+
+            start = int(header.contact_data_offset)
+            impulse = 0.0
+            for i in range(start, start + int(header.num_contact_data)):
+                try:
+                    impulse += float(np.linalg.norm(np.asarray(points[i].impulse, dtype=float)))
+                except (IndexError, TypeError, ValueError):
+                    break
+            out.append({"body": other, "force": round(impulse / dt, 4)})
         return out
 
     def contact_bodies(self) -> set[str]:

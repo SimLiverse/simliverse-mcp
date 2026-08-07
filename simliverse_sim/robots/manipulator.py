@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from .._compat import as_vec3, motion_generation
+from .._compat import as_vec3, get_stage, motion_generation
 from .base import Morphology, Robot
 
 if TYPE_CHECKING:
@@ -335,6 +335,7 @@ class Manipulator(Robot):
         self._rmpflow: Any = None
         self._policy: Any = None
         self._ik: Any = None
+        self._obstacles: dict[str, Any] = {}
         self.gripper = Gripper(self, self.groups.gripper)
 
     def attach_suction_gripper(
@@ -416,16 +417,48 @@ class Manipulator(Robot):
             end_effector_frame_name=frame,
         )
         self._end_effector_frame = frame
+        self._sync_base_pose()
+
+    def _sync_base_pose(self) -> None:
+        """Tell RMPflow and Lula where the robot actually stands.
+
+        Both solve in the robot's *base* frame. Until they are given the base
+        pose they assume it is the world origin, which silently turns every
+        world-space target and every `ee_position` reading into a base-frame
+        quantity. A robot at the origin is unaffected — which is exactly why
+        this went unnoticed — but a second arm spawned at y=0.8 never moves at
+        all, and reports its end effector near the origin while doing so.
+
+        Re-read every call rather than cached once: a manipulator on a mobile
+        base moves, and a stale base pose is the same bug with extra steps.
+        """
+        try:
+            position = self.base_position
+            orientation = self.base_orientation
+        except Exception:
+            logger.debug("Could not read base pose for %s", self.prim_path, exc_info=True)
+            return
+        kinematics = None
+        if self._ik is not None:
+            getter = getattr(self._ik, "get_kinematics_solver", None)
+            kinematics = getter() if getter else getattr(self._ik, "_kinematics_solver", None)
+        for solver in (self._rmpflow, kinematics):
+            setter = getattr(solver, "set_robot_base_pose", None)
+            if setter is not None:
+                setter(np.asarray(position, dtype=float), np.asarray(orientation, dtype=float))
 
     @property
     def ee_position(self) -> np.ndarray:
+        """World-space end-effector position."""
         self._ensure_motion_policy()
+        self._sync_base_pose()
         position, _ = self._ik.compute_end_effector_pose()
         return np.asarray(position, dtype=float)
 
     @property
     def ee_orientation(self) -> np.ndarray:
         self._ensure_motion_policy()
+        self._sync_base_pose()
         _, rotation = self._ik.compute_end_effector_pose()
         return np.asarray(rotation, dtype=float)
 
@@ -446,6 +479,7 @@ class Manipulator(Robot):
         arriving.
         """
         self._ensure_motion_policy()
+        self._sync_base_pose()
         target = as_vec3(position, name="position")
         self._rmpflow.set_end_effector_target(
             target_position=target,
@@ -478,11 +512,104 @@ class Manipulator(Robot):
     def move_ee_by(self, delta: Any, **kwargs: Any) -> MotionResult:
         return self.move_ee_to(self.ee_position + as_vec3(delta, name="delta"), **kwargs)
 
+    # ── Obstacles ─────────────────────────────────────────────────────────────
+
+    _OBSTACLE_WRAPPERS = {
+        "Cube": "VisualCuboid",
+        "Sphere": "VisualSphere",
+        "Cylinder": "VisualCylinder",
+        "Capsule": "VisualCapsule",
+        "Cone": "VisualCone",
+    }
+
+    def add_obstacle(self, target: Any, *, static: bool = False) -> bool:
+        """Register a body RMPflow must plan around.
+
+        RMPflow avoids obstacles, but only ones it has been told about — an
+        empty obstacle set means the arm plans straight through the scene. It
+        still *reaches* its target, so this failure looks like success right up
+        until the elbow sweeps a finished stack off the table.
+
+        `target` may be a `RigidObject`, a prim path, or an already-wrapped
+        core-API object. Pass `static=True` for anything that will not move
+        (a table, a wall); a static obstacle is baked once instead of re-read
+        every step.
+
+        Note the object being *manipulated* should not be registered — the arm
+        has to touch that one.
+        """
+        self._ensure_motion_policy()
+
+        obstacle = target
+        if hasattr(target, "prim_path") and not hasattr(target, "geom"):
+            obstacle = self._wrap_obstacle(target.prim_path)
+        elif isinstance(target, str):
+            obstacle = self._wrap_obstacle(target)
+
+        added = bool(self._rmpflow.add_obstacle(obstacle, static=static))
+        if added:
+            self._obstacles[getattr(obstacle, "prim_path", str(target))] = obstacle
+        return added
+
+    def _wrap_obstacle(self, prim_path: str) -> Any:
+        """Wrap an existing prim in the core-API type RMPflow expects."""
+        import isaacsim.core.api.objects as core_objects
+
+        prim = get_stage().GetPrimAtPath(prim_path)
+        if not prim.IsValid():
+            raise ValueError(f"No prim at {prim_path!r} to use as an obstacle")
+
+        kind = prim.GetTypeName()
+        wrapper = self._OBSTACLE_WRAPPERS.get(str(kind))
+        if wrapper is None:
+            raise ValueError(
+                f"{prim_path} is a {kind}, which Lula cannot represent as an "
+                f"obstacle. Supported: {sorted(self._OBSTACLE_WRAPPERS)}. Wrap the "
+                f"region in a cuboid of your own and register that instead."
+            )
+        # Visual* rather than Dynamic*: this binds to the prim already on the
+        # stage for collision queries and must not add a second rigid body to it.
+        return getattr(core_objects, wrapper)(
+            prim_path=prim_path, name=f"obstacle_{prim_path.strip('/').replace('/', '_')}"
+        )
+
+    def remove_obstacle(self, target: Any) -> bool:
+        path = getattr(target, "prim_path", target)
+        obstacle = self._obstacles.pop(path, None)
+        if obstacle is None:
+            return False
+        self._rmpflow.remove_obstacle(obstacle)
+        return True
+
+    def clear_obstacles(self) -> None:
+        for obstacle in list(self._obstacles.values()):
+            try:
+                self._rmpflow.remove_obstacle(obstacle)
+            except Exception:  # noqa: BLE001 — the registry is what must end up empty
+                logger.debug("Could not remove obstacle", exc_info=True)
+        self._obstacles.clear()
+
+    def obstacles(self) -> list[str]:
+        return sorted(self._obstacles)
+
     # ── Grasping ──────────────────────────────────────────────────────────────
 
-    def is_grasping(self, obj: "RigidObject", *, min_contacts: int = 1) -> bool:
-        """True when the object is genuinely held — measured from contact reports."""
-        touching = [b for b in obj.contact_bodies() if b.startswith(self.prim_path)]
+    def is_grasping(
+        self, obj: "RigidObject", *, min_contacts: int = 1, min_force: float = 0.05
+    ) -> bool:
+        """True when the object is genuinely held — measured from contact reports.
+
+        `min_force` (newtons) is what separates holding from touching. A closed
+        Franka hand reports three contacts with a grasped cube, and one of them
+        is the palm at ~0 N: it is along for the ride, not carrying the object.
+        Counting it would make "the object brushed the hand on its way past"
+        indistinguishable from a grasp.
+        """
+        touching = {
+            c["body"]
+            for c in obj.contacts()
+            if c["body"].startswith(self.prim_path) and c["force"] >= min_force
+        }
         return len(touching) >= min_contacts
 
     def grasp(

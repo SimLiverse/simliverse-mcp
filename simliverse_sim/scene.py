@@ -130,15 +130,39 @@ class Scene:
     # ── Timeline and stepping ─────────────────────────────────────────────────
 
     def play(self) -> None:
+        """Start the timeline, and do not return until it reports playing.
+
+        `timeline.play()` only takes effect on the next Kit tick, so the naive
+        version left `is_playing()` returning False for the rest of the calling
+        script. That reads as "physics failed to start" to anyone — human or
+        agent — who checks, and sends them debugging a scene that is fine.
+        """
         timeline = get_timeline()
-        if not timeline.is_playing():
-            timeline.play()
+        if timeline.is_playing():
+            return
+        timeline.play()
+        for _ in range(8):
+            update_app()
+            if timeline.is_playing():
+                return
+        logger.warning("Timeline did not report playing after 8 app updates.")
 
     def pause(self) -> None:
         get_timeline().pause()
 
     def stop(self) -> None:
+        """Stop the timeline and let PhysX actually tear down.
+
+        The app updates are not cosmetic. Stopping without them leaves PhysX
+        mid-teardown, and the next `play()` brings the scene back with no
+        articulation metadata — every `SingleArticulation` then dies on
+        `'NoneType' object has no attribute 'link_names'`, which names nothing
+        the caller did and reads as a corrupted robot rather than a stop that
+        did not finish.
+        """
         get_timeline().stop()
+        for _ in range(4):
+            update_app()
         self._sim_time = 0.0
 
     def is_playing(self) -> bool:
