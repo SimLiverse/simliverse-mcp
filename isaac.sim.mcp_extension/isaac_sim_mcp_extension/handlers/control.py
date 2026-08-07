@@ -46,16 +46,38 @@ from ..adapters.base import IsaacAdapterBase
 # Persistent execution namespace, keyed by nothing — one live sim, one session.
 _NAMESPACE: Dict[str, Any] = {}
 
+_IMPORT_WARNING = (
+    "simliverse_sim could not be imported inside Isaac Sim: {error}. Names like "
+    "Scene, spawn_robot and RigidObject are NOT bound; anything using them will "
+    "raise NameError. Plain Python and the omni/isaacsim modules still work, so "
+    "this call can repair sys.path and then re-run with reset_namespace=true."
+)
+
 
 def _ensure_library_on_path() -> Optional[str]:
-    """Make `simliverse_sim` importable from the extension's repo checkout."""
+    """Make `simliverse_sim` importable from the extension's repo checkout.
+
+    Two roots, deliberately, and the extension directory is searched first.
+
+    In a plain checkout `simliverse_sim` sits beside `isaac.sim.mcp_extension`
+    at the repo root. In the deployed container only the extension directory is
+    bind-mounted from the host -- its parent is baked into the image and is
+    read-only -- so a copy shipped *inside* the extension is the one that can
+    actually be updated without rebuilding the image. Searching the extension
+    directory first means that copy wins when it exists and nothing changes
+    when it does not.
+    """
     import os
 
     here = os.path.dirname(os.path.abspath(__file__))
     # handlers/ -> isaac_sim_mcp_extension/ -> isaac.sim.mcp_extension/ -> repo root
-    repo_root = os.path.abspath(os.path.join(here, "..", "..", ".."))
-    if repo_root not in sys.path:
-        sys.path.insert(0, repo_root)
+    extension_root = os.path.abspath(os.path.join(here, "..", ".."))
+    repo_root = os.path.abspath(os.path.join(extension_root, ".."))
+
+    for root in (repo_root, extension_root):  # inserted at 0, so extension ends up first
+        if root in sys.path:
+            sys.path.remove(root)
+        sys.path.insert(0, root)
     return repo_root
 
 
@@ -109,22 +131,20 @@ def run_control(
     if reset_namespace or not _NAMESPACE:
         _NAMESPACE = _fresh_namespace(adapter)
 
-    if "__import_error__" in _NAMESPACE:
-        return {
-            "status": "error",
-            "message": (
-                "simliverse_sim could not be imported inside Isaac Sim: "
-                f"{_NAMESPACE['__import_error__']}. Check that the repo root is on "
-                "sys.path and that the extension is loaded from a full checkout."
-            ),
-        }
+    # A failed `simliverse_sim` import is reported, not enforced. Refusing to
+    # execute made this verb unable to repair itself: the one tool that can put
+    # a directory back on sys.path declined to run until sys.path was already
+    # correct. Recovering a container then needed a different verb entirely.
+    # Control code that does not touch the library still works, and code that
+    # does gets a NameError naming the symbol, plus this warning.
+    import_warning = _NAMESPACE.get("__import_error__")
 
     stdout, stderr = io.StringIO(), io.StringIO()
     old_out, old_err = sys.stdout, sys.stderr
     sys.stdout, sys.stderr = stdout, stderr
     try:
         exec(code, _NAMESPACE)  # noqa: S102 — this is the intended escape hatch
-        return {
+        result = {
             "status": "success",
             "stdout": stdout.getvalue(),
             "stderr": stderr.getvalue(),
@@ -134,14 +154,20 @@ def run_control(
                 if not name.startswith("_") and name not in ("np", "sls")
             ),
         }
+        if import_warning:
+            result["warning"] = _IMPORT_WARNING.format(error=import_warning)
+        return result
     except Exception as exc:
-        return {
+        result = {
             "status": "error",
             "message": f"{type(exc).__name__}: {exc}",
             "traceback": traceback.format_exc(),
             "stdout": stdout.getvalue(),
             "stderr": stderr.getvalue(),
         }
+        if import_warning:
+            result["warning"] = _IMPORT_WARNING.format(error=import_warning)
+        return result
     finally:
         sys.stdout, sys.stderr = old_out, old_err
 
