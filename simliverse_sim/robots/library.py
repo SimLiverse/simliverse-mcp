@@ -140,16 +140,125 @@ def _controller_class(morphology: Morphology) -> type[Robot]:
     }.get(morphology, Robot)
 
 
+# ── Discovery ─────────────────────────────────────────────────────────────────
+#
+# The catalogue above is a seed, not the source of truth. Isaac Sim 6.0 regrouped
+# every robot under a vendor directory and nine of seventeen hardcoded paths
+# silently began returning 404 — including the Franka, which is the first robot
+# any manipulation task reaches for. A hardcoded map cannot notice that; the
+# asset server can be asked.
+#
+# Discovery also finds robots nobody listed. The 6.0 server ships vendors the
+# catalogue never mentioned (Agility, Fourier, Galbot, Booster, 1X), so walking
+# it surfaces humanoids that were simply invisible before.
+
+# Directories that are not robots, and files that are parts rather than a robot.
+_SKIP_DIRS = {"props", "materials", "detailedprops", "configuration", "instanceable_meshes"}
+_SKIP_FILE_TOKENS = ("_part", "_mesh", "instanceable_meshes", "_props")
+
+# Joint-name tokens that identify which RMPflow config an asset needs, where the
+# asset's own name does not match the config name.
+_MOTION_ALIASES = {"panda": "Franka", "fr3": "FR3"}
+
+_DISCOVERED: dict[str, RobotAsset] | None = None
+
+
+def _preferred_usd(files: list[str], model: str) -> str | None:
+    """Pick the robot file when a model directory holds several.
+
+    Prefers an exact model-name match, then the shortest name: `franka.usd` over
+    `franka_alt_finger.usd`, and never a `*_part.usd` fragment.
+    """
+    usable = [
+        f for f in files
+        if f.endswith(".usd") and not any(t in f.lower() for t in _SKIP_FILE_TOKENS)
+    ]
+    if not usable:
+        return None
+    stem = model.lower().replace("_", "")
+    exact = [f for f in usable if f.lower().replace("_", "").removesuffix(".usd") == stem]
+    return sorted(exact or usable, key=len)[0]
+
+
+def discover_robots(refresh: bool = False) -> dict[str, RobotAsset]:
+    """Walk the Isaac asset server and build the catalogue from what is there.
+
+    Cached, because the walk is a few seconds of network listing. Falls back to
+    the seeded `CATALOGUE` if the server is unreachable — an offline session
+    should degrade to the known-good subset rather than report no robots at all.
+    """
+    global _DISCOVERED
+    if _DISCOVERED is not None and not refresh:
+        return _DISCOVERED
+
+    try:
+        import omni.client
+
+        root = assets_root()
+    except Exception as exc:
+        logger.warning("Asset server unavailable (%s); using the seeded catalogue", exc)
+        return dict(CATALOGUE)
+
+    def ls(path: str) -> list[str]:
+        result, entries = omni.client.list(root + path)
+        if str(result) != "Result.OK":
+            return []
+        return sorted(e.relative_path for e in entries)
+
+    found: dict[str, RobotAsset] = {}
+    base = "/Isaac/Robots"
+    for vendor in ls(base):
+        if vendor.startswith(".") or vendor.lower() in _SKIP_DIRS:
+            continue
+        for model in ls(f"{base}/{vendor}"):
+            if model.startswith(".") or model.lower() in _SKIP_DIRS:
+                continue
+            model_dir = f"{base}/{vendor}/{model}"
+            chosen = _preferred_usd(ls(model_dir), model)
+            if chosen is None:
+                continue
+            key = model.lower().replace("-", "_").replace(" ", "_")
+            found[key] = RobotAsset(
+                key=key,
+                asset_path=f"{model_dir}/{chosen}",
+                # Morphology is classified from the articulation after loading —
+                # a directory listing cannot know, and does not need to.
+                morphology=Morphology.UNKNOWN,
+                motion_config=None,
+                description=f"{vendor} {model}",
+            )
+
+    if not found:
+        logger.warning("Asset walk returned nothing; using the seeded catalogue")
+        return dict(CATALOGUE)
+
+    # Seeded entries win on key collision: they carry a hand-checked morphology,
+    # a motion config, and a written description that discovery cannot infer.
+    merged = {**found, **CATALOGUE}
+    logger.info(
+        "Robot catalogue: %d discovered, %d seeded, %d total",
+        len(found), len(CATALOGUE), len(merged),
+    )
+    _DISCOVERED = merged
+    return merged
+
+
+def refresh_catalogue() -> int:
+    """Re-walk the asset server. Returns the number of robots now known."""
+    return len(discover_robots(refresh=True))
+
+
 def resolve(robot_type: str) -> RobotAsset:
     """Look up a catalogue entry, tolerating partial names."""
+    catalogue = discover_robots()
     key = robot_type.strip().lower().replace("-", "_").replace(" ", "_")
-    if key in CATALOGUE:
-        return CATALOGUE[key]
-    matches = [k for k in CATALOGUE if key in k or k in key]
+    if key in catalogue:
+        return catalogue[key]
+    matches = [k for k in catalogue if key in k or k in key]
     if matches:
-        return CATALOGUE[sorted(matches, key=len)[0]]
+        return catalogue[sorted(matches, key=len)[0]]
     raise ValueError(
-        f"Unknown robot {robot_type!r}. Known robots: {', '.join(sorted(CATALOGUE))}. "
+        f"Unknown robot {robot_type!r}. Known robots: {', '.join(sorted(catalogue))}. "
         f"For anything else, load the USD yourself and call Robot.attach(prim_path)."
     )
 
@@ -223,5 +332,7 @@ def list_robots() -> list[dict[str, str]]:
             "cartesian_control": "yes" if asset.motion_config else "no",
             "description": asset.description,
         }
-        for asset in sorted(CATALOGUE.values(), key=lambda a: (a.morphology.value, a.key))
+        for asset in sorted(
+            discover_robots().values(), key=lambda a: (a.morphology.value, a.key)
+        )
     ]
