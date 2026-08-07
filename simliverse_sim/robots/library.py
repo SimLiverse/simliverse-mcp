@@ -29,6 +29,7 @@ class RobotAsset:
     # Cartesian control is unavailable and joint control is the fallback.
     motion_config: str | None = None
     description: str = ""
+    manufacturer: str = ""
 
 
 # Asset paths are the 6.0 layout, where NVIDIA regrouped every robot under a
@@ -226,6 +227,7 @@ def discover_robots(refresh: bool = False) -> dict[str, RobotAsset]:
                 morphology=Morphology.UNKNOWN,
                 motion_config=None,
                 description=f"{vendor} {model}",
+                manufacturer=vendor,
             )
 
     if not found:
