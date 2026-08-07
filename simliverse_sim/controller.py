@@ -204,6 +204,79 @@ def write(name: str, code: str, *, directory: str | None = None) -> str:
     return path
 
 
+def attach(script_path: str, *, graph_path: str = "/World/TaskGraph") -> str:
+    """Wire a controller script into the stage as OnPlaybackTick -> ScriptNode.
+
+    Same graph the `create_action_graph` verb builds. It lives here as well
+    because crossing tool types mid-task is where the deliverable kept getting
+    dropped: an agent already inside `run_control` would finish the motion, mean
+    to wire it, and never switch tools. One call in the tool it is already
+    holding is worth the small duplication.
+    """
+    import omni.graph.core as og
+
+    keys = og.Controller.Keys
+    graph, nodes, _, _ = og.Controller.edit(
+        {"graph_path": graph_path, "evaluator_name": "push"},
+        {
+            keys.CREATE_NODES: [
+                ("OnPlaybackTick", "omni.graph.action.OnPlaybackTick"),
+                ("ScriptNode", "omni.graph.scriptnode.ScriptNode"),
+            ],
+            keys.CONNECT: [("OnPlaybackTick.outputs:tick", "ScriptNode.inputs:execIn")],
+        },
+    )
+    if graph is None:
+        raise ControllerError(f"Could not create an action graph at {graph_path!r}")
+
+    node = graph.get_node(f"{graph_path}/ScriptNode")
+    if node is None or not node.is_valid():
+        raise ControllerError(f"Action graph at {graph_path!r} has no usable ScriptNode")
+
+    # Without usePath the node ignores scriptPath and runs its inline source,
+    # which is empty — a graph that is wired, valid, and does nothing.
+    og.Controller.set(node.get_attribute("inputs:usePath"), True)
+    og.Controller.set(node.get_attribute("inputs:scriptPath"), script_path)
+    logger.info("Wired %s -> %s", script_path, graph_path)
+    return graph_path
+
+
+def deliver(
+    name: str,
+    code: str,
+    *,
+    objects: list[str] | None = None,
+    robots: list[str] | None = None,
+    seconds: float = 30.0,
+    graph_path: str = "/World/TaskGraph",
+) -> dict[str, Any]:
+    """Author, wire and prove a controller in one call. This is what "done" means.
+
+    Equivalent to `write` then `attach` then `verify`, and exists as one call
+    because the three-step version kept being started and not finished.
+
+    Re-running a task by hand after a stop is not this. That demonstrates the
+    agent can repeat itself; it says nothing about the scene, which is what the
+    user actually keeps. Only a controller makes the stage perform the task, and
+    only `reproduced: True` here shows that it does.
+    """
+    path = write(name, code)
+    attach(path, graph_path=graph_path)
+    report = verify(seconds=seconds, objects=objects, robots=robots)
+    report["controller_path"] = path
+    report["graph_path"] = graph_path
+    if not report["reproduced"]:
+        report["hint"] = (
+            "Nothing moved when the scene played on its own. The controller is "
+            "wired but is not driving anything: check that compute() advances its "
+            "state machine (one transition per call, never a loop), that it waits "
+            "for physics before building handles, and that motion states call "
+            "servo_to every frame rather than the blocking move_ee_to. "
+            "get_isaac_logs shows anything the script printed or raised."
+        )
+    return report
+
+
 def _sample(objects: dict[str, Any], robots: dict[str, Any]) -> dict[str, Any]:
     state: dict[str, Any] = {}
     for path, obj in objects.items():
