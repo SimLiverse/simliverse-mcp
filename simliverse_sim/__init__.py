@@ -57,6 +57,8 @@ from .assertions import (
     verify_navigation,
     verify_throw,
 )
+from . import controller
+from .controller import ControllerError
 from .objects import RigidObject
 from .robots import (
     AerialRobot,
@@ -83,6 +85,8 @@ from .scene import PhysicsConfig, Scene
 __all__ = [
     "AerialRobot",
     "Check",
+    "ControllerError",
+    "controller",
     "DexterousHand",
     "FlightError",
     "Gripper",

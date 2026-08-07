@@ -104,6 +104,11 @@ def _fresh_namespace(adapter: IsaacAdapterBase) -> Dict[str, Any]:
                 "spawn_robot": sls.spawn_robot,
                 "list_robots": sls.list_robots,
                 "Manipulator": sls.Manipulator,
+                # A task is not finished when the scene looks right; it is
+                # finished when stop-then-play reproduces it. `controller.write`
+                # authors the ScriptNode source and `controller.verify` replays
+                # the scene from its authored state and measures what moved.
+                "controller": sls.controller,
                 "verify_grasp": sls.verify_grasp,
                 "verify_throw": sls.verify_throw,
                 "grasped": sls.grasped,
