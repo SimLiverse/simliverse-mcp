@@ -65,6 +65,100 @@ class ControllerError(RuntimeError):
     """A controller could not be authored or did not reproduce its task."""
 
 
+SKELETON = '''"""<what this controller does>."""
+
+import carb
+import numpy as np
+
+WARMUP_FRAMES = 30
+
+# Every state you need, plus WARMUP and DONE.
+WARMUP, INIT, DOING, DONE = 0, 1, 2, 3
+
+# Persistent state lives at module level, not in compute()'s locals.
+_state = WARMUP
+_frame = 0
+_arm = None
+
+
+def _go(state):
+    global _state, _frame
+    _state, _frame = state, 0
+
+
+def _on_timeline(event):
+    """Reset on STOP, or the second Play resumes mid-task instead of restarting."""
+    import omni.timeline
+
+    global _state, _frame, _arm
+    if event.type == int(omni.timeline.TimelineEventType.STOP):
+        _state, _frame, _arm = WARMUP, 0, None
+
+
+_timeline_sub = None
+
+
+def setup(db=None):
+    global _timeline_sub
+    if _timeline_sub is None:
+        import omni.timeline
+
+        stream = omni.timeline.get_timeline_interface().get_timeline_event_stream()
+        _timeline_sub = stream.create_subscription_to_pop(_on_timeline)
+
+
+def compute(db=None):
+    """One frame. One state transition. Never loop, never step physics."""
+    global _state, _frame, _arm
+    _frame += 1
+
+    if _state == WARMUP:                      # let physics settle first
+        if _frame >= WARMUP_FRAMES:
+            _go(INIT)
+        return True
+
+    if _state == INIT:
+        from simliverse_sim import RigidObject, Scene
+        from simliverse_sim.robots.manipulator import Manipulator
+
+        _arm = Manipulator("/World/Robot", scene=Scene.get())
+        _go(DOING)
+        return True
+
+    if _state == DOING:
+        # servo_to advances ONE tick and returns True once converged.
+        if _arm.servo_to([0.4, 0.0, 0.3]):
+            _go(DONE)
+        return True
+
+    return True
+'''
+
+
+def skeleton() -> str:
+    """The minimum correct ScriptNode shape, to fill in rather than rediscover.
+
+    Every rule that silently produces a graph which does nothing is already
+    satisfied here: both entry points defined, state at module level, a STOP
+    subscription, a warmup, and one transition per call.
+    """
+    return SKELETON
+
+
+def example() -> str:
+    """A complete worked controller — the three-cube stack, as shipped.
+
+    Cheaper and more reliable than searching the container's filesystem for it,
+    which is what an agent does otherwise.
+    """
+    for directory in _CANDIDATE_DIRECTORIES:
+        candidate = os.path.join(os.path.dirname(directory), "demo", "stack_cubes.py")
+        if os.path.isfile(candidate):
+            with open(candidate, encoding="utf-8") as handle:
+                return handle.read()
+    return SKELETON
+
+
 def write(name: str, code: str, *, directory: str | None = None) -> str:
     """Validate a controller script and write it to disk.
 
