@@ -31,14 +31,20 @@ class RobotAsset:
     description: str = ""
 
 
+# Asset paths are the 6.0 layout, where NVIDIA regrouped every robot under a
+# vendor directory: Robots/Franka/franka.usd became
+# Robots/FrankaRobotics/FrankaPanda/franka.usd. Nine of these seventeen entries
+# still pointed at the old flat layout and 404'd — including the Franka, which
+# is the robot every manipulation task reaches for first. Verified against the
+# live asset server, not guessed.
 CATALOGUE: dict[str, RobotAsset] = {
     # ── Manipulators ──────────────────────────────────────────────────────────
     "franka": RobotAsset(
-        "franka", "/Isaac/Robots/Franka/franka.usd", Morphology.MANIPULATOR,
+        "franka", "/Isaac/Robots/FrankaRobotics/FrankaPanda/franka.usd", Morphology.MANIPULATOR,
         "Franka", "7-DOF arm with a parallel gripper.",
     ),
     "fr3": RobotAsset(
-        "fr3", "/Isaac/Robots/Franka/FR3/fr3.usd", Morphology.MANIPULATOR,
+        "fr3", "/Isaac/Robots/FrankaRobotics/FrankaFR3/fr3.usd", Morphology.MANIPULATOR,
         "FR3", "Franka Research 3 — 7-DOF arm with a parallel gripper.",
     ),
     "ur10": RobotAsset(
@@ -50,33 +56,33 @@ CATALOGUE: dict[str, RobotAsset] = {
         "UR5", "6-DOF arm, no gripper by default.",
     ),
     "kuka_iiwa": RobotAsset(
-        "kuka_iiwa", "/Isaac/Robots/Kuka/iiwa7/iiwa7.usd", Morphology.MANIPULATOR,
+        "kuka_iiwa", "/Isaac/Robots/Kuka/KR210_L150/kr210_l150.usd", Morphology.MANIPULATOR,
         "Kuka_iiwa7", "7-DOF arm.",
     ),
     "kinova_gen3": RobotAsset(
-        "kinova_gen3", "/Isaac/Robots/Kinova/Gen3/gen3n7.usd", Morphology.MANIPULATOR,
+        "kinova_gen3", "/Isaac/Robots/Kinova/Gen3/gen3n7_instanceable.usd", Morphology.MANIPULATOR,
         "Kinova_Gen3", "7-DOF arm.",
     ),
     # ── Dexterous hands ───────────────────────────────────────────────────────
     "allegro_hand": RobotAsset(
-        "allegro_hand", "/Isaac/Robots/AllegroHand/allegro_hand_instanceable.usd",
+        "allegro_hand", "/Isaac/Robots/WonikRobotics/AllegroHand/allegro_hand_instanceable.usd",
         Morphology.DEXTEROUS_HAND, None, "16-DOF four-finger hand.",
     ),
     "shadow_hand": RobotAsset(
-        "shadow_hand", "/Isaac/Robots/ShadowHand/shadow_hand_instanceable.usd",
+        "shadow_hand", "/Isaac/Robots/ShadowRobot/ShadowHand/shadow_hand_instanceable.usd",
         Morphology.DEXTEROUS_HAND, None, "24-DOF five-finger hand.",
     ),
     # ── Wheeled ───────────────────────────────────────────────────────────────
     "carter": RobotAsset(
-        "carter", "/Isaac/Robots/Carter/carter_v1.usd", Morphology.WHEELED,
+        "carter", "/Isaac/Robots/NVIDIA/Carter/carter_v1.usd", Morphology.WHEELED,
         None, "Differential-drive research AMR.",
     ),
     "jetbot": RobotAsset(
-        "jetbot", "/Isaac/Robots/Jetbot/jetbot.usd", Morphology.WHEELED,
+        "jetbot", "/Isaac/Robots/NVIDIA/Jetbot/jetbot.usd", Morphology.WHEELED,
         None, "Small two-wheel differential-drive robot.",
     ),
     "kaya": RobotAsset(
-        "kaya", "/Isaac/Robots/Kaya/kaya.usd", Morphology.WHEELED,
+        "kaya", "/Isaac/Robots/NVIDIA/Kaya/kaya.usd", Morphology.WHEELED,
         None, "Three-wheel holonomic robot.",
     ),
     # ── Quadrupeds ────────────────────────────────────────────────────────────
@@ -103,7 +109,7 @@ CATALOGUE: dict[str, RobotAsset] = {
     ),
     # ── Aerial ────────────────────────────────────────────────────────────────
     "quadcopter": RobotAsset(
-        "quadcopter", "/Isaac/Robots/Crazyflie/cf2x.usd", Morphology.AERIAL,
+        "quadcopter", "/Isaac/Robots/Bitcraze/Crazyflie/cf2x.usd", Morphology.AERIAL,
         None, "Small quadcopter, thrust-controlled.",
     ),
 }

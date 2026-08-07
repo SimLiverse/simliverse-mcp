@@ -179,14 +179,35 @@ class Manipulator(Robot):
         name = self._rmp_config_name
         if name is None:
             supported = loader.get_supported_robot_policy_pairs()
+
+            # Match on the robot's own joint names first, then the prim path.
+            #
+            # Path matching alone is what ADR 012 rejected for morphology
+            # classification, and it fails here for the same reason: a Franka
+            # Panda spawned at /World/Panda has no supported name inside "panda",
+            # so Cartesian control silently became unavailable on a robot that
+            # RMPflow fully supports. Joint names come from the asset's own
+            # URDF/USD and survive whatever the user called the prim.
+            joints = " ".join(self.joint_names).lower().replace("_", "")
             leaf = self.prim_path.rsplit("/", 1)[-1].lower().replace("_", "")
-            for candidate in supported:
-                if candidate.lower().replace("_", "") in leaf:
-                    name = candidate
+
+            # Asset joint prefixes whose names differ from the RMPflow config.
+            aliases = {"panda": "Franka", "fr3": "FR3"}
+            for token, config in aliases.items():
+                if token in joints and config in supported:
+                    name = config
                     break
+
+            if name is None:
+                for candidate in supported:
+                    key = candidate.lower().replace("_", "")
+                    if key in joints or key in leaf:
+                        name = candidate
+                        break
             if name is None:
                 raise MotionError(
-                    f"No RMPflow configuration matches {self.prim_path}. Supported "
+                    f"No RMPflow configuration matches {self.prim_path} "
+                    f"(joints: {self.joint_names[:3]}...). Supported "
                     f"robots: {sorted(supported)}. Pass rmp_config= explicitly, or "
                     f"drive the joints directly with set_joint_positions."
                 )
