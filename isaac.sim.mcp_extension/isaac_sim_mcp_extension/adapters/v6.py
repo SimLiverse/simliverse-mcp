@@ -140,13 +140,33 @@ class IsaacAdapterV6(IsaacAdapterBase):
         if not prim.IsValid():
             raise ValueError(f"Prim not found: {prim_path}")
         xformable = UsdGeom.Xformable(prim)
+
+        # Merge with what is already authored. ClearXformOpOrder() drops every
+        # op, so re-adding only the supplied ones silently reset the rest to
+        # identity: `transform_object(path, scale=[...])` used to wipe position
+        # and rotation. A ramp lost its 20-degree tilt the moment an agent tried
+        # to widen it, and the damage was invisible until the geometry was
+        # measured — the call reports success either way.
+        current = {}
+        try:
+            current = self.get_prim_transform(prim_path) or {}
+        except Exception:
+            pass
+
+        def _pick(supplied, key, default):
+            if supplied is not None:
+                return list(supplied)
+            value = current.get(key)
+            return list(value) if value is not None else list(default)
+
+        pos = _pick(position, "position", (0.0, 0.0, 0.0))
+        rot = _pick(rotation, "rotation", (0.0, 0.0, 0.0))
+        scl = _pick(scale, "scale", (1.0, 1.0, 1.0))
+
         xformable.ClearXformOpOrder()
-        if position is not None:
-            xformable.AddTranslateOp(precision=UsdGeom.XformOp.PrecisionDouble).Set(Gf.Vec3d(*position))
-        if rotation is not None:
-            xformable.AddRotateXYZOp(precision=UsdGeom.XformOp.PrecisionDouble).Set(Gf.Vec3d(*rotation))
-        if scale is not None:
-            xformable.AddScaleOp(precision=UsdGeom.XformOp.PrecisionDouble).Set(Gf.Vec3d(*scale))
+        xformable.AddTranslateOp(precision=UsdGeom.XformOp.PrecisionDouble).Set(Gf.Vec3d(*pos))
+        xformable.AddRotateXYZOp(precision=UsdGeom.XformOp.PrecisionDouble).Set(Gf.Vec3d(*rot))
+        xformable.AddScaleOp(precision=UsdGeom.XformOp.PrecisionDouble).Set(Gf.Vec3d(*scl))
 
     def get_prim_transform(self, prim_path: str) -> Dict[str, Any]:
         from pxr import UsdGeom
