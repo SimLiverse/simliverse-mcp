@@ -265,7 +265,15 @@ def deliver(
     report = verify(seconds=seconds, objects=objects, robots=robots)
     report["controller_path"] = path
     report["graph_path"] = graph_path
-    if not report["reproduced"]:
+    if report.get("diverged"):
+        report["hint"] = (
+            f"{', '.join(report['diverged'])} left the world, which means the "
+            f"physics setup is broken rather than the motion being wrong. The "
+            f"usual cause is rigid-body physics applied to something that should "
+            f"not have it — an articulation root, or a body with no valid mass. "
+            f"Check the prim's applied schemas before blaming the controller."
+        )
+    elif not report["reproduced"]:
         report["hint"] = (
             "Nothing moved when the scene played on its own. The controller is "
             "wired but is not driving anything: check that compute() advances its "
@@ -323,7 +331,18 @@ def verify(
     timeline = get_timeline()
 
     scene.stop()
-    handles_objects = {p: RigidObject(p, scene=scene) for p in objects or []}
+    # Fail before touching anything: a robot path in `objects` used to be
+    # silently destructive, and the resulting explosion then read as "something
+    # moved", i.e. as success.
+    handles_objects: dict[str, Any] = {}
+    for path in objects or []:
+        try:
+            handles_objects[path] = RigidObject(path, scene=scene)
+        except ValueError as exc:
+            raise ControllerError(
+                f"objects={path!r} cannot be measured as a rigid body.\n\n{exc}\n\n"
+                f"Pass robots=[{path!r}] instead if you meant the robot."
+            ) from exc
     handles_robots = {p: Robot(p, scene=scene) for p in robots or []}
     before = _sample(handles_objects, handles_robots)
 
@@ -358,9 +377,20 @@ def verify(
         entry.get("speed", 0.0) < 0.05 for entry in after.values() if "speed" in entry
     )
 
+    # Anything that left the world did not "move" in any sense worth reporting.
+    # Motion alone was the whole test until a robot with a corrupted articulation
+    # fell 14 km and counted as the scene doing its job.
+    diverged = sorted(
+        path
+        for path, entry in after.items()
+        if "position" in entry
+        and (entry["position"][2] < -1.0 or max(abs(v) for v in entry["position"]) > 50.0)
+    )
+
     return {
         "moved": sorted(moved),
-        "reproduced": bool(moved),
+        "reproduced": bool(moved) and not diverged,
+        "diverged": diverged,
         "at_rest": at_rest,
         "simulated_seconds": round(float(timeline.get_current_time() - start), 2),
         "before": before,

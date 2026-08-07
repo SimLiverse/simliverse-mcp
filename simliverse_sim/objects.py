@@ -31,7 +31,32 @@ class RigidObject:
         self._view: Any = None
         if not self.prim.IsValid():
             raise ValueError(f"No prim at {prim_path!r}")
+        self._reject_articulation()
         self._enable_contact_reporting()
+
+    def _reject_articulation(self) -> None:
+        """Refuse to treat a robot as a rigid body.
+
+        This is destructive, not merely wrong. `SingleRigidPrim` applies
+        RigidBodyAPI to whatever path it is given, and an articulation root with
+        a rigid body on it is not a valid PhysX object: its inertia goes
+        invalid, its mass goes negative, and the robot is flung out of the
+        world. A measured run passed a robot path in a list of objects and the
+        arm ended up at z = -14140 m, with nothing in the traceback pointing
+        here — the failure surfaced as "the robot broke when I pressed Play".
+        """
+        from pxr import UsdPhysics
+
+        if not self.prim.HasAPI(UsdPhysics.ArticulationRootAPI):
+            return
+        raise ValueError(
+            f"{self.prim_path!r} is an articulation root — a robot, not a rigid "
+            f"body. Wrapping it as a RigidObject would apply RigidBodyAPI to it "
+            f"and destroy the articulation, sending the robot out of the world.\n\n"
+            f"Use Robot.attach({self.prim_path!r}) for the robot itself, or name a "
+            f"single link (e.g. {self.prim_path}/panda_hand) if you really want one "
+            f"body's state."
+        )
 
     def __repr__(self) -> str:
         p = self.position
