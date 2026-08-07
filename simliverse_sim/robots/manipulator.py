@@ -14,13 +14,19 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from .._compat import as_vec3, get_stage, motion_generation
+from .._compat import as_quat, as_vec3, get_stage, motion_generation
 from .base import Morphology, Robot
 
 if TYPE_CHECKING:
     from ..objects import RigidObject
 
 logger = logging.getLogger("simliverse_sim.robots.manipulator")
+
+
+def _same_orientation(a: Any, b: Any) -> bool:
+    if a is None or b is None:
+        return a is None and b is None
+    return bool(np.allclose(a, b))
 
 
 class MotionError(RuntimeError):
@@ -336,6 +342,10 @@ class Manipulator(Robot):
         self._policy: Any = None
         self._ik: Any = None
         self._obstacles: dict[str, Any] = {}
+        self._servo_target: Any = None
+        self._servo_orientation: Any = None
+        self._servo_settled = 0
+        self._servo_error = float("inf")
         self.gripper = Gripper(self, self.groups.gripper)
 
     def attach_suction_gripper(
@@ -478,28 +488,18 @@ class Manipulator(Robot):
         consecutive steps, so flying through the target does not count as
         arriving.
         """
-        self._ensure_motion_policy()
-        self._sync_base_pose()
         target = as_vec3(position, name="position")
-        self._rmpflow.set_end_effector_target(
-            target_position=target,
-            target_orientation=np.asarray(orientation) if orientation is not None else None,
-        )
-
         self.scene.play()
-        controller = self._controller()
-        settled, error = 0, float("inf")
 
         for step in range(max_steps):
-            self._rmpflow.update_world()
-            controller.apply_action(self._policy.get_next_articulation_action())
+            reached = self.servo_to(
+                target, orientation, tolerance=tolerance, hold=hold_steps
+            )
             self.scene.step(1)
+            if reached:
+                return MotionResult(True, step + 1, self._servo_error, target.tolist())
 
-            error = float(np.linalg.norm(self.ee_position - target))
-            settled = settled + 1 if error < tolerance else 0
-            if settled >= hold_steps:
-                return MotionResult(True, step + 1, error, target.tolist())
-
+        error = self._servo_error
         result = MotionResult(False, max_steps, error, target.tolist())
         if raise_on_fail:
             raise MotionError(
@@ -508,6 +508,52 @@ class Manipulator(Robot):
                 f"target is likely outside the workspace or blocked by a collision."
             )
         return result
+
+    def servo_to(
+        self,
+        position: Any,
+        orientation: Any = None,
+        *,
+        tolerance: float = 0.005,
+        hold: int = 3,
+    ) -> bool:
+        """Advance the arm one control tick toward a Cartesian target.
+
+        Does NOT step physics, and does not block. Returns True once the end
+        effector has stayed inside `tolerance` for `hold` consecutive ticks.
+
+        This is the form a controller needs. `move_ee_to` steps physics itself,
+        which is correct when driving the sim from outside but wrong inside a
+        ScriptNode or any OnPlaybackTick callback, where the timeline owns
+        stepping -- stepping from within the callback either deadlocks or
+        double-advances the world. Calling the same target repeatedly is the
+        intended usage; the target is only re-issued to RMPflow when it changes,
+        so convergence state survives across ticks.
+        """
+        self._ensure_motion_policy()
+        self._sync_base_pose()
+
+        target = as_vec3(position, name="position")
+        rotation = as_quat(orientation) if orientation is not None else None
+        changed = (
+            self._servo_target is None
+            or not np.allclose(self._servo_target, target)
+            or not _same_orientation(self._servo_orientation, rotation)
+        )
+        if changed:
+            self._servo_target = target
+            self._servo_orientation = rotation
+            self._servo_settled = 0
+            self._rmpflow.set_end_effector_target(
+                target_position=target, target_orientation=rotation
+            )
+
+        self._rmpflow.update_world()
+        self._controller().apply_action(self._policy.get_next_articulation_action())
+
+        self._servo_error = float(np.linalg.norm(self.ee_position - target))
+        self._servo_settled = self._servo_settled + 1 if self._servo_error < tolerance else 0
+        return self._servo_settled >= hold
 
     def move_ee_by(self, delta: Any, **kwargs: Any) -> MotionResult:
         return self.move_ee_to(self.ee_position + as_vec3(delta, name="delta"), **kwargs)
