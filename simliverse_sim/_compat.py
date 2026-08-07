@@ -13,9 +13,12 @@ ImportError.
 from __future__ import annotations
 
 import functools
+import logging
 from typing import Any
 
 import numpy as np
+
+logger = logging.getLogger("simliverse_sim._compat")
 
 
 class IsaacSimUnavailable(RuntimeError):
@@ -44,19 +47,82 @@ def get_stage() -> Any:
     return stage
 
 
+def _physics_ready(_world: Any = None) -> bool:
+    """Is the physics simulation view live?
+
+    Deliberately NOT `world._physics_context`. That attribute is `None` on Isaac
+    Sim 6.0 even for a freshly constructed, perfectly healthy `World` — it
+    belongs to the older stepping path — so checking it reports every session as
+    broken. `SimulationManager.get_physics_sim_view()` is what 6.0 actually
+    populates, and what articulation and rigid-body views read through.
+    """
+    try:
+        from isaacsim.core.simulation_manager import SimulationManager
+    except ImportError:  # older layout
+        return True
+    return SimulationManager.get_physics_sim_view() is not None
+
+
 def get_world(physics_dt: float = 1.0 / 60.0) -> Any:
-    """Return the singleton `World`, creating and initializing it if needed."""
+    """Return the singleton `World`, with physics genuinely initialized.
+
+    The previous version wrapped `initialize_physics()` in a bare `except: pass`
+    on the theory that a second call is harmless. It is — but so is every other
+    failure under a bare except, and a genuine one left `_physics_context` as
+    None and handed back a `World` that raised on the next `step()`. That killed
+    a live grasp run: eight failures across all three agent tiers, each reported
+    as an AttributeError on `_step` with nothing pointing here.
+
+    Re-entry is now handled by asking whether physics is ready rather than by
+    calling and discarding the answer.
+    """
     from isaacsim.core.api import World
 
     world = World.instance()
     if world is None:
         world = World(physics_dt=physics_dt, stage_units_in_meters=1.0)
+    elif _physics_ready(world):
+        return world
+
     try:
         world.initialize_physics()
-    except Exception:
-        # Already initialized — harmless, and the common case on re-entry.
-        pass
+    except Exception as exc:
+        # A singleton left behind by a previous run can hold a stage that no
+        # longer exists, and it cannot be repaired in place. Drop it and build a
+        # fresh one — the alternative is every later call failing on a corpse.
+        logger.warning("World.initialize_physics() failed (%s); rebuilding", exc)
+        try:
+            World.clear_instance()
+        except Exception:  # noqa: BLE001 — best effort; the retry is what matters
+            logger.debug("World.clear_instance() failed", exc_info=True)
+        world = World(physics_dt=physics_dt, stage_units_in_meters=1.0)
+        world.initialize_physics()
+
+    if not _physics_ready(world):
+        # A warning, not an error. The sim view is only populated once physics
+        # has actually stepped, so it is legitimately absent on a scene that has
+        # just been built — and raising here would make `Scene.get()` fail for
+        # every caller that only wants to author prims or step PhysX directly,
+        # neither of which needs it. Articulation code checks for itself.
+        logger.warning(
+            "No physics sim view yet; articulation reads will fail until the "
+            "scene has been played and stepped at least once."
+        )
     return world
+
+
+def get_physx() -> Any:
+    """The PhysX interface, which is how an extension steps physics itself."""
+    import omni.physx
+
+    return omni.physx.get_physx_interface()
+
+
+def update_app() -> None:
+    """Advance Kit one frame — rendering only, never physics."""
+    import omni.kit.app
+
+    omni.kit.app.get_app().update()
 
 
 def get_timeline() -> Any:

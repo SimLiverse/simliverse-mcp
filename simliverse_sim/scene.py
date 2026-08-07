@@ -14,7 +14,7 @@ from typing import Any
 
 import numpy as np
 
-from ._compat import as_vec3, get_stage, get_timeline, get_world
+from ._compat import as_vec3, get_physx, get_stage, get_timeline, get_world, update_app
 
 logger = logging.getLogger("simliverse_sim.scene")
 
@@ -38,6 +38,9 @@ class Scene:
     def __init__(self, dt: float = DEFAULT_DT) -> None:
         self._dt = dt
         self._world = get_world(physics_dt=dt)
+        # PhysX wants a monotonically increasing simulation clock; it is ours
+        # to keep now that we step physics directly rather than via World.
+        self._sim_time = 0.0
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -109,15 +112,13 @@ class Scene:
         timeline = get_timeline()
         if not timeline.is_playing():
             timeline.play()
-        # A World step after play() is what actually starts physics; without it
-        # the timeline is "playing" but nothing has advanced.
-        self._world.step(render=False)
 
     def pause(self) -> None:
         get_timeline().pause()
 
     def stop(self) -> None:
         get_timeline().stop()
+        self._sim_time = 0.0
 
     def is_playing(self) -> bool:
         return bool(get_timeline().is_playing())
@@ -125,14 +126,32 @@ class Scene:
     def step(self, count: int = 1, *, render: bool = False) -> None:
         """Advance physics by `count` steps.
 
-        This genuinely steps physics. The MCP `step_simulation` verb calls
-        `update_app()`, which only advances the render loop and moves physics
-        solely as a side effect of the timeline already running (ADR 012 §1.5).
+        Stepped through `omni.physx` rather than `World.step()`. Two reasons,
+        both learned the hard way:
+
+        `World.step()` is documented as "not intended to be used in the Isaac
+        Sim Extensions workflow", and we are an extension — Kit owns the render
+        loop. Its `render=False` branch dereferences
+        `SimulationContext._physics_context`, which is `None` on Isaac Sim 6.0
+        even for a freshly constructed `World`, so it raises
+        `'NoneType' object has no attribute '_step'`. That single call produced
+        eight failures across all three agent tiers in one grasp run, and the
+        error names nothing that appears in this file.
+
+        The MCP `step_simulation` verb is no substitute: it calls `update_app()`,
+        which advances rendering and moves physics only as a side effect of the
+        timeline already running (ADR 012 §1.5). This advances physics itself, by
+        a known dt, whether or not anything is rendering.
         """
-        if not self.is_playing():
-            self.play()
+        physx = get_physx()
         for _ in range(max(0, int(count))):
-            self._world.step(render=render)
+            physx.update_simulation(self._dt, self._sim_time)
+            self._sim_time += self._dt
+        # Push the results into USD/Fabric so reads afterwards see the new poses
+        # rather than the ones from before the step.
+        physx.update_transformations(False, True, True, False)
+        if render:
+            update_app()
 
     def settle(self, seconds: float = 0.5, *, render: bool = False) -> None:
         """Step long enough for contacts and drives to reach steady state."""
