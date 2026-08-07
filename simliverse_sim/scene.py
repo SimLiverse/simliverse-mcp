@@ -176,12 +176,16 @@ class Scene:
         color: Any = (0.9, 0.2, 0.15),
         friction: float = 0.9,
         restitution: float = 0.05,
+        static: bool = False,
     ) -> "RigidObject":
         """Create a dynamic rigid body with real, tunable contact properties.
 
         `friction` matters: the MCP verb layer hardcodes 0.5/0.5/0.0 and does not
         expose it at all, which makes a friction grasp untunable. A rubber-ish
         0.9 is what actually holds a ball between two finger pads.
+
+        `static=True` gives a body that collides but never moves — a table,
+        a shelf, a wall, a ramp. `mass` is ignored for those.
         """
         from pxr import Gf, UsdGeom, UsdPhysics
 
@@ -216,9 +220,16 @@ class Scene:
             geom.CreateDisplayColorAttr().Set([Gf.Vec3f(*as_vec3(color, name="color"))])
 
         UsdPhysics.CollisionAPI.Apply(prim)
-        UsdPhysics.RigidBodyAPI.Apply(prim)
-        mass_api = UsdPhysics.MassAPI.Apply(prim)
-        mass_api.CreateMassAttr().Set(float(mass))
+        if static:
+            # Collision without a rigid body: the thing collides and never moves.
+            # Tables, shelves, walls and ramps are all this, and without it the
+            # only way to get one was a heavy body that sags or drifts. An agent
+            # asking for `static=True` and getting a TypeError burns a turn.
+            UsdPhysics.RigidBodyAPI.Apply(prim).CreateKinematicEnabledAttr().Set(True)
+        else:
+            UsdPhysics.RigidBodyAPI.Apply(prim)
+            mass_api = UsdPhysics.MassAPI.Apply(prim)
+            mass_api.CreateMassAttr().Set(float(mass))
 
         self.apply_physics_material(
             prim_path, friction=friction, restitution=restitution
