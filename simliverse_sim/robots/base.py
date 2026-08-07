@@ -326,22 +326,23 @@ class Robot:
         return problems
 
     def repair_drives(self) -> list[str]:
-        """Turn on any joint drive that is switched off, and report which.
+        """Enable joint drives that are switched off. **Explicit request only.**
 
-        `drive_health()` finds these; this fixes them. A drive with stiffness and
-        damping both zero is a PD controller with no gains — it exerts no force
-        however you command it, so the joint goes limp and is shoved around by
-        contact.
+        Never call this to make a task succeed. It modifies the robot: after it
+        runs, the simulation no longer models the asset that was loaded, and
+        anything measured or trained afterwards describes a robot that does not
+        exist outside this session. On a sim-to-real platform that is a worse
+        outcome than the task failing, because the failure is silent and shows up
+        later as hardware that "doesn't match sim".
 
-        Isaac Sim's Franka FR3 ships exactly that way: `fr3_finger_joint1` has
-        stiffness 60000 / damping 6000, `fr3_finger_joint2` has 0 / 0, because
+        A misconfigured asset is a finding to report. `drive_health()` finds
+        them; motion code refuses and says so. This exists for when the user has
+        seen that report and decided they want the robot changed.
+
+        Isaac Sim's Franka FR3 is the common case: `fr3_finger_joint1` has
+        stiffness 60000 / damping 6000 and `fr3_finger_joint2` has 0 / 0, because
         the asset expects joint2 to mimic joint1 and no mimic joint is
-        configured. One pad presses, the other flops, and a two-finger pinch
-        cannot work however good the control code above it is.
-
-        That failure is indistinguishable from bad IK by observation — the arm
-        reaches, the fingers move, the object is not held — which is why this is
-        repaired in code rather than left for an agent to notice.
+        configured.
 
         Gains are copied from the healthiest sibling drive on the same robot, so
         a correctly authored asset is left untouched.

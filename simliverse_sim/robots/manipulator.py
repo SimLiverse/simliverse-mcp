@@ -79,12 +79,45 @@ class Gripper:
     def open_width(self) -> float:
         return self._limits()[0]
 
+    def _assert_can_grip(self) -> None:
+        """Refuse to command fingers whose drives cannot exert force.
+
+        A drive with stiffness and damping both zero is a PD controller with no
+        gains: it produces no force however it is commanded. Isaac Sim's Franka
+        FR3 ships that way on `fr3_finger_joint2`, expecting a mimic joint that
+        this build does not configure.
+
+        This reports rather than repairs. Writing gains onto the asset would make
+        the grasp succeed while quietly changing the robot being simulated, and a
+        policy trained against a gripper we silently modified does not transfer
+        to the real one — the failure would surface as bad hardware, long after
+        anyone could connect it to this. Changing a robot's dynamics is the
+        user's call, not a side effect of `close()`.
+
+        `Robot.repair_drives()` does it, when someone asks for it.
+        """
+        names = set(self.joint_names)
+        disabled = [
+            problem["joint"]
+            for problem in self._robot.drive_health()
+            if problem["joint"].rsplit("/", 1)[-1] in names
+        ]
+        if not disabled:
+            return
+        raise MotionError(
+            f"{self._robot.prim_path} cannot grip: the drive on "
+            f"{', '.join(disabled)} is disabled (stiffness and damping both 0), "
+            f"so those fingers exert no force and will be pushed open by contact. "
+            f"This is how the asset ships — it is not something this run broke. "
+            f"Report it rather than working around it. If the user wants the "
+            f"robot changed, `robot.repair_drives()` enables the drives, but that "
+            f"alters the dynamics being simulated and must be their decision."
+        )
+
     def set_position(self, value: float, *, settle_steps: int = 30) -> None:
         if not self.exists:
             raise MotionError(f"{self._robot.prim_path} has no gripper joints.")
-        # A finger whose drive is switched off cannot grip whatever it is
-        # commanded to do; repair before commanding, not after failing.
-        self._robot.repair_drives()
+        self._assert_can_grip()
         self._robot.set_joint_positions(
             [float(value)] * len(self.joint_indices),
             indices=self.joint_indices,
