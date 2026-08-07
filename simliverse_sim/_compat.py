@@ -174,3 +174,48 @@ def as_vec3(value: Any, *, name: str = "value") -> np.ndarray:
     if arr.size != 3:
         raise ValueError(f"{name} must have 3 components, got {arr.size}: {value!r}")
     return arr
+
+
+def as_quat(value: Any, *, name: str = "orientation") -> np.ndarray:
+    """Normalise any orientation to a plain float `[w, x, y, z]` array.
+
+    Isaac Sim's numpy backend calls `.astype(np.float32)` on whatever it is
+    handed, which fails on `Gf.Quatf` with
+    `TypeError: float() argument must be a string or a real number, not 'Quatf'`
+    — several frames below the call, naming nothing the caller wrote. A `Gf`
+    quaternion is the obvious type to reach for from pxr, so this accepts it,
+    along with a 4-tuple and a 3-tuple of euler angles in degrees.
+    """
+    if value is None:
+        return np.array([1.0, 0.0, 0.0, 0.0], dtype=float)
+
+    # Gf.Quatf / Gf.Quatd — real part and imaginary vector, not indexable.
+    if hasattr(value, "GetReal") and hasattr(value, "GetImaginary"):
+        imaginary = value.GetImaginary()
+        return np.array(
+            [float(value.GetReal()), float(imaginary[0]), float(imaginary[1]), float(imaginary[2])],
+            dtype=float,
+        )
+
+    array = np.asarray(value, dtype=float).reshape(-1)
+    if array.size == 4:
+        return array
+    if array.size == 3:
+        # Euler degrees, XYZ order — how a human describes "tilt it 20 degrees".
+        roll, pitch, yaw = np.radians(array)
+        cr, sr = np.cos(roll / 2), np.sin(roll / 2)
+        cp, sp = np.cos(pitch / 2), np.sin(pitch / 2)
+        cy, sy = np.cos(yaw / 2), np.sin(yaw / 2)
+        return np.array(
+            [
+                cr * cp * cy + sr * sp * sy,
+                sr * cp * cy - cr * sp * sy,
+                cr * sp * cy + sr * cp * sy,
+                cr * cp * sy - sr * sp * cy,
+            ],
+            dtype=float,
+        )
+    raise ValueError(
+        f"{name} must be a quaternion [w,x,y,z], euler degrees [x,y,z], or a "
+        f"Gf.Quat; got {value!r}"
+    )

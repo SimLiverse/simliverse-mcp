@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from ._compat import as_vec3, get_stage
+from ._compat import as_quat, as_vec3, get_stage
 
 if TYPE_CHECKING:
     from .scene import Scene
@@ -129,7 +129,10 @@ class RigidObject:
         """
         view = self._rigid_view()
         pos = as_vec3(position, name="position") if position is not None else None
-        view.set_world_pose(position=pos, orientation=orientation)
+        view.set_world_pose(
+            position=pos,
+            orientation=as_quat(orientation) if orientation is not None else None,
+        )
 
     def set_velocity(self, linear: Any = None, angular: Any = None) -> None:
         view = self._rigid_view()

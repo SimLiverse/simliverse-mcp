@@ -9,12 +9,20 @@ by an agent, and reviewable by a human.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 import numpy as np
 
-from ._compat import as_vec3, get_physx, get_stage, get_timeline, get_world, update_app
+from ._compat import (
+    as_quat,
+    as_vec3,
+    get_physx,
+    get_stage,
+    get_timeline,
+    get_world,
+    update_app,
+)
 
 logger = logging.getLogger("simliverse_sim.scene")
 
@@ -56,7 +64,9 @@ class Scene:
     def stage(self) -> Any:
         return get_stage()
 
-    def configure_physics(self, config: PhysicsConfig | None = None) -> PhysicsConfig:
+    def configure_physics(
+        self, config: PhysicsConfig | None = None, **overrides: Any
+    ) -> PhysicsConfig:
         """Apply gravity, timestep and solver settings, and create a ground plane.
 
         The MCP `set_physics_params` verb silently discards every one of these
@@ -64,7 +74,18 @@ class Scene:
         """
         from pxr import PhysxSchema, UsdGeom, UsdPhysics
 
+        # Accept `configure_physics(gravity=-9.81)` as well as a PhysicsConfig.
+        # Requiring the wrapper type cost a turn every time: the keyword call is
+        # what anyone writes first, and it raised TypeError.
         cfg = config or PhysicsConfig()
+        if overrides:
+            unknown = set(overrides) - set(PhysicsConfig.__dataclass_fields__)
+            if unknown:
+                raise TypeError(
+                    f"Unknown physics setting(s): {sorted(unknown)}. Valid: "
+                    f"{sorted(PhysicsConfig.__dataclass_fields__)}"
+                )
+            cfg = replace(cfg, **overrides)
         stage = self.stage
 
         scene_path = "/World/PhysicsScene"
@@ -177,6 +198,7 @@ class Scene:
         friction: float = 0.9,
         restitution: float = 0.05,
         static: bool = False,
+        orientation: Any = None,
     ) -> "RigidObject":
         """Create a dynamic rigid body with real, tunable contact properties.
 
@@ -186,6 +208,11 @@ class Scene:
 
         `static=True` gives a body that collides but never moves — a table,
         a shelf, a wall, a ramp. `mass` is ignored for those.
+
+        `orientation` takes euler degrees `[x, y, z]`, a quaternion `[w,x,y,z]`,
+        or a `Gf.Quat`. Without it a ramp was unbuildable: the body had to be
+        spawned flat and re-posed afterwards, which is where the `Gf.Quatf`
+        crash lived and why a "20 degree ramp" came out at the wrong angle.
         """
         from pxr import Gf, UsdGeom, UsdPhysics
 
@@ -213,6 +240,9 @@ class Scene:
         xform = UsdGeom.Xformable(prim)
         xform.ClearXformOpOrder()
         xform.AddTranslateOp().Set(Gf.Vec3d(*as_vec3(position, name="position")))
+        if orientation is not None:
+            w, x, y, z = as_quat(orientation)
+            xform.AddOrientOp().Set(Gf.Quatf(float(w), Gf.Vec3f(float(x), float(y), float(z))))
         if scale is not None:
             xform.AddScaleOp().Set(Gf.Vec3f(*as_vec3(scale, name="scale")))
 

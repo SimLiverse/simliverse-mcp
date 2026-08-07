@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from .._compat import articulation_action, as_vec3, get_stage, single_articulation
+from .._compat import articulation_action, as_quat, as_vec3, get_stage, single_articulation
 
 if TYPE_CHECKING:
     from ..scene import Scene
@@ -292,7 +292,7 @@ class Robot:
     def set_base_pose(self, position: Any = None, orientation: Any = None) -> None:
         self._articulation.set_world_pose(
             position=as_vec3(position, name="position") if position is not None else None,
-            orientation=orientation,
+            orientation=as_quat(orientation) if orientation is not None else None,
         )
 
     # ── Diagnostics ───────────────────────────────────────────────────────────
