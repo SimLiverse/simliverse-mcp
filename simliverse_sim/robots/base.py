@@ -325,6 +325,81 @@ class Robot:
                     )
         return problems
 
+    def repair_drives(self) -> list[str]:
+        """Turn on any joint drive that is switched off, and report which.
+
+        `drive_health()` finds these; this fixes them. A drive with stiffness and
+        damping both zero is a PD controller with no gains — it exerts no force
+        however you command it, so the joint goes limp and is shoved around by
+        contact.
+
+        Isaac Sim's Franka FR3 ships exactly that way: `fr3_finger_joint1` has
+        stiffness 60000 / damping 6000, `fr3_finger_joint2` has 0 / 0, because
+        the asset expects joint2 to mimic joint1 and no mimic joint is
+        configured. One pad presses, the other flops, and a two-finger pinch
+        cannot work however good the control code above it is.
+
+        That failure is indistinguishable from bad IK by observation — the arm
+        reaches, the fingers move, the object is not held — which is why this is
+        repaired in code rather than left for an agent to notice.
+
+        Gains are copied from the healthiest sibling drive on the same robot, so
+        a correctly authored asset is left untouched.
+        """
+        from pxr import Usd, UsdPhysics
+
+        root = get_stage().GetPrimAtPath(self.prim_path)
+        drives: list[tuple[str, Any, float, float, float]] = []
+        for prim in Usd.PrimRange(root):
+            for kind in ("angular", "linear"):
+                drive = UsdPhysics.DriveAPI.Get(prim, kind)
+                if not drive:
+                    continue
+                drives.append(
+                    (
+                        str(prim.GetPath()),
+                        drive,
+                        float(drive.GetStiffnessAttr().Get() or 0.0),
+                        float(drive.GetDampingAttr().Get() or 0.0),
+                        float(drive.GetMaxForceAttr().Get() or 0.0),
+                    )
+                )
+
+        broken = [d for d in drives if d[2] == 0.0 and d[3] == 0.0]
+        if not broken:
+            return []
+
+        stiffness = max((d[2] for d in drives), default=0.0)
+        damping = max((d[3] for d in drives), default=0.0)
+        # A finite maxForce from a sibling beats the `inf` an unconfigured drive
+        # carries, which would let a repaired finger crush what it is holding.
+        finite = [d[4] for d in drives if 0.0 < d[4] < float("inf")]
+        max_force = min(finite) if finite else 0.0
+
+        if stiffness <= 0.0:
+            # Every drive on the robot is off, so there is nothing to copy from.
+            # These are the Franka FR3 factory finger values and a sane default
+            # for a parallel jaw.
+            stiffness, damping, max_force = 60_000.0, 6_000.0, 100.0
+
+        repaired: list[str] = []
+        for path, drive, _, _, force in broken:
+            drive.GetStiffnessAttr().Set(stiffness)
+            drive.GetDampingAttr().Set(damping or 0.1 * stiffness)
+            if max_force > 0.0 and not 0.0 < force < float("inf"):
+                drive.GetMaxForceAttr().Set(max_force)
+            repaired.append(path)
+
+        logger.warning(
+            "Enabled %d disabled joint drive(s) on %s (stiffness=%s damping=%s): %s",
+            len(repaired),
+            self.prim_path,
+            stiffness,
+            damping,
+            ", ".join(repaired),
+        )
+        return repaired
+
     def links(self) -> list[str]:
         """Every link prim under this robot — useful for finding a TCP or foot."""
         from pxr import Usd, UsdPhysics

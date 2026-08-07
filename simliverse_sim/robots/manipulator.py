@@ -82,6 +82,9 @@ class Gripper:
     def set_position(self, value: float, *, settle_steps: int = 30) -> None:
         if not self.exists:
             raise MotionError(f"{self._robot.prim_path} has no gripper joints.")
+        # A finger whose drive is switched off cannot grip whatever it is
+        # commanded to do; repair before commanding, not after failing.
+        self._robot.repair_drives()
         self._robot.set_joint_positions(
             [float(value)] * len(self.joint_indices),
             indices=self.joint_indices,
