@@ -59,29 +59,82 @@ class AerialRobot(Robot):
 
         self.body_path = body_path or prim_path
         self._body: Any = None
+        self._force_prim: Any = None
         self._mass = mass
 
     # ── Body access ───────────────────────────────────────────────────────────
 
     def _rigid_body(self) -> Any:
-        if self._body is None:
-            from isaacsim.core.prims import SingleRigidPrim
+        """The airframe's physics view, or None when it cannot be bound.
 
-            self._body = SingleRigidPrim(prim_path=self.body_path)
+        Constructing one is what fails, not initialising it: `RigidPrim.__init__`
+        reads velocities during construction, so a backend that is not ready
+        raises "Failed to get rigid body velocities from backend" before there is
+        an object to initialise. Wrapping only `initialize()` therefore caught
+        nothing, and `altitude()` — the first thing any flight code calls — died
+        four frames inside the tensor API.
+        """
+        if self._body is None:
             try:
-                self._body.initialize()
+                from isaacsim.core.prims import SingleRigidPrim
+
+                body = SingleRigidPrim(prim_path=self.body_path)
+                try:
+                    body.initialize()
+                except Exception:
+                    logger.debug("Rigid body init deferred for %s", self.body_path,
+                                 exc_info=True)
+                self._body = body
             except Exception:
-                logger.debug("Rigid body init deferred for %s", self.body_path, exc_info=True)
+                logger.debug("No physics view for %s", self.body_path, exc_info=True)
+                return None
         return self._body
+
+    def _force_view(self) -> Any:
+        """A view that can actually apply forces.
+
+        `SingleRigidPrim` has no force methods at all on this Isaac version —
+        `apply_forces_and_torques_at_pos` is defined on the batched `RigidPrim`.
+        Calling it on the single wrapper raised "object has no attribute
+        apply_forces_and_torques_at_pos", so thrust, hover and fly_to were all
+        unreachable: every flight primitive goes through this one call.
+
+        Batched with a single path, which is why the force arrays are shaped
+        (1, 3) rather than (3,).
+        """
+        if self._force_prim is None:
+            from isaacsim.core.prims import RigidPrim
+
+            # `prim_paths_expr`, positional — not `paths`.
+            view = RigidPrim(self.body_path)
+            try:
+                view.initialize()
+            except Exception:
+                logger.debug("Force view init deferred for %s", self.body_path, exc_info=True)
+            self._force_prim = view
+        return self._force_prim
 
     @property
     def position(self) -> np.ndarray:
-        pos, _ = self._rigid_body().get_world_pose()
-        return np.asarray(pos, dtype=float)
+        """Airframe position, falling back to the articulation's own pose."""
+        body = self._rigid_body()
+        if body is not None:
+            try:
+                pos, _ = body.get_world_pose()
+                return np.asarray(pos, dtype=float)
+            except Exception:
+                logger.debug("Airframe pose unavailable", exc_info=True)
+        return self.base_position
 
     @property
     def velocity(self) -> np.ndarray:
-        return np.asarray(self._rigid_body().get_linear_velocity(), dtype=float)
+        body = self._rigid_body()
+        if body is not None:
+            try:
+                return np.asarray(body.get_linear_velocity(), dtype=float)
+            except Exception:
+                logger.debug("Airframe velocity unavailable", exc_info=True)
+        return np.zeros(3)
 
     @property
     def mass(self) -> float:
@@ -100,7 +153,7 @@ class AerialRobot(Robot):
 
     def apply_thrust(self, force: Any, *, torque: Any = None) -> None:
         """Apply a world-frame force (and optional torque) to the body for one step."""
-        body = self._rigid_body()
+        body = self._force_view()
         vector = as_vec3(force, name="force")
         try:
             body.apply_forces_and_torques_at_pos(

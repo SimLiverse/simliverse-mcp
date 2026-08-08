@@ -269,7 +269,9 @@ def specialize(probe: Robot, **kwargs: Any) -> Robot:
     """Re-wrap a generic `Robot` as the subclass matching its actual structure."""
     from .base import classify_morphology
 
-    morphology = classify_morphology(probe.joint_names, probe.groups)
+    morphology = classify_morphology(
+        probe.joint_names, probe.groups, [str(l) for l in probe.links()]
+    )
     controller = _controller_class(morphology)
     if controller is Robot:
         logger.info(
@@ -394,7 +396,9 @@ def spawn_robot(
     # Load first, then classify from the real joint set — the catalogue's
     # morphology is a hint, but the articulation is the ground truth.
     probe = Robot(prim_path, scene=scene)
-    morphology = classify_morphology(probe.joint_names, probe.groups)
+    morphology = classify_morphology(
+        probe.joint_names, probe.groups, [str(l) for l in probe.links()]
+    )
     controller = _controller_class(morphology)
 
     if controller is Robot:

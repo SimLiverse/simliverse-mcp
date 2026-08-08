@@ -113,11 +113,27 @@ class JointGroups:
         }
 
 
-def classify_morphology(joint_names: list[str], groups: JointGroups) -> Morphology:
-    """Infer what kind of robot this is from its joint structure."""
-    dof = len(joint_names)
+def classify_morphology(
+    joint_names: list[str],
+    groups: JointGroups,
+    link_names: list[str] | None = None,
+) -> Morphology:
+    """Infer what kind of robot this is from its joint structure.
 
-    if groups.rotors and len(groups.rotors) >= 3:
+    Link names are consulted as well, because a joint set alone is often not
+    descriptive enough. Isaac's quadcopter names its joints `m1_joint`..`m4_joint`
+    — matching no rotor token — while its links are `m1_prop`..`m4_prop`, which
+    say plainly what the robot is. Classified from joints alone it came back
+    UNKNOWN, so `attach` returned a bare handle with no `fly_to`, `hover` or
+    `altitude`, while `spawn` returned a working AerialRobot because it reads the
+    morphology from the catalogue instead. The same robot answered differently
+    depending on how you got hold of it, and every controller uses `attach`.
+    """
+    dof = len(joint_names)
+    links = [n.rsplit("/", 1)[-1] for n in (link_names or [])]
+
+    rotor_links = [n for n in links if any(t in n.lower() for t in ROTOR_TOKENS)]
+    if len(groups.rotors) >= 3 or len(rotor_links) >= 3:
         return Morphology.AERIAL
 
     has_legs = len(groups.legs) >= 8      # four limbs x >= 2 joints
