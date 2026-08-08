@@ -665,13 +665,21 @@ def _body_position(robot: Any) -> np.ndarray:
 
     Distance is therefore taken from the links rather than the root.
 
-    NOT YET VERIFIED for the planar-base case. Link transforms are only written
-    back to USD when something syncs them, so this pushes physics results across
-    first — but the test that would prove it drove the base with a command the
-    joint did not take, so both samples came from the same pose and the result
-    was uninformative. For a robot whose root *is* the moving body (every
-    wheeled base tested so far) this is equivalent to the old behaviour and is
-    exercised by the slalom and gate demos.
+    DOES NOT WORK for a planar base, and the reason is worth keeping. Measured
+    on a Ridgeback-Franka, commanding the base joint and reading back:
+
+        cmd 0.0 -> joint 0.008 | link world x 0.308
+        cmd 0.8 -> joint 0.783 | link world x 0.308
+        cmd 0.0 -> joint 0.017 | link world x 0.308
+
+    The joints track the command exactly; the link's USD world transform never
+    changes, before or after an explicit `update_transformations`. So this reads
+    the one thing that stays still. For such a robot the authoritative pose is
+    the joint vector itself — the planar triple *is* the base pose — and the
+    general fix is to read link poses from the physics view rather than USD.
+
+    Kept because it is correct and exercised for every robot whose root is the
+    body that moves, which is every wheeled base tested so far.
     """
     root = np.asarray(robot.base_position, dtype=float)
     try:
