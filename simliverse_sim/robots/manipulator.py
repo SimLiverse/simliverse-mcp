@@ -670,7 +670,7 @@ class Manipulator(Robot):
         "Capsule": "VisualCapsule",
     }
 
-    def add_obstacle(self, target: Any, *, static: bool = False) -> bool:
+    def add_obstacle(self, target: Any, *, static: bool = False, reactive: bool = True) -> bool:
         """Register a body the arm must not hit.
 
         An empty obstacle set means the arm moves straight through the scene. It
@@ -699,6 +699,15 @@ class Manipulator(Robot):
         politely, it makes every later plan fail for as long as it stays
         registered.
 
+        `reactive=False` registers it for planning only. Worth reaching for
+        whenever gross motion is planned and the policy is left to do short
+        local moves: RMPflow's repulsion does not stop at the obstacle, and a
+        post 23 cm away was measured pulling a descent 1.4 cm off-centre —
+        enough to land the fingers beside a 4 cm cube and push it away. An
+        obstacle the tool never goes near costs accuracy and buys nothing.
+        Registering the *surface being placed onto* this way is the same idea:
+        the planner routes over it, and the final descent is not fought.
+
         Returns True when the reactive policy accepted it too.
         """
         from .planning import UNREPRESENTABLE_TYPES
@@ -723,6 +732,10 @@ class Manipulator(Robot):
         # A changed obstacle set invalidates the planner's world; it is rebound
         # on the next plan rather than here, so adding several costs one rebind.
         self._plan = None
+
+        if not reactive:
+            logger.info("%s registered for planning only", path)
+            return False
 
         try:
             self._ensure_motion_policy()

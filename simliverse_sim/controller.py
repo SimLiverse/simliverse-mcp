@@ -468,6 +468,20 @@ def deliver(
     only `reproduced: True` here shows that it does.
     """
     path = write(name, code)
+    foreign = [entry for entry in graphs() if entry["script"] and entry["graph"] != graph_path]
+    if foreign:
+        raise ControllerError(
+            "Another action graph is already driving this scene:\n  "
+            + "\n  ".join(f"{e['graph']} runs {e['script']}" for e in foreign)
+            + "\n\nDelivering now would leave two controllers commanding the same "
+            "robot every frame. That does not fail — it produces a scene that "
+            "does roughly the right thing at roughly twice the speed, which reads "
+            "as the controller working, and it has silently corrupted three "
+            "measured runs.\n\n"
+            "Remove the other graph first:\n"
+            + "\n".join(f"    Scene.get().stage.RemovePrim({e['graph']!r})" for e in foreign)
+            + "\n\nor deliver to that same graph_path to replace it."
+        )
     attach(path, graph_path=graph_path)
     report = verify(seconds=seconds, objects=objects, robots=robots)
     report["controller_path"] = path
