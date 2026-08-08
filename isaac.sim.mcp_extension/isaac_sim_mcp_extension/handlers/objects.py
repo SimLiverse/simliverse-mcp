@@ -95,15 +95,37 @@ def create(
 
         stage = adapter.get_stage()
         prim = stage.GetPrimAtPath(prim_path)
+
+        # Asking for a mass is an unambiguous statement that this object is
+        # meant to be simulated, and `physics_enabled` defaults to False. The
+        # combination used to return "success" having applied neither the mass
+        # nor the material, leaving a static prim that no amount of pushing
+        # will move — a silent drop the caller can only find by measuring.
+        # Honour the intent and say so, rather than obeying the flag literally.
+        note = None
+        if mass is not None and not physics_enabled:
+            physics_enabled = True
+            note = (
+                f"mass={mass} was given, so physics_enabled was turned on — a mass "
+                f"has no meaning on a static prim, and the object would not have "
+                f"moved. Pass physics_enabled=False with no mass for a fixed collider."
+            )
+
         if prim.IsValid():
             if not prim.HasAPI(UsdPhysics.CollisionAPI):
                 UsdPhysics.CollisionAPI.Apply(prim)
             if physics_enabled and not prim.HasAPI(UsdPhysics.RigidBodyAPI):
                 UsdPhysics.RigidBodyAPI.Apply(prim)
-            if physics_enabled:
-                _apply_contact_properties(stage, prim, prim_path, mass, friction, restitution)
+            # Friction and restitution are bound whether or not the body is
+            # dynamic: what a *static* collider is made of decides whether
+            # anything resting on it slides, so a ground plane needs them too.
+            _apply_contact_properties(
+                stage, prim, prim_path, mass if physics_enabled else None, friction, restitution
+            )
 
         response: Dict[str, Any] = {"status": "success", "message": f"Created {object_type}", "prim_path": prim_path}
+        if note:
+            response["note"] = note
         try:
             actual_size, (bbox_min, bbox_max) = adapter.get_prim_actual_size(prim_path)
             response["actual_size"] = actual_size

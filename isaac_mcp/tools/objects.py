@@ -69,7 +69,9 @@ def register_tools(mcp: FastMCP, get_connection: "Callable[[], IsaacConnection]"
             rotation: [rx, ry, rz] rotation in degrees. MUST be actual numbers.
             scale: [sx, sy, sz] scale factors. MUST be actual numbers.
             color: [r, g, b] color values (0-1). MUST be actual numbers.
-            physics_enabled: Enable physics on this object.
+            physics_enabled: Enable physics on this object. Passing a `mass`
+                turns this on by itself, since a mass is meaningless on a static
+                prim; the response says so when that happens.
             prim_path: Custom prim path. Auto-generated if not provided.
             mass: Mass in kg. Defaults to whatever PhysX derives from the volume,
                 which for a small primitive is often far heavier than intended.
