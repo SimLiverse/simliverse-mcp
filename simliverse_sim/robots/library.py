@@ -282,42 +282,82 @@ def specialize(probe: Robot, **kwargs: Any) -> Robot:
 
 
 def _register_articulation(scene: Any, prim_path: str) -> None:
-    """Make PhysX parse a robot that was added while the timeline was running.
+    """Make PhysX parse a robot that has just been added to the stage.
 
-    PhysX builds its articulation metadata when the timeline starts. A robot
-    referenced onto the stage mid-play is never parsed, so the prim looks
-    perfectly healthy in USD while every handle built from it dies on
+    PhysX builds articulation metadata *when the timeline starts*, and only
+    then. Until that has happened the prim looks perfectly healthy in USD while
+    every handle built from it dies on
 
         AttributeError: 'NoneType' object has no attribute 'link_names'
 
     raised several frames inside isaacsim.core, naming nothing the caller did.
-    A stop/play cycle is the only thing that fixes it, and an agent that has to
-    discover that empirically spends its whole budget doing so — one measured
-    run burned six turns and a failed subagent on exactly this.
+    Rigid bodies are parsed as they are added and have no such problem, which is
+    why this bites only robots and reads as the library being broken.
 
-    Only runs when the timeline is playing, so the ordinary build-then-play
-    flow pays nothing. Note the cycle resets dynamic bodies to their spawn
-    poses; that is why this is loud rather than silent, and why robots belong
-    at the start of a scene rather than in the middle of a task.
+    Both ways of getting there need fixing, because between them they cover
+    every order a caller can write the code in:
+
+      * **Timeline playing.** The robot arrived after the parse and was never
+        seen. A stop/play cycle is the only repair, and it resets dynamic bodies
+        to their spawn poses — hence the warning, and hence robots belonging at
+        the start of a scene rather than in the middle of a task.
+      * **Timeline stopped.** Nothing has been parsed yet at all. This is the
+        *natural* order — configure, spawn, then play — so it has to work:
+        `Robot.spawn(...)` followed by `scene.play()` is what anyone writes
+        first, and it used to fail on the spawn, before the play it was about
+        to do anyway. The timeline is started here and left playing; the
+        caller's own `play()` is then a no-op.
+
+    An agent that has to discover any of this empirically spends its budget
+    doing so — one measured run burned six turns and a failed subagent on it.
+
+    The cycle is repeated until the articulation actually resolves, rather than
+    performed once and assumed to have worked. A robot arrives on the stage as
+    a *reference*, and USD composes it asynchronously: cycle too early and PhysX
+    parses a prim whose links do not exist yet, which fails exactly like never
+    having cycled at all. One measured attempt did the right thing one frame too
+    soon and reported the library as broken.
     """
-    from .._compat import get_timeline
+    from .._compat import get_timeline, single_articulation, update_app
+
+    def registered() -> bool:
+        try:
+            single_articulation(prim_path)
+            return True
+        except Exception:  # noqa: BLE001 — that is the question being asked
+            return False
 
     try:
-        if not get_timeline().is_playing():
-            return
+        playing = get_timeline().is_playing()
     except Exception:  # noqa: BLE001 — no timeline is not a reason to fail a spawn
         logger.debug("Could not read timeline state", exc_info=True)
         return
 
+    if playing:
+        logger.warning(
+            "Spawned %s while the simulation was playing. PhysX only parses "
+            "articulations at play time, so the timeline is being cycled to "
+            "register it — dynamic objects will reset to their spawn poses.",
+            prim_path,
+        )
+
+    for attempt in range(3):
+        scene.stop()
+        # Let USD finish composing the reference before PhysX looks at it.
+        for _ in range(5):
+            update_app()
+        scene.play()
+        scene.step(3)
+        if registered():
+            return
+        logger.debug("Articulation %s not registered on attempt %d", prim_path, attempt + 1)
+
     logger.warning(
-        "Spawned %s while the simulation was playing. PhysX only parses "
-        "articulations at play time, so the timeline is being cycled to "
-        "register it — dynamic objects will reset to their spawn poses.",
+        "PhysX still has no articulation for %s after three timeline cycles. "
+        "The asset may not have finished loading; building a handle now will "
+        "fail with a link_names error.",
         prim_path,
     )
-    scene.stop()
-    scene.play()
-    scene.step(2)
 
 
 def spawn_robot(

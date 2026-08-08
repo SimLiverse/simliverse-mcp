@@ -17,6 +17,9 @@ actually moved.
 from __future__ import annotations
 
 import ast
+import glob
+import hashlib
+import json
 import logging
 import os
 from typing import Any
@@ -253,6 +256,198 @@ def attach(script_path: str, *, graph_path: str = "/World/TaskGraph") -> str:
     return graph_path
 
 
+# ── Reading the stage back ────────────────────────────────────────────────────
+
+
+def _script_node(graph_path: str) -> Any:
+    """The ScriptNode inside an action graph, or None."""
+    try:
+        import omni.graph.core as og
+
+        graph = og.get_graph_by_path(graph_path)
+        if graph is None:
+            return None
+        node = graph.get_node(f"{graph_path}/ScriptNode")
+        return node if node is not None and node.is_valid() else None
+    except Exception:
+        logger.debug("Could not read the graph at %s", graph_path, exc_info=True)
+        return None
+
+
+def _wired_script(graph_path: str) -> str | None:
+    """Which controller a graph actually runs, read from the live graph.
+
+    Read through `og.Controller`, not off the USD attribute: the USD read
+    returns None for these even on a correctly wired node. A graph with
+    `usePath` False runs its inline source instead, which is normally empty —
+    reporting its `scriptPath` in that case would describe a controller that
+    is not running.
+    """
+    node = _script_node(graph_path)
+    if node is None:
+        return None
+    try:
+        import omni.graph.core as og
+
+        if not bool(og.Controller.get(node.get_attribute("inputs:usePath"))):
+            return None
+        return str(og.Controller.get(node.get_attribute("inputs:scriptPath")))
+    except Exception:
+        logger.debug("Could not read scriptPath on %s", graph_path, exc_info=True)
+        return None
+
+
+def graphs() -> list[dict[str, Any]]:
+    """Every action graph on the stage, and the controller each one runs.
+
+    Worth checking after any delivery that did not go cleanly the first time.
+    A stage can hold several graphs pointed at the *same* script, each with its
+    own copy of the module state, all commanding the same robot every frame —
+    a measured session ended up with two, and the task completed roughly twice
+    as fast as the controller was written to run, which looked like success.
+    """
+    from ._compat import get_stage
+
+    found: list[dict[str, Any]] = []
+    for prim in get_stage().Traverse():
+        if prim.GetTypeName() != "OmniGraph":
+            continue
+        path = str(prim.GetPath())
+        found.append({"graph": path, "script": _wired_script(path)})
+    return found
+
+
+# ── Recording a verification so it does not have to be repeated ───────────────
+
+
+def _digest(path: str) -> str | None:
+    try:
+        with open(path, "rb") as handle:
+            return hashlib.sha256(handle.read()).hexdigest()
+    except OSError:
+        return None
+
+
+def _record_path(script_path: str) -> str:
+    return os.path.splitext(script_path)[0] + ".report.json"
+
+
+def _record(report: dict[str, Any], *, script_path: str, graph_path: str) -> str | None:
+    """Persist a verification next to the controller it verified.
+
+    `verify` is the expensive step — it plays the scene for its full duration
+    in real time — and it was being paid for twice, once by the agent that
+    wrote the controller and again by the agent checking that agent's work.
+    The second run is not what makes the check independent; the measurement is
+    already model-free. What the checker actually needs is the numbers, plus
+    enough fingerprint to know they still describe the stage in front of it.
+    """
+    stamped = dict(report)
+    stamped["script_path"] = script_path
+    stamped["script_sha256"] = _digest(script_path)
+    stamped["graph_path"] = graph_path
+    destination = _record_path(script_path)
+    try:
+        with open(destination, "w", encoding="utf-8") as handle:
+            json.dump(stamped, handle, indent=2)
+    except OSError:
+        logger.debug("Could not record the report to %s", destination, exc_info=True)
+        return None
+    return destination
+
+
+def _latest_record() -> str | None:
+    newest, newest_time = None, -1.0
+    for directory in _CANDIDATE_DIRECTORIES:
+        for candidate in glob.glob(os.path.join(directory, "*.report.json")):
+            try:
+                stamp = os.path.getmtime(candidate)
+            except OSError:
+                continue
+            if stamp > newest_time:
+                newest, newest_time = candidate, stamp
+    return newest
+
+
+def audit(name: str | None = None) -> dict[str, Any]:
+    """Re-check a recorded verification against the stage, without replaying it.
+
+    Answers the question a checker actually has — *does the scene in front of
+    me still do what that report says it does* — for the cost of a few file
+    reads instead of a full playback.
+
+    `current` is True only when the recorded run still describes this stage:
+    the controller on disk is byte-for-byte the one that was measured, the
+    graph is still present, and it is still wired to that same script through
+    `usePath`. Any of those failing puts the reason in `stale_because` and the
+    report has to be earned again with `verify`.
+
+    A `current: True` record is a measurement, not a claim — `verify` runs no
+    model. Read its numbers and decide for yourself whether they support what
+    was asserted; that is the part worth doing twice, and it is not the part
+    that costs minutes.
+    """
+    if name:
+        path = name if name.endswith(".report.json") else None
+        if path is None:
+            stem = name[:-3] if name.endswith(".py") else name
+            for directory in _CANDIDATE_DIRECTORIES:
+                candidate = os.path.join(directory, f"{stem}.report.json")
+                if os.path.isfile(candidate):
+                    path = candidate
+                    break
+    else:
+        path = _latest_record()
+
+    if not path or not os.path.isfile(path):
+        return {
+            "found": False,
+            "current": False,
+            "stale_because": ["no recorded verification"],
+            "hint": (
+                "Nothing has been delivered through controller.deliver() in a way "
+                "that recorded its result. Run controller.verify(...) yourself."
+            ),
+        }
+
+    with open(path, encoding="utf-8") as handle:
+        report = json.load(handle)
+
+    reasons: list[str] = []
+    script_path = report.get("script_path") or ""
+    graph_path = report.get("graph_path") or ""
+
+    if not os.path.isfile(script_path):
+        reasons.append(f"the controller {script_path} is gone")
+    elif _digest(script_path) != report.get("script_sha256"):
+        reasons.append(f"{script_path} has been edited since it was verified")
+
+    wired = _wired_script(graph_path)
+    if wired is None:
+        reasons.append(f"no graph at {graph_path} is running a script")
+    elif os.path.abspath(wired) != os.path.abspath(script_path):
+        reasons.append(f"{graph_path} now runs {wired}, not the script that was verified")
+
+    duplicates = [
+        entry["graph"]
+        for entry in graphs()
+        if entry["script"]
+        and os.path.abspath(entry["script"]) == os.path.abspath(script_path)
+        and entry["graph"] != graph_path
+    ]
+    if duplicates:
+        reasons.append(
+            f"{', '.join(duplicates)} also runs this controller — the scene is "
+            f"driving the robot from more than one graph"
+        )
+
+    report["found"] = True
+    report["record_path"] = path
+    report["current"] = not reasons
+    report["stale_because"] = reasons
+    return report
+
+
 def deliver(
     name: str,
     code: str,
@@ -277,6 +472,7 @@ def deliver(
     report = verify(seconds=seconds, objects=objects, robots=robots)
     report["controller_path"] = path
     report["graph_path"] = graph_path
+    report["record_path"] = _record(report, script_path=path, graph_path=graph_path)
     if report.get("diverged"):
         report["hint"] = (
             f"{', '.join(report['diverged'])} left the world, which means the "
@@ -295,6 +491,40 @@ def deliver(
             "get_isaac_logs shows anything the script printed or raised."
         )
     return report
+
+
+def _is_articulation(path: str) -> bool:
+    from pxr import UsdPhysics
+
+    from ._compat import get_stage
+
+    prim = get_stage().GetPrimAtPath(path)
+    return bool(prim.IsValid() and prim.HasAPI(UsdPhysics.ArticulationRootAPI))
+
+
+def _split_by_kind(
+    objects: list[str] | None, robots: list[str] | None
+) -> tuple[list[str], list[str], list[str]]:
+    """Sort requested paths into rigid bodies and articulations.
+
+    A robot path in `objects` was originally an error, because measuring one as
+    a rigid body applies RigidBodyAPI to the articulation root and throws the
+    robot out of the world. Refusing was the right call and the wrong ergonomic:
+    the caller cannot see the difference from the outside — both are just prims
+    it wants the state of — so the error was reliably hit and reliably cost two
+    turns to correct. The stage already knows which is which. Sort them here and
+    report it in `rerouted` rather than making the caller guess and retry.
+    """
+    requested_objects = list(objects or [])
+    requested_robots = list(robots or [])
+
+    rerouted = [path for path in requested_objects if _is_articulation(path)]
+    if rerouted:
+        moved = set(rerouted)
+        requested_objects = [p for p in requested_objects if p not in moved]
+        requested_robots += [p for p in rerouted if p not in requested_robots]
+        logger.info("Measuring %s as robots, not rigid bodies", ", ".join(rerouted))
+    return requested_objects, requested_robots, rerouted
 
 
 def _sample(objects: dict[str, Any], robots: dict[str, Any]) -> dict[str, Any]:
@@ -343,19 +573,20 @@ def verify(
     timeline = get_timeline()
 
     scene.stop()
-    # Fail before touching anything: a robot path in `objects` used to be
-    # silently destructive, and the resulting explosion then read as "something
-    # moved", i.e. as success.
+    # Sort before touching anything. Wrapping an articulation root as a rigid
+    # body is silently destructive, and the resulting explosion then reads as
+    # "something moved", i.e. as success — so the split has to happen before the
+    # first handle is built, not as a rescue afterwards.
+    body_paths, robot_paths, rerouted = _split_by_kind(objects, robots)
     handles_objects: dict[str, Any] = {}
-    for path in objects or []:
+    for path in body_paths:
         try:
             handles_objects[path] = RigidObject(path, scene=scene)
         except ValueError as exc:
             raise ControllerError(
-                f"objects={path!r} cannot be measured as a rigid body.\n\n{exc}\n\n"
-                f"Pass robots=[{path!r}] instead if you meant the robot."
+                f"objects={path!r} cannot be measured as a rigid body.\n\n{exc}"
             ) from exc
-    handles_robots = {p: Robot(p, scene=scene) for p in robots or []}
+    handles_robots = {p: Robot(p, scene=scene) for p in robot_paths}
     before = _sample(handles_objects, handles_robots)
 
     scene.play()
@@ -399,7 +630,7 @@ def verify(
         and (entry["position"][2] < -1.0 or max(abs(v) for v in entry["position"]) > 50.0)
     )
 
-    return {
+    report = {
         "moved": sorted(moved),
         "reproduced": bool(moved) and not diverged,
         "diverged": diverged,
@@ -408,3 +639,12 @@ def verify(
         "before": before,
         "after": after,
     }
+    if rerouted:
+        report["rerouted"] = rerouted
+        report["note"] = (
+            f"Routed to robots rather than rigid bodies: {', '.join(rerouted)} "
+            f"(articulation roots). A robot reports joint positions and never "
+            f"counts towards `moved` — the scene has to move the objects, not "
+            f"just wave the arm."
+        )
+    return report
