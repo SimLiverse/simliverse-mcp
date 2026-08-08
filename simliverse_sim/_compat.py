@@ -131,9 +131,44 @@ def get_timeline() -> Any:
     return omni.timeline.get_timeline_interface()
 
 
+def articulation_root(prim_path: str) -> str:
+    """The prim that actually carries ArticulationRootAPI, at or below `prim_path`.
+
+    A robot is referenced onto the stage at a path of the caller's choosing, and
+    only sometimes is that path the articulation root. ANYmal puts it on
+    `<robot>/base`; so, presumably, does anything else authored the same way.
+    Asking PhysX for the articulation at the reference path then fails with
+    "Failed to get root link transforms from backend", several frames inside the
+    tensor API, which names neither the prim nor the reason and reads as a
+    corrupt asset — the ANYmal that produced it had loaded perfectly, with all
+    17 joints and 18 bodies present.
+
+    Searching one level of nesting costs a traversal and removes a whole class
+    of robot from the "mysteriously broken" pile.
+    """
+    from pxr import UsdPhysics
+
+    stage = get_stage()
+    prim = stage.GetPrimAtPath(prim_path)
+    if not prim.IsValid() or prim.HasAPI(UsdPhysics.ArticulationRootAPI):
+        return prim_path
+
+    for child in prim.GetChildren():
+        if child.HasAPI(UsdPhysics.ArticulationRootAPI):
+            resolved = str(child.GetPath())
+            logger.info("Articulation root for %s is %s", prim_path, resolved)
+            return resolved
+
+    for descendant in prim.GetAllChildren() if hasattr(prim, "GetAllChildren") else []:
+        if descendant.HasAPI(UsdPhysics.ArticulationRootAPI):
+            return str(descendant.GetPath())
+    return prim_path
+
+
 def single_articulation(prim_path: str, name: str | None = None) -> Any:
     from isaacsim.core.prims import SingleArticulation
 
+    prim_path = articulation_root(prim_path)
     try:
         return SingleArticulation(prim_path=prim_path, name=name or prim_path.rsplit("/", 1)[-1])
     except AttributeError as exc:
