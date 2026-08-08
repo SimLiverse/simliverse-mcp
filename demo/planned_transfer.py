@@ -14,18 +14,23 @@ registered for *planning only* — the tool never goes near them under servo
 control, so giving them to the policy costs accuracy and buys nothing.
 """
 
-(WARMUP, INIT, OPEN, PLAN_PICK, GOTO_PICK, HOVER, DESCEND, CLOSE, LIFT,
+(WARMUP, INIT, OPEN, PLAN_PICK, GOTO_PICK, HOVER, DESCEND, CLOSE, LIFT, GOTO_LIFT,
  PLAN_PLACE, GOTO_PLACE, LOWER, RELEASE, PLAN_CLEAR, GOTO_CLEAR,
- NEXT, DONE, FAILED) = range(18)
+ NEXT, DONE, FAILED) = range(19)
 
-NAMES = ["WARMUP", "INIT", "OPEN", "PLAN_PICK", "GOTO_PICK", "HOVER", "DESCEND", "CLOSE", "LIFT", "PLAN_PLACE", "GOTO_PLACE", "LOWER", "RELEASE", "PLAN_CLEAR",
+NAMES = ["WARMUP", "INIT", "OPEN", "PLAN_PICK", "GOTO_PICK", "HOVER", "DESCEND", "CLOSE", "LIFT", "GOTO_LIFT", "PLAN_PLACE", "GOTO_PLACE", "LOWER", "RELEASE", "PLAN_CLEAR",
          "GOTO_CLEAR", "NEXT", "DONE", "FAILED"]
 TRACE_PATH = "/tmp/ctl_trace.log"
 
 DOWN = [0.0, 1.0, 0.0, 0.0]      # tool z pointing at the table
 HOVER_Z = 0.16                   # above the cube, where the plan hands over
 GRASP_Z = 0.030                  # fingertips around a 4 cm cube
-PLACE_HOVER = 0.32               # well clear of the platform, so the plan may end there
+# Just outside the planner's margin around the platform (top 0.10 + 0.06),
+# and no further. Everything between here and the surface is servoed, and
+# the reactive policy is fighting the post's field the whole way — a 17 cm
+# descent from 0.32 stalled with 27 cm of error and drifted off carrying the
+# cube. Keep the reactive segment as short as the margin allows.
+PLACE_HOVER = 0.19
 # Lift the object clear before planning the transfer. Right for any
 # pick-and-place — you do not drag a grasped object across a surface — and
 # it also plans far better: from down at the table the same transfer took
@@ -38,7 +43,8 @@ LIMIT = 900
 FINE = 0.007
 
 POST = "/World/Post"
-OBSTACLES = [POST, "/World/Platform"]
+PLATFORM = "/World/Platform"
+OBSTACLES = [POST, PLATFORM]
 JOBS = [
     {"cube": "/World/CubeA", "place": [0.42, 0.34]},
     {"cube": "/World/CubeB", "place": [0.50, 0.34]},
@@ -51,6 +57,7 @@ _arm = None
 _cubes = None
 _pick = None
 _plan = None
+_hit = None      # the state that first touched something it must not
 
 
 def _trace(line):
@@ -99,6 +106,7 @@ def _on_timeline(event):
     if event.type == int(omni.timeline.TimelineEventType.STOP):
         _state, _frame, _job = WARMUP, 0, 0
         _arm, _cubes, _pick, _plan = None, None, None, None
+        globals()['_hit'] = None
         open(TRACE_PATH, "w", encoding="utf-8").close()
 
 
@@ -114,10 +122,26 @@ def setup(db=None):
         _timeline_sub = stream.create_subscription_to_pop(_on_timeline)
 
 
+def _watch_post():
+    """Name the state that first touches the post. One line of evidence."""
+    global _hit
+    if _hit is not None or _arm is None:
+        return
+    from simliverse_sim import RigidObject, Scene
+
+    bodies = RigidObject(POST, scene=Scene.get()).contact_bodies()
+    hits = sorted(b for b in bodies if b.startswith("/World/Franka"))
+    if hits:
+        _hit = NAMES[_state]
+        _trace("  FIRST POST CONTACT during %s (job=%d frame=%d) by %s"
+               % (_hit, _job, _frame, ", ".join(hits)))
+
+
 def compute(db=None):
     """One frame, one transition. Never loops, never steps physics."""
     global _state
     try:
+        _watch_post()
         return _compute(db)
     except Exception:
         import traceback
@@ -210,17 +234,34 @@ def _compute(db=None):
         if _frame == 1:
             _arm.gripper.close()  # non-blocking: never step inside compute()
         if _frame >= GRIP_FRAMES:
+            # Give the post back to the reactive policy BEFORE the lift, not
+            # after. Measured: link5 first contacts the post 26 frames into
+            # LIFT. The tool rises 23 cm away from it and the elbow does not —
+            # servo_to steers the end effector and lets the arm behind it go
+            # where it likes, so an obstacle nowhere near the tool is still very
+            # much near the robot. The field bias that made hiding it necessary
+            # only ever mattered for the fine descent onto the cube.
+            _arm.remove_obstacle(POST)
+            _arm.add_obstacle(POST)
             _go(LIFT)
         return True
 
     if _state == LIFT:
-        # Straight up, no obstacle anywhere near: the reactive policy is the
-        # right tool and planning a vertical retreat would be ceremony.
-        if _arm.servo_to([_pick[0], _pick[1], TRANSIT_Z], DOWN, tolerance=0.012) or _timeout():
-            # Clear of the cube now; give the post back to the servo before any
-            # motion that takes the arm over it.
-            _arm.remove_obstacle(POST)
-            _arm.add_obstacle(POST)
+        # Plan the lift; do not servo it.
+        #
+        # Raising the tool 37 cm is gross motion through the workspace, not a
+        # final approach, and it was misfiled as the latter. Both ways of
+        # servoing it fail, which is what makes the classification the bug: with
+        # the post hidden from the reactive policy, link5 sweeps through it as
+        # the elbow comes up; with the post visible, the policy wedges against
+        # its own repulsion and drives the arm back to x=0.02 instead of up.
+        # The planner reasons about the whole arm and about a route, and has
+        # neither failure.
+        _plan_to([_pick[0], _pick[1], TRANSIT_Z], GOTO_LIFT)
+        return True
+
+    if _state == GOTO_LIFT:
+        if _arm.follow(_plan) or _timeout():
             _go(PLAN_PLACE)
         return True
 
@@ -232,6 +273,18 @@ def _compute(db=None):
 
     if _state == GOTO_PLACE:
         if _arm.follow(_plan) or _timeout():
+            # Hide the platform from the reactive policy for the descent onto
+            # it. A registered obstacle is somewhere RMPflow will not take the
+            # tool, and the place target is 3.5 cm above the platform's top —
+            # so the policy fights the last move of every place, stalls with
+            # 30 cm of error and drifts away carrying the cube. Same rule as the
+            # post during the pick: whatever the tool must approach cannot be in
+            # the reactive set while it approaches it. The planner still has it.
+            # The platform only: the tool has to approach it, so it cannot be
+            # in the reactive set. The post stays, because the arm still swings
+            # near it while reaching across and nothing else protects the links.
+            _arm.remove_obstacle(PLATFORM)
+            _arm.add_obstacle(PLATFORM, reactive=False)
             _go(LOWER)
         return True
 
@@ -248,11 +301,19 @@ def _compute(db=None):
         return True
 
     if _state == PLAN_CLEAR:
-        _plan_to([px, py, PLACE_HOVER], GOTO_CLEAR)
-        return True
-
-    if _state == GOTO_CLEAR:
-        if _arm.follow(_plan) or _timeout():
+        # Servo out, do not plan out.
+        #
+        # After releasing, the tool sits ~4 cm above the platform, which is
+        # inside the planner's safety margin around it — so there is no
+        # collision-free route out, and asking for one fails with "walled off by
+        # an obstacle" while the arm is in perfectly good shape. The margin that
+        # keeps a plan clear of a surface is exactly what makes a pose next to
+        # that surface unplannable. Retreat with the reactive policy until the
+        # arm is somewhere the planner considers free, then plan.
+        if _arm.servo_to([px, py, PLACE_HOVER], DOWN, tolerance=0.015) or _timeout():
+            # Clear of the platform; hand it back before anything transits.
+            _arm.remove_obstacle(PLATFORM)
+            _arm.add_obstacle(PLATFORM)
             _go(NEXT)
         return True
 

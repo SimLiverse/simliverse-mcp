@@ -687,10 +687,20 @@ def verify(
     # that is struck and comes to rest somewhere plausible is invisible to a
     # before/after comparison of that body alone; the contact is the evidence.
     touched: dict[str, set[str]] = {p: set() for p in keep_still}
+    first_touch: dict[str, float] = {}
     while timeline.get_current_time() - start < seconds + settle:
         update_app()
         for path, obj in keep_still.items():
-            touched[path].update(obj.contact_bodies())
+            bodies = obj.contact_bodies()
+            touched[path].update(bodies)
+            # *When* it was first hit is what turns "the arm touched the post"
+            # into a state you can look at. Filtered to the robot, because a
+            # body resting on the ground is in contact from the first frame and
+            # would otherwise stamp every obstacle at t=0.
+            if path not in first_touch and any(
+                b.startswith(r) for b in bodies for r in handles_robots
+            ):
+                first_touch[path] = round(timeline.get_current_time() - start, 2)
         ticks += 1
         if ticks > 200_000:  # a stopped timeline would otherwise spin forever
             raise ControllerError(
@@ -729,10 +739,11 @@ def verify(
     disturbed = {}
     for path, obj in keep_still.items():
         shift = float(np.linalg.norm(np.asarray(obj.position, dtype=float) - before_still[path]))
-        if shift > 0.005:
+        if shift > 0.005 or path in first_touch:
             hits = _by_robot(touched[path], handles_robots)
             disturbed[path] = {
                 "moved_by": round(shift, 4),
+                "first_touched_at": first_touch.get(path),
                 "from": before_still[path].round(4).tolist(),
                 "to": np.asarray(obj.position, dtype=float).round(4).tolist(),
                 "touched_by": hits,
