@@ -230,17 +230,50 @@ def attach(script_path: str, *, graph_path: str = "/World/TaskGraph") -> str:
         logger.info("Replacing existing action graph at %s", graph_path)
         stage.RemovePrim(graph_path)
 
+    # Trigger on the *physics* step, not the playback tick.
+    #
+    # OnPlaybackTick fires once per app update, which is the render rate. That
+    # happens to equal the physics rate when the app is pumped headless, and does
+    # not when someone presses Play and the viewport is drawing. Control code
+    # written against it then runs at whatever the frame rate is: a servo loop
+    # gets fewer corrections, and a trajectory gets commanded in coarse jumps
+    # that the arm cuts across in joint space.
+    #
+    # That is not hypothetical. Driving this scene's controller at a third of
+    # the physics rate knocked the obstacle 25 cm across the table and left both
+    # cubes on the floor, while the report still said reproduced: True — the same
+    # task passes cleanly at 1:1. Any control law that assumes a fixed timestep
+    # belongs on the timestep.
     keys = og.Controller.Keys
-    graph, nodes, _, _ = og.Controller.edit(
-        {"graph_path": graph_path, "evaluator_name": "push"},
-        {
-            keys.CREATE_NODES: [
-                ("OnPlaybackTick", "omni.graph.action.OnPlaybackTick"),
-                ("ScriptNode", "omni.graph.scriptnode.ScriptNode"),
-            ],
-            keys.CONNECT: [("OnPlaybackTick.outputs:tick", "ScriptNode.inputs:execIn")],
-        },
-    )
+    trigger, pulse = "isaacsim.core.nodes.OnPhysicsStep", "outputs:step"
+    try:
+        graph, nodes, _, _ = og.Controller.edit(
+            {"graph_path": graph_path, "evaluator_name": "push"},
+            {
+                keys.CREATE_NODES: [
+                    ("Trigger", trigger),
+                    ("ScriptNode", "omni.graph.scriptnode.ScriptNode"),
+                ],
+                keys.CONNECT: [(f"Trigger.{pulse}", "ScriptNode.inputs:execIn")],
+            },
+        )
+    except Exception:
+        logger.warning(
+            "%s is unavailable; falling back to OnPlaybackTick. The controller "
+            "will run at the render rate, so its motion depends on frame rate.",
+            trigger,
+        )
+        stage.RemovePrim(graph_path)
+        graph, nodes, _, _ = og.Controller.edit(
+            {"graph_path": graph_path, "evaluator_name": "push"},
+            {
+                keys.CREATE_NODES: [
+                    ("Trigger", "omni.graph.action.OnPlaybackTick"),
+                    ("ScriptNode", "omni.graph.scriptnode.ScriptNode"),
+                ],
+                keys.CONNECT: [("Trigger.outputs:tick", "ScriptNode.inputs:execIn")],
+            },
+        )
     if graph is None:
         raise ControllerError(f"Could not create an action graph at {graph_path!r}")
 

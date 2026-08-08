@@ -142,6 +142,14 @@ class CuMotionPlanner:
     keep in sync.
     """
 
+    #: Metres of clearance demanded around every obstacle, over and above its
+    #: geometry. A plan is collision-free for the *planned* joint path, and the
+    #: arm does not follow that path exactly — PD drives lag, and lag is largest
+    #: exactly where the trajectory is fastest. Without a margin the tracked
+    #: path can clip an obstacle the plan cleared by millimetres, which presents
+    #: as "the planner drove into the thing it was avoiding".
+    DEFAULT_SAFETY_MARGIN = 0.02
+
     def __init__(
         self,
         robot_name: str,
@@ -149,6 +157,7 @@ class CuMotionPlanner:
         *,
         obstacles: Callable[[], Sequence[str]] | None = None,
         tool_frame: str | None = None,
+        safety_margin: float | None = None,
     ) -> None:
         if not available():
             raise PlanningUnavailable(
@@ -161,6 +170,9 @@ class CuMotionPlanner:
         self.joint_names = list(joint_names)
         self._obstacles = obstacles or (lambda: [])
         self._tool_frame = tool_frame
+        self.safety_margin = (
+            self.DEFAULT_SAFETY_MARGIN if safety_margin is None else float(safety_margin)
+        )
 
         self._robot = self._load_robot(robot_name)
         # cuMotion plans its own joint set, which is the arm without the
@@ -202,9 +214,15 @@ class CuMotionPlanner:
         if self._planner is not None and wanted == self._bound_obstacles:
             return
 
+        strategy = mg.ObstacleStrategy()
+        try:
+            strategy.set_default_safety_tolerance(self.safety_margin)
+        except Exception:
+            logger.debug("Could not set the planner safety margin", exc_info=True)
+
         binding = mg.WorldBinding(
             world_interface=cu_mg.CumotionWorldInterface(),
-            obstacle_strategy=mg.ObstacleStrategy(),
+            obstacle_strategy=strategy,
             tracked_prims=list(wanted),
             tracked_collision_api=mg.TrackableApi.PHYSICS_COLLISION,
         )

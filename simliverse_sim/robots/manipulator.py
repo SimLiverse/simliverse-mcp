@@ -350,6 +350,9 @@ class Manipulator(Robot):
         self._planner: Any = None
         self._plan: Any = None
         self._plan_time = 0.0
+        self._plan_clock = 0.0
+        self._plan_command: Any = None
+        self._plan_lag = 0.0
         self._servo_target: Any = None
         self._servo_orientation: Any = None
         self._servo_settled = 0
@@ -617,32 +620,95 @@ class Manipulator(Robot):
             as_quat(orientation) if orientation is not None else None,
         )
 
-    def follow(self, plan: Any, *, restart: bool = False) -> bool:
+    def follow(
+        self,
+        plan: Any,
+        *,
+        restart: bool = False,
+        lag_tolerance: float = 0.12,
+        max_step: float = 0.05,
+    ) -> bool:
         """Advance one control tick along a plan. Returns True when it is done.
 
         Same contract as `servo_to` — one tick, no blocking, no stepping — so a
         controller state that plans instead of servoing keeps exactly the same
-        shape. The clock advances by the scene's physics step per call rather
-        than by wall time, so a replay is deterministic.
+        shape.
+
+        Two things keep the *tracked* motion close to the *planned* one, which
+        is the whole safety argument for planning at all. A plan that is
+        collision-free on paper buys nothing if the arm takes a shortcut across
+        it.
+
+          * **The clock is read from the timeline, not accumulated.** Adding a
+            fixed `dt` per call silently assumes one call per physics step.
+            That happens to hold when the app is pumped headless and does not
+            hold when someone presses Play, where `compute` runs at the render
+            rate. Get it wrong in the fast direction and the commanded state
+            runs ahead of the arm, which is exactly a cut corner.
+          * **The clock stalls while the arm is behind.** If the measured joints
+            are more than `lag_tolerance` radians from what was last commanded,
+            time does not advance this tick. The arm is allowed to catch up
+            rather than being handed a target further along a curve it has not
+            reached — standard practice for trajectory following on hardware,
+            and the reason a slow tick makes the motion slower instead of
+            straighter.
+
+        An arm that can never catch up will never finish; that is what the
+        calling state's own timeout is for, and it is the right failure to have
+        rather than a collision.
         """
         if restart or self._plan is not plan:
             self._plan = plan
             self._plan_time = 0.0
-
-        dt = getattr(self.scene, "dt", None) or 1.0 / 60.0
-        self._plan_time += float(dt)
-        positions, velocities = plan.sample(self._plan_time)
+            self._plan_clock = self._sim_time()
 
         index = {name: i for i, name in enumerate(self.joint_names)}
         indices = np.asarray([index[n] for n in plan.joint_names], dtype=int)
+        measured = np.asarray(self.joint_positions, dtype=float)[indices]
+
+        now = self._sim_time()
+        elapsed = max(0.0, now - self._plan_clock)
+        self._plan_clock = now
+
+        # Lag is measured against the plan, never against the last command.
+        # Comparing with the command is self-defeating once the command is
+        # clamped: the arm is always near the clamped target by construction, so
+        # the clock advances anyway, the plan runs away, and the final sample
+        # drags the arm to the end pose in a straight line through everything
+        # the route went around. Which is precisely the collision this exists to
+        # prevent, arrived at by a different road.
+        sample, velocities = plan.sample(self._plan_time)
+        self._plan_lag = float(np.max(np.abs(measured - sample))) if sample.size else 0.0
+        if self._plan_lag <= lag_tolerance:
+            self._plan_time += elapsed
+            sample, velocities = plan.sample(self._plan_time)
+
+        # Never command a pose further than `max_step` from where the arm is.
+        # A plan is collision-free along its path, not along the chord between
+        # two samples of it, and a slow tick samples it coarsely.
+        step = sample - measured
+        distance = float(np.max(np.abs(step))) if step.size else 0.0
+        scale = min(1.0, max_step / distance) if distance > max_step else 1.0
+        self._plan_command = measured + step * scale
+
         self._controller().apply_action(
             articulation_action(
-                joint_positions=np.asarray(positions, dtype=float),
-                joint_velocities=np.asarray(velocities, dtype=float),
+                joint_positions=self._plan_command,
+                joint_velocities=np.asarray(velocities, dtype=float) * scale,
                 joint_indices=indices,
             )
         )
-        return self._plan_time >= plan.duration
+        return self._plan_time >= plan.duration and self._plan_lag <= lag_tolerance
+
+    def _sim_time(self) -> float:
+        """Simulated seconds since the timeline started."""
+        from .._compat import get_timeline
+
+        try:
+            return float(get_timeline().get_current_time())
+        except Exception:
+            logger.debug("No timeline; falling back to the physics step", exc_info=True)
+            return self._plan_clock + (getattr(self.scene, "dt", None) or 1.0 / 60.0)
 
     def move_along(self, plan: Any, *, settle: int = 30) -> bool:
         """Follow a plan to completion, stepping physics. For exploration only.
