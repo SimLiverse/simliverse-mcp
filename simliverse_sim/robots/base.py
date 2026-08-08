@@ -172,6 +172,7 @@ class Robot:
             self.scene.step(4)
         self._articulation.initialize()
 
+        self._root_body: Any = None
         self.groups = JointGroups.classify(self.joint_names)
 
     @staticmethod
@@ -225,11 +226,34 @@ class Robot:
 
     @property
     def joint_positions(self) -> np.ndarray:
-        return np.asarray(self._articulation.get_joint_positions(), dtype=float)
+        return self._joint_state("get_joint_positions", "positions")
 
     @property
     def joint_velocities(self) -> np.ndarray:
-        return np.asarray(self._articulation.get_joint_velocities(), dtype=float)
+        return self._joint_state("get_joint_velocities", "velocities")
+
+    def _joint_state(self, method: str, kind: str) -> np.ndarray:
+        """Joint state, rebuilding the articulation view if it has gone stale.
+
+        The tensor backend can refuse a view that was built across a timeline
+        cycle — "Failed to get DOF positions from backend", raised from inside
+        the physics API, naming neither the robot nor the reason. It is the same
+        failure that made a quadruped's `stand()` unusable while the identical
+        articulation, bound freshly, answered immediately.
+
+        So the view is rebuilt once and the read retried. If that fails too the
+        problem is real rather than stale, and the original error is what the
+        caller should see.
+        """
+        try:
+            return np.asarray(getattr(self._articulation, method)(), dtype=float)
+        except Exception:
+            logger.debug("Rebuilding the articulation view for %s", self.prim_path,
+                         exc_info=True)
+
+        self._articulation = single_articulation(self.prim_path)
+        self._articulation.initialize()
+        return np.asarray(getattr(self._articulation, method)(), dtype=float)
 
     @property
     def joint_limits(self) -> list[tuple[float | None, float | None]]:
@@ -287,24 +311,71 @@ class Robot:
 
     # ── Base pose ─────────────────────────────────────────────────────────────
 
+    def _root_pose(self) -> tuple[np.ndarray, np.ndarray]:
+        """World pose of the articulation root, from whichever source can answer.
+
+        Three sources, tried in order of how much they can be trusted, because
+        each of them has been observed failing on a different robot:
+
+        1. **The articulation view.** Correct when it works, and it does not
+           always: a quadruped spawned through the library raises "Failed to get
+           root link transforms from backend" from inside the tensor API, while
+           the identical articulation referenced by hand answers fine. The view
+           built during the spawn's timeline cycling is the broken one.
+        2. **The root link as a rigid body.** The physics pose of the same body,
+           by a different route, and it answered every time the view above did
+           not.
+        3. **USD.** Last, because physics results are not written back to USD
+           for every articulation — a Ridgeback reports a constant 0.308 for a
+           link that physics has at 1.44, before or after a transform sync.
+
+        `base_orientation` used to have no fallback at all, so a robot whose
+        view was unusable could not report which way up it was, and every
+        legged check — `is_upright`, `tilt_degrees`, `describe` — raised from
+        four frames down with a message about tensor backends.
+        """
+        try:
+            position, quaternion = self._articulation.get_world_pose()
+            return np.asarray(position, dtype=float), np.asarray(quaternion, dtype=float)
+        except Exception:
+            logger.debug("Articulation view has no root pose for %s", self.prim_path,
+                         exc_info=True)
+
+        try:
+            from .._compat import articulation_root
+
+            if self._root_body is None:
+                from isaacsim.core.prims import SingleRigidPrim
+
+                self._root_body = SingleRigidPrim(prim_path=articulation_root(self.prim_path))
+                self._root_body.initialize()
+            position, quaternion = self._root_body.get_world_pose()
+            return np.asarray(position, dtype=float), np.asarray(quaternion, dtype=float)
+        except Exception:
+            logger.debug("Root body has no pose for %s", self.prim_path, exc_info=True)
+
+        from pxr import Gf, UsdGeom
+
+        matrix = UsdGeom.Xformable(
+            get_stage().GetPrimAtPath(self.prim_path)
+        ).ComputeLocalToWorldTransform(0)
+        rotation = Gf.Transform(matrix).GetRotation().GetQuat()
+        imaginary = rotation.GetImaginary()
+        return (
+            np.asarray(matrix.ExtractTranslation(), dtype=float),
+            np.asarray(
+                [rotation.GetReal(), imaginary[0], imaginary[1], imaginary[2]], dtype=float
+            ),
+        )
+
     @property
     def base_position(self) -> np.ndarray:
         """World position of the articulation root."""
-        try:
-            position, _ = self._articulation.get_world_pose()
-            return np.asarray(position, dtype=float)
-        except Exception:
-            from pxr import UsdGeom
-
-            matrix = UsdGeom.Xformable(
-                get_stage().GetPrimAtPath(self.prim_path)
-            ).ComputeLocalToWorldTransform(0)
-            return np.asarray(matrix.ExtractTranslation(), dtype=float)
+        return self._root_pose()[0]
 
     @property
     def base_orientation(self) -> np.ndarray:
-        _, quaternion = self._articulation.get_world_pose()
-        return np.asarray(quaternion, dtype=float)
+        return self._root_pose()[1]
 
     def set_base_pose(self, position: Any = None, orientation: Any = None) -> None:
         self._articulation.set_world_pose(
