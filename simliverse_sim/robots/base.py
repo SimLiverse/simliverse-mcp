@@ -189,6 +189,7 @@ class Robot:
         self._articulation.initialize()
 
         self._root_body: Any = None
+        self._pose_source = "unknown"
         self.groups = JointGroups.classify(self.joint_names)
 
     @staticmethod
@@ -352,6 +353,7 @@ class Robot:
         """
         try:
             position, quaternion = self._articulation.get_world_pose()
+            self._pose_source = "articulation"
             return np.asarray(position, dtype=float), np.asarray(quaternion, dtype=float)
         except Exception:
             logger.debug("Articulation view has no root pose for %s", self.prim_path,
@@ -366,10 +368,17 @@ class Robot:
                 self._root_body = SingleRigidPrim(prim_path=articulation_root(self.prim_path))
                 self._root_body.initialize()
             position, quaternion = self._root_body.get_world_pose()
+            self._pose_source = "root body"
             return np.asarray(position, dtype=float), np.asarray(quaternion, dtype=float)
         except Exception:
             logger.debug("Root body has no pose for %s", self.prim_path, exc_info=True)
 
+        # Neither physics source could answer, so this is the authored pose:
+        # what the scene was built with, not where the robot is. Recorded so
+        # `asset_problems` can say so — a humanoid reporting exactly its spawn
+        # height and exactly zero tilt after three seconds of settling is not
+        # standing still, it is not being simulated.
+        self._pose_source = "usd (authored)"
         from pxr import Gf, UsdGeom
 
         matrix = UsdGeom.Xformable(
@@ -578,6 +587,22 @@ class Robot:
                 ),
             })
 
+        self.base_position  # refresh `_pose_source`
+        if self._pose_source == "usd (authored)":
+            problems.append({
+                "issue": "physics cannot see this robot",
+                "detail": (
+                    "neither the articulation view nor the root body would report a "
+                    "pose, so positions come from the authored USD transform"
+                ),
+                "consequence": (
+                    "Every pose reading is the value the scene was built with, not "
+                    "where the robot is: it will report itself upright and at its "
+                    "spawn height forever, including while it falls over. Joint "
+                    "commands will not be tracked either. The articulation is not "
+                    "registered with PhysX."
+                ),
+            })
         problems.extend(self._pose_feedback_problems())
         return problems
 

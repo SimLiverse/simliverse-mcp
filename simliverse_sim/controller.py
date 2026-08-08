@@ -572,6 +572,7 @@ def deliver(
     robots: list[str] | None = None,
     undisturbed: list[str] | None = None,
     traveled: list[str] | None = None,
+    posed: list[str] | None = None,
     seconds: float = 30.0,
     graph_path: str = "/World/TaskGraph",
 ) -> dict[str, Any]:
@@ -614,7 +615,7 @@ def deliver(
         )
     attach(path, graph_path=graph_path)
     report = verify(seconds=seconds, objects=objects, robots=robots,
-                    undisturbed=undisturbed, traveled=traveled)
+                    undisturbed=undisturbed, traveled=traveled, posed=posed)
     report["controller_path"] = path
     report["graph_path"] = graph_path
     report["record_path"] = _record(report, script_path=path, graph_path=graph_path)
@@ -793,6 +794,7 @@ def verify(
     robots: list[str] | None = None,
     undisturbed: list[str] | None = None,
     traveled: list[str] | None = None,
+    posed: list[str] | None = None,
     settle: float = 2.0,
     scene: Any = None,
 ) -> dict[str, Any]:
@@ -848,8 +850,10 @@ def verify(
     handles_robots = {p: Robot.attach(p, scene=scene) for p in robot_paths}
     keep_still = {p: RigidObject(p, scene=scene) for p in (undisturbed or [])}
     movers = {p: Robot.attach(p, scene=scene) for p in (traveled or [])}
+    posers = {p: Robot.attach(p, scene=scene) for p in (posed or [])}
     before = _sample(handles_objects, handles_robots)
     before_still = {p: np.asarray(o.position, dtype=float) for p, o in keep_still.items()}
+    before_pose = {p: np.asarray(r.joint_positions, dtype=float) for p, r in posers.items()}
     before_travel = {
         p: (_body_position(r),
             np.asarray(r.joint_positions, dtype=float))
@@ -958,17 +962,41 @@ def verify(
             "under_own_power": bool(distance > 0.05 and joint_delta > 0.05),
         }
 
+    # A robot that was supposed to change shape rather than place. Posture is a
+    # real outcome — standing, reaching, holding a limb somewhere — and it moves
+    # nothing else in the scene, so a working posture controller reported
+    # `reproduced: False` with an empty `moved` and no way to say otherwise.
+    posture = {}
+    for path, robot in posers.items():
+        # Not `start`: that name holds the timeline's start time in this scope,
+        # and shadowing it turned `simulated_seconds` into an array.
+        was = before_pose[path]
+        now = np.asarray(robot.joint_positions, dtype=float)
+        delta = float(np.max(np.abs(now - was))) if now.size else 0.0
+        entry = {"joints_moved": round(delta, 4), "changed": bool(delta > 0.05)}
+        # If the robot can say which way up it is, a posture that ended on the
+        # floor is not a posture that was held.
+        if hasattr(robot, "is_upright"):
+            try:
+                entry["upright"] = bool(robot.is_upright())
+                entry["tilt_degrees"] = round(float(robot.tilt_degrees()), 2)
+            except Exception:  # noqa: BLE001 — not every robot has an up
+                pass
+        posture[path] = entry
+
     report = {
         "moved": sorted(moved),
         "reproduced": (
-            (bool(moved) or bool(travelled))
+            (bool(moved) or bool(travelled) or bool(posture))
             and all(t["under_own_power"] for t in travelled.values())
+            and all(p["changed"] and p.get("upright", True) for p in posture.values())
             and not diverged
             and not disturbed
         ),
         "diverged": diverged,
         "disturbed": disturbed,
         "travelled": travelled,
+        "posture": posture,
         "at_rest": at_rest,
         "simulated_seconds": round(float(timeline.get_current_time() - start), 2),
         "before": before,
@@ -979,7 +1007,8 @@ def verify(
     # evidence exists at the moment of failure and was otherwise discarded,
     # leaving the author to debug a controller that was never the problem.
     faults: dict[str, Any] = {}
-    for path, robot in list(handles_robots.items()) + list(movers.items()):
+    for path, robot in (list(handles_robots.items()) + list(movers.items())
+                        + list(posers.items())):
         try:
             found = robot.asset_problems()
         except Exception:  # noqa: BLE001 — a missing check is not itself a fault
