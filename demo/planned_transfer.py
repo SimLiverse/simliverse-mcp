@@ -14,14 +14,13 @@ registered for *planning only* — the tool never goes near them under servo
 control, so giving them to the policy costs accuracy and buys nothing.
 """
 
-(WARMUP, INIT, OPEN, PLAN_PICK, GOTO_PICK, DESCEND, CLOSE, LIFT,
+(WARMUP, INIT, OPEN, PLAN_PICK, GOTO_PICK, HOVER, DESCEND, CLOSE, LIFT,
  PLAN_PLACE, GOTO_PLACE, LOWER, RELEASE, PLAN_CLEAR, GOTO_CLEAR,
- NEXT, DONE, FAILED) = range(17)
+ NEXT, DONE, FAILED) = range(18)
 
-NAMES = ["WARMUP", "INIT", "OPEN", "PLAN_PICK", "GOTO_PICK", "DESCEND", "CLOSE",
-         "LIFT", "PLAN_PLACE", "GOTO_PLACE", "LOWER", "RELEASE", "PLAN_CLEAR",
+NAMES = ["WARMUP", "INIT", "OPEN", "PLAN_PICK", "GOTO_PICK", "HOVER", "DESCEND", "CLOSE", "LIFT", "PLAN_PLACE", "GOTO_PLACE", "LOWER", "RELEASE", "PLAN_CLEAR",
          "GOTO_CLEAR", "NEXT", "DONE", "FAILED"]
-TRACE_PATH = "/tmp/planned_transfer.log"
+TRACE_PATH = "/tmp/ctl_trace.log"
 
 DOWN = [0.0, 1.0, 0.0, 0.0]      # tool z pointing at the table
 HOVER_Z = 0.16                   # above the cube, where the plan hands over
@@ -34,11 +33,12 @@ PLACE_HOVER = 0.32               # well clear of the platform, so the plan may e
 TRANSIT_Z = 0.40
 PLACE_Z = 0.145                  # platform top 0.10 + half a cube + clearance
 WARMUP_FRAMES = 30
-GRIP_FRAMES = 45
-LIMIT = 600
+GRIP_FRAMES = 100   # closing takes real time; the state waits instead of stepping
+LIMIT = 900
 FINE = 0.007
 
-OBSTACLES = ["/World/Post", "/World/Platform"]
+POST = "/World/Post"
+OBSTACLES = [POST, "/World/Platform"]
 JOBS = [
     {"cube": "/World/CubeA", "place": [0.42, 0.34]},
     {"cube": "/World/CubeB", "place": [0.50, 0.34]},
@@ -116,6 +116,18 @@ def setup(db=None):
 
 def compute(db=None):
     """One frame, one transition. Never loops, never steps physics."""
+    global _state
+    try:
+        return _compute(db)
+    except Exception:
+        import traceback
+        _trace("RAISED in " + NAMES[_state])
+        _trace(traceback.format_exc())
+        _state = FAILED
+        return True
+
+
+def _compute(db=None):
     global _state, _frame, _job, _arm, _cubes, _pick, _plan
     _frame += 1
 
@@ -132,8 +144,13 @@ def compute(db=None):
         _arm = Manipulator("/World/Franka", scene=scene)
         _cubes = {j["cube"]: RigidObject(j["cube"], scene=scene) for j in JOBS}
         _arm.clear_obstacles()
+        # Visible to BOTH backends by default. Planner-only was wrong: it left
+        # servo_to blind, and the servo that lowers onto the platform swings the
+        # wrist and forearm back across the post — measured, as link5/6/7 in the
+        # contact report. The planner reasons about the whole arm; the reactive
+        # policy only avoids what it has been given.
         for path in OBSTACLES:
-            _arm.add_obstacle(path, reactive=False)
+            _arm.add_obstacle(path)
         # Build the planner here rather than on first use: loading the robot and
         # compiling the GPU kernels takes a couple of seconds, and that belongs
         # in a state that is expecting to wait rather than mid-transfer.
@@ -151,7 +168,13 @@ def compute(db=None):
 
     if _state == OPEN:
         if _frame == 1:
-            _arm.gripper.open()   # non-blocking: never step inside compute()
+            _arm.gripper.open()
+            # Hide the post from the reactive policy for the pick only. Its
+            # repulsion reaches 23 cm and pulls the descent 1.4 cm off-centre,
+            # which lands the fingers beside a 4 cm cube. The planner still
+            # routes around it; the arm never goes near it while picking.
+            _arm.remove_obstacle(POST)
+            _arm.add_obstacle(POST, reactive=False)   # non-blocking: never step inside compute()
         if _frame >= GRIP_FRAMES:
             # Read the pose once, before touching it: after the grasp the cube
             # travels with the gripper and a live read would chase itself.
@@ -160,11 +183,21 @@ def compute(db=None):
         return True
 
     if _state == PLAN_PICK:
-        _plan_to([_pick[0], _pick[1], HOVER_Z], GOTO_PICK)
+        # Cross at transit height, then descend. Asking the planner for a
+        # target below the obstacle's own height on the far side of it makes
+        # the route thread down past the post; the outbound leg already lifts
+        # clear before transiting and the return has to be symmetric.
+        _plan_to([_pick[0], _pick[1], TRANSIT_Z], GOTO_PICK)
         return True
 
     if _state == GOTO_PICK:
         if _arm.follow(_plan) or _timeout():
+            _go(HOVER)
+        return True
+
+    if _state == HOVER:
+        # Straight down, directly above the cube, nothing near: servo.
+        if _arm.servo_to([_pick[0], _pick[1], HOVER_Z], DOWN, tolerance=0.012) or _timeout():
             _go(DESCEND)
         return True
 
@@ -184,6 +217,10 @@ def compute(db=None):
         # Straight up, no obstacle anywhere near: the reactive policy is the
         # right tool and planning a vertical retreat would be ceremony.
         if _arm.servo_to([_pick[0], _pick[1], TRANSIT_Z], DOWN, tolerance=0.012) or _timeout():
+            # Clear of the cube now; give the post back to the servo before any
+            # motion that takes the arm over it.
+            _arm.remove_obstacle(POST)
+            _arm.add_obstacle(POST)
             _go(PLAN_PLACE)
         return True
 

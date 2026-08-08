@@ -487,6 +487,7 @@ def deliver(
     *,
     objects: list[str] | None = None,
     robots: list[str] | None = None,
+    undisturbed: list[str] | None = None,
     seconds: float = 30.0,
     graph_path: str = "/World/TaskGraph",
 ) -> dict[str, Any]:
@@ -516,11 +517,27 @@ def deliver(
             + "\n\nor deliver to that same graph_path to replace it."
         )
     attach(path, graph_path=graph_path)
-    report = verify(seconds=seconds, objects=objects, robots=robots)
+    report = verify(seconds=seconds, objects=objects, robots=robots,
+                    undisturbed=undisturbed)
     report["controller_path"] = path
     report["graph_path"] = graph_path
     report["record_path"] = _record(report, script_path=path, graph_path=graph_path)
-    if report.get("diverged"):
+    if report.get("disturbed"):
+        detail = "; ".join(
+            "%s moved %s m, touched by %s"
+            % (path, d["moved_by"], ", ".join(d["touched_by"]) or "nothing recorded")
+            for path, d in report["disturbed"].items()
+        )
+        report["hint"] = (
+            detail
+            + ". These were named as things the task must not move, and the "
+            "arm reached its targets and hit them on the way. That is a routing "
+            "problem rather than a target problem: register them with "
+            "add_obstacle before the motion that passes them, and check "
+            "unavoidable_by_servo() — an obstacle the reactive policy cannot "
+            "represent is avoided by plan_to and never by servo_to."
+        )
+    elif report.get("diverged"):
         report["hint"] = (
             f"{', '.join(report['diverged'])} left the world, which means the "
             f"physics setup is broken rather than the motion being wrong. The "
@@ -574,6 +591,18 @@ def _split_by_kind(
     return requested_objects, requested_robots, rerouted
 
 
+def _by_robot(bodies: set[str], robots: dict[str, Any]) -> list[str]:
+    """The contacts that belong to one of the robots, links included.
+
+    Contacts report the *link* that touched, not the articulation root, so a
+    prefix match is what connects `/World/Franka/panda_link5` back to the robot
+    the caller named. Falls back to every contact when none match, because "the
+    post was hit by something" is still worth reporting.
+    """
+    hits = sorted(b for b in bodies if any(b.startswith(r) for r in robots))
+    return hits or sorted(bodies)
+
+
 def _sample(objects: dict[str, Any], robots: dict[str, Any]) -> dict[str, Any]:
     state: dict[str, Any] = {}
     for path, obj in objects.items():
@@ -594,6 +623,7 @@ def verify(
     seconds: float = 25.0,
     objects: list[str] | None = None,
     robots: list[str] | None = None,
+    undisturbed: list[str] | None = None,
     settle: float = 2.0,
     scene: Any = None,
 ) -> dict[str, Any]:
@@ -608,6 +638,15 @@ def verify(
     tick, or was never reached leaves the scene exactly as authored — and a
     scene whose objects were teleported into their final pose reports `False`
     here too, because stop puts them back.
+
+    `undisturbed` is the other half, and the half that was missing. Name the
+    things the task must *not* move — an obstacle, a neighbouring stack, a
+    fixture — and any of them shifting makes `reproduced` False and appears in
+    `disturbed`, along with which robot links were seen touching it. Without
+    it, a run that transferred one cube, dropped the other on the floor and
+    swept the obstacle 25 cm across the table reported `reproduced: True`,
+    because something moved and nothing left the world. It did that repeatedly,
+    and reading the raw positions is the only reason anyone noticed.
 
     Returns the before and after states so a caller can assert on real numbers
     rather than on a claim.
@@ -634,7 +673,9 @@ def verify(
                 f"objects={path!r} cannot be measured as a rigid body.\n\n{exc}"
             ) from exc
     handles_robots = {p: Robot(p, scene=scene) for p in robot_paths}
+    keep_still = {p: RigidObject(p, scene=scene) for p in (undisturbed or [])}
     before = _sample(handles_objects, handles_robots)
+    before_still = {p: np.asarray(o.position, dtype=float) for p, o in keep_still.items()}
 
     scene.play()
     start = timeline.get_current_time()
@@ -642,8 +683,14 @@ def verify(
     # Kit's own loop drives OnPlaybackTick, so the app has to be pumped here —
     # stepping PhysX directly would advance physics without ever running the
     # graph, and the controller would never see a frame.
+    # Who touched what, sampled throughout rather than only at the end. A body
+    # that is struck and comes to rest somewhere plausible is invisible to a
+    # before/after comparison of that body alone; the contact is the evidence.
+    touched: dict[str, set[str]] = {p: set() for p in keep_still}
     while timeline.get_current_time() - start < seconds + settle:
         update_app()
+        for path, obj in keep_still.items():
+            touched[path].update(obj.contact_bodies())
         ticks += 1
         if ticks > 200_000:  # a stopped timeline would otherwise spin forever
             raise ControllerError(
@@ -677,10 +724,25 @@ def verify(
         and (entry["position"][2] < -1.0 or max(abs(v) for v in entry["position"]) > 50.0)
     )
 
+    # What the task promised not to move. Displacement is the fact; the robot
+    # links seen touching it say how it happened.
+    disturbed = {}
+    for path, obj in keep_still.items():
+        shift = float(np.linalg.norm(np.asarray(obj.position, dtype=float) - before_still[path]))
+        if shift > 0.005:
+            hits = _by_robot(touched[path], handles_robots)
+            disturbed[path] = {
+                "moved_by": round(shift, 4),
+                "from": before_still[path].round(4).tolist(),
+                "to": np.asarray(obj.position, dtype=float).round(4).tolist(),
+                "touched_by": hits,
+            }
+
     report = {
         "moved": sorted(moved),
-        "reproduced": bool(moved) and not diverged,
+        "reproduced": bool(moved) and not diverged and not disturbed,
         "diverged": diverged,
+        "disturbed": disturbed,
         "at_rest": at_rest,
         "simulated_seconds": round(float(timeline.get_current_time() - start), 2),
         "before": before,

@@ -892,9 +892,23 @@ class Manipulator(Robot):
             )
         # Visual* rather than Dynamic*: this binds to the prim already on the
         # stage for collision queries and must not add a second rigid body to it.
-        return getattr(core_objects, wrapper)(
+        wrapped = getattr(core_objects, wrapper)(
             prim_path=prim_path, name=f"obstacle_{prim_path.strip('/').replace('/', '_')}"
         )
+        # Binding rewrites `extent` with the transform's scale already applied,
+        # and the transform then applies it again. Measured on a bare cube:
+        #
+        #   before   extent ±1                    world size 0.06 x 0.06 x 0.35
+        #   after    extent ±(0.03, 0.03, 0.175)  world size 0.0018 x 0.0018 x 0.0613
+        #
+        # So the act of registering something as an obstacle is what makes every
+        # bounds query see it at a fraction of its size — including the motion
+        # planner's collision world, which is why the tool cleared a sliver while
+        # the arm's links went through the real post. Repair it here, at the
+        # point of damage: repairing before this call, which is what the first
+        # attempt did, is undone by this call one line later.
+        _repair_extent(prim)
+        return wrapped
 
     def remove_obstacle(self, target: Any) -> bool:
         """Stop avoiding a body, in both backends.

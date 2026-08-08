@@ -148,7 +148,7 @@ class CuMotionPlanner:
     #: exactly where the trajectory is fastest. Without a margin the tracked
     #: path can clip an obstacle the plan cleared by millimetres, which presents
     #: as "the planner drove into the thing it was avoiding".
-    DEFAULT_SAFETY_MARGIN = 0.02
+    DEFAULT_SAFETY_MARGIN = 0.06
 
     def __init__(
         self,
