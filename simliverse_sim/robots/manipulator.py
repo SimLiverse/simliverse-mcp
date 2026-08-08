@@ -29,6 +29,9 @@ def _same_orientation(a: Any, b: Any) -> bool:
     return bool(np.allclose(a, b))
 
 
+_EXTENT_REPORTED: set[str] = set()
+
+
 def _repair_extent(prim: Any) -> bool:
     """Make a primitive's `extent` agree with its own geometry.
 
@@ -62,14 +65,21 @@ def _repair_extent(prim: Any) -> bool:
     if np.allclose(current, expected, atol=1e-4):
         return False
 
-    logger.warning(
-        "%s has an extent of %s where its size implies %s — bounds queries see "
-        "it at the wrong size, and the motion planner is a bounds query. "
-        "Repairing it.",
-        prim.GetPath(),
-        current[1].round(4).tolist(),
-        expected[1].round(4).tolist(),
+    # Loud once per prim, quiet thereafter. Wrapping an obstacle re-corrupts
+    # it, so a task that registers the same body each run repeats this forever —
+    # and a warning that always fires is one nobody reads. The repair happens
+    # either way; only the reporting is throttled.
+    path = str(prim.GetPath())
+    detail = (
+        "%s has an extent of %s where its size implies %s — bounds queries see it "
+        "at the wrong size, and the motion planner is a bounds query. Repairing it."
     )
+    args = (path, current[1].round(4).tolist(), expected[1].round(4).tolist())
+    if path in _EXTENT_REPORTED:
+        logger.debug(detail, *args)
+    else:
+        _EXTENT_REPORTED.add(path)
+        logger.warning(detail, *args)
     extent_attr.Set([tuple(expected[0]), tuple(expected[1])])
     return True
 
@@ -403,6 +413,8 @@ class Manipulator(Robot):
         # holds no cylinders or cones, while the planner's world does.
         self._obstacle_paths: set[str] = set()
         self._obstacles: dict[str, Any] = {}
+        # Built once per prim and kept, because building one mutates the prim.
+        self._obstacle_wrappers: dict[str, Any] = {}
         self._planner: Any = None
         self._plan: Any = None
         self._plan_time = 0.0
@@ -875,8 +887,21 @@ class Manipulator(Robot):
         return sorted(self._obstacle_paths - set(self._obstacles))
 
     def _wrap_obstacle(self, prim_path: str) -> Any:
-        """Wrap an existing prim in the core-API type RMPflow expects."""
+        """Wrap an existing prim in the core-API type RMPflow expects.
+
+        Wrappers are cached per prim and reused. Building one has a side effect —
+        it rewrites the prim's `extent` with the transform's scale baked in — so
+        a task that takes an obstacle out of the reactive set and puts it back
+        each time it picks or places re-corrupts and re-repairs the same prim
+        dozens of times per run. That showed up as a wall of repair warnings,
+        and it leaves a window in which any bounds query, the motion planner's
+        world included, reads the obstacle at a fraction of its size.
+        """
         import isaacsim.core.api.objects as core_objects
+
+        cached = self._obstacle_wrappers.get(prim_path)
+        if cached is not None:
+            return cached
 
         prim = get_stage().GetPrimAtPath(prim_path)
         if not prim.IsValid():
@@ -908,6 +933,7 @@ class Manipulator(Robot):
         # point of damage: repairing before this call, which is what the first
         # attempt did, is undone by this call one line later.
         _repair_extent(prim)
+        self._obstacle_wrappers[prim_path] = wrapped
         return wrapped
 
     def remove_obstacle(self, target: Any) -> bool:

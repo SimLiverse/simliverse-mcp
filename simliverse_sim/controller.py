@@ -245,11 +245,26 @@ def attach(script_path: str, *, graph_path: str = "/World/TaskGraph") -> str:
     # cubes on the floor, while the report still said reproduced: True — the same
     # task passes cleanly at 1:1. Any control law that assumes a fixed timestep
     # belongs on the timestep.
+    # The physics-step trigger only works in an ON-DEMAND graph. In a push graph
+    # it is evaluated with the rest of the push pipeline — once per app update —
+    # and Isaac says so, at Error level, once per attach:
+    #
+    #   Physics OnSimulationStep node detected in a non on-demand Graph. Node
+    #   will only trigger events if the parent Graph is set to compute on-demand.
+    #
+    # Which means a graph built this way is back to running at the render rate
+    # while looking like it runs on the physics step — the failure it was added
+    # to fix, now wearing a disguise. Getting the evaluator wrong is worse than
+    # never having switched.
     keys = og.Controller.Keys
     trigger, pulse = "isaacsim.core.nodes.OnPhysicsStep", "outputs:step"
     try:
         graph, nodes, _, _ = og.Controller.edit(
-            {"graph_path": graph_path, "evaluator_name": "push"},
+            {
+                "graph_path": graph_path,
+                "evaluator_name": "execution",
+                "pipeline_stage": og.GraphPipelineStage.GRAPH_PIPELINE_STAGE_ONDEMAND,
+            },
             {
                 keys.CREATE_NODES: [
                     ("Trigger", trigger),
@@ -286,7 +301,32 @@ def attach(script_path: str, *, graph_path: str = "/World/TaskGraph") -> str:
     # which is empty — a graph that is wired, valid, and does nothing.
     og.Controller.set(node.get_attribute("inputs:usePath"), True)
     og.Controller.set(node.get_attribute("inputs:scriptPath"), script_path)
-    logger.info("Wired %s -> %s", script_path, graph_path)
+
+    # Confirm the trigger can actually fire, rather than trusting that it does.
+    # A physics-step trigger in the wrong pipeline stage still builds, still
+    # connects, and still looks right in the editor — it just runs at the render
+    # rate instead, which is indistinguishable from working until the motion
+    # depends on frame rate.
+    trigger_node = graph.get_node(f"{graph_path}/Trigger")
+    kind = str(trigger_node.get_type_name()) if trigger_node else ""
+    if "OnPhysicsStep" in kind:
+        try:
+            stage_ok = (
+                graph.get_pipeline_stage()
+                == og.GraphPipelineStage.GRAPH_PIPELINE_STAGE_ONDEMAND
+            )
+        except Exception:  # noqa: BLE001 — an unreadable stage is not a failure
+            stage_ok = True
+        if not stage_ok:
+            raise ControllerError(
+                f"{graph_path} triggers on the physics step but is not an "
+                f"on-demand graph, so the trigger will not fire per step — it "
+                f"will run at the render rate and the motion will depend on "
+                f"frame rate. Build it with evaluator_name='execution' and "
+                f"pipeline_stage=GRAPH_PIPELINE_STAGE_ONDEMAND."
+            )
+
+    logger.info("Wired %s -> %s (trigger %s)", script_path, graph_path, kind or "?")
     return graph_path
 
 
