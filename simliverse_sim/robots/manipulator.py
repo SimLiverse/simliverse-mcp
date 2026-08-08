@@ -29,6 +29,51 @@ def _same_orientation(a: Any, b: Any) -> bool:
     return bool(np.allclose(a, b))
 
 
+def _repair_extent(prim: Any) -> bool:
+    """Make a primitive's `extent` agree with its own geometry.
+
+    `extent` is local-space bounds. For a `UsdGeom.Cube` of `size` S it is
+    ±S/2, and the transform's scale is applied on top. Some authoring paths
+    write it with the scale already baked in, and then the scale is applied a
+    second time — a 6 cm x 6 cm x 35 cm post reports a bound of 2 mm x 2 mm x
+    6 cm, its size multiplied by its own scale twice.
+
+    Nothing about that is visible. The prim renders and collides at its true
+    size, because rendering and PhysX use the geometry; only *bounds queries*
+    are wrong. The motion planner is a bounds query. So the arm was routed
+    neatly around a sliver a thirtieth of the post's width while the links swept
+    through the real one — visible only by watching, which is how it was
+    actually caught.
+
+    Returns True when something was repaired.
+    """
+    from pxr import UsdGeom
+
+    if prim.GetTypeName() != "Cube":
+        return False
+    cube = UsdGeom.Cube(prim)
+    size_attr, extent_attr = cube.GetSizeAttr(), cube.GetExtentAttr()
+    if not size_attr or not extent_attr or extent_attr.Get() is None:
+        return False
+
+    half = float(size_attr.Get() or 2.0) / 2.0
+    current = np.asarray([[c[i] for i in range(3)] for c in extent_attr.Get()], dtype=float)
+    expected = np.array([[-half] * 3, [half] * 3], dtype=float)
+    if np.allclose(current, expected, atol=1e-4):
+        return False
+
+    logger.warning(
+        "%s has an extent of %s where its size implies %s — bounds queries see "
+        "it at the wrong size, and the motion planner is a bounds query. "
+        "Repairing it.",
+        prim.GetPath(),
+        current[1].round(4).tolist(),
+        expected[1].round(4).tolist(),
+    )
+    extent_attr.Set([tuple(expected[0]), tuple(expected[1])])
+    return True
+
+
 class MotionError(RuntimeError):
     """A motion could not be completed — unreachable, blocked, or timed out."""
 
@@ -130,15 +175,26 @@ class Gripper:
             settle_steps=settle_steps,
         )
 
-    def open(self, *, settle_steps: int = 30) -> None:
+    def open(self, *, settle_steps: int = 0) -> None:
+        """Command the fingers open. Does not step physics by default.
+
+        Non-blocking is the safe default because the dangerous caller is the
+        silent one. A controller runs inside the simulator's own step
+        callback, so stepping from there is re-entrant, and it does not raise
+        — it quietly desynchronises the run, which then diverges from the same
+        controller replayed headless. Pass `settle_steps` explicitly when you
+        are driving the sim from outside and want to wait.
+        """
         self.set_position(self._limits()[0], settle_steps=settle_steps)
 
-    def close(self, *, settle_steps: int = 45) -> None:
-        """Drive the fingers closed.
+    def close(self, *, settle_steps: int = 0) -> None:
+        """Drive the fingers closed. Does not step physics by default.
 
         Commanding fully-closed against a solid object is intentional: the drive
         pushes until contact stops it, and that residual push is the normal force
-        a friction grasp depends on.
+        a friction grasp depends on. Closing takes real time either way — a
+        controller waits by staying in its state for a number of ticks, not by
+        stepping.
         """
         self.set_position(self._limits()[1], settle_steps=settle_steps)
 
@@ -625,8 +681,8 @@ class Manipulator(Robot):
         plan: Any,
         *,
         restart: bool = False,
-        lag_tolerance: float = 0.12,
-        max_step: float = 0.05,
+        lag_tolerance: float = 0.6,
+        max_step: float | None = None,
     ) -> bool:
         """Advance one control tick along a plan. Returns True when it is done.
 
@@ -639,12 +695,15 @@ class Manipulator(Robot):
         collision-free on paper buys nothing if the arm takes a shortcut across
         it.
 
-          * **The clock is read from the timeline, not accumulated.** Adding a
-            fixed `dt` per call silently assumes one call per physics step.
-            That happens to hold when the app is pumped headless and does not
-            hold when someone presses Play, where `compute` runs at the render
-            rate. Get it wrong in the fast direction and the commanded state
-            runs ahead of the arm, which is exactly a cut corner.
+          * **The clock advances by one physics step per call.** That is
+            exact, because the graph is triggered by the physics step and
+            `move_along` steps once per call — but only because of that. It was
+            briefly read from the timeline instead, to be safe against a caller
+            ticking at the render rate, and that broke every use outside the
+            graph: `Scene.step` drives PhysX directly and does not advance the
+            timeline, so elapsed time read as zero and the arm never moved at
+            all. The lag gate below is what actually makes a wrong tick rate
+            safe; the clock just has to agree with whoever is stepping.
           * **The clock stalls while the arm is behind.** If the measured joints
             are more than `lag_tolerance` radians from what was last commanded,
             time does not advance this tick. The arm is allowed to catch up
@@ -660,15 +719,12 @@ class Manipulator(Robot):
         if restart or self._plan is not plan:
             self._plan = plan
             self._plan_time = 0.0
-            self._plan_clock = self._sim_time()
 
         index = {name: i for i, name in enumerate(self.joint_names)}
         indices = np.asarray([index[n] for n in plan.joint_names], dtype=int)
         measured = np.asarray(self.joint_positions, dtype=float)[indices]
 
-        now = self._sim_time()
-        elapsed = max(0.0, now - self._plan_clock)
-        self._plan_clock = now
+        elapsed = float(getattr(self.scene, "dt", None) or 1.0 / 60.0)
 
         # Lag is measured against the plan, never against the last command.
         # Comparing with the command is self-defeating once the command is
@@ -686,10 +742,13 @@ class Manipulator(Robot):
         # Never command a pose further than `max_step` from where the arm is.
         # A plan is collision-free along its path, not along the chord between
         # two samples of it, and a slow tick samples it coarsely.
-        step = sample - measured
-        distance = float(np.max(np.abs(step))) if step.size else 0.0
-        scale = min(1.0, max_step / distance) if distance > max_step else 1.0
-        self._plan_command = measured + step * scale
+        scale = 1.0
+        if max_step is not None:
+            step = sample - measured
+            distance = float(np.max(np.abs(step))) if step.size else 0.0
+            if distance > max_step:
+                scale = max_step / distance
+        self._plan_command = measured + (sample - measured) * scale
 
         self._controller().apply_action(
             articulation_action(
@@ -699,28 +758,6 @@ class Manipulator(Robot):
             )
         )
         return self._plan_time >= plan.duration and self._plan_lag <= lag_tolerance
-
-    def _sim_time(self) -> float:
-        """Simulated seconds since the timeline started."""
-        from .._compat import get_timeline
-
-        try:
-            return float(get_timeline().get_current_time())
-        except Exception:
-            logger.debug("No timeline; falling back to the physics step", exc_info=True)
-            return self._plan_clock + (getattr(self.scene, "dt", None) or 1.0 / 60.0)
-
-    def move_along(self, plan: Any, *, settle: int = 30) -> bool:
-        """Follow a plan to completion, stepping physics. For exploration only.
-
-        The controller equivalent is `follow` in a state that returns each tick;
-        this one blocks and is the wrong thing inside a ScriptNode.
-        """
-        self.follow(plan, restart=True)
-        while not self.follow(plan):
-            self.scene.step(1)
-        self.scene.step(settle)
-        return True
 
     # ── Obstacles ─────────────────────────────────────────────────────────────
 
@@ -794,6 +831,7 @@ class Manipulator(Robot):
                 f"need to be visible, and the real {kind} can stay as it is."
             )
 
+        _repair_extent(prim)
         self._obstacle_paths.add(path)
         # A changed obstacle set invalidates the planner's world; it is rebound
         # on the next plan rather than here, so adding several costs one rebind.
@@ -928,10 +966,10 @@ class Manipulator(Robot):
         is why the previous skills never generalised.
         """
         target = obj.position + as_vec3(grasp_offset, name="grasp_offset")
-        self.gripper.open()
+        self.gripper.open(settle_steps=30)
         self.move_ee_to(target + np.array([0.0, 0.0, approach_height]), orientation)
         self.move_ee_to(target, orientation)
-        self.gripper.close()
+        self.gripper.close(settle_steps=45)
         self.scene.step(verify_steps)
         return self.is_grasping(obj)
 

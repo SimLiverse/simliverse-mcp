@@ -159,13 +159,30 @@ class Robot:
         self.scene = scene or _Scene.get()
 
         self._articulation = single_articulation(prim_path)
-        self.scene.play()
-        # An articulation cannot initialize before physics has ticked; doing this
-        # here removes a whole class of "the robot ignores my commands" reports.
-        self.scene.step(4)
+        # An articulation cannot initialize before physics has ticked, and
+        # building a handle on a stopped timeline is the common way to get a
+        # robot that ignores every command. But this runs inside controllers
+        # too, where the timeline is already playing and physics is mid-step:
+        # play/step from there is re-entrant and silently desynchronises the
+        # run. When it is already playing there is nothing to arrange, so do
+        # nothing — the condition that makes the wait necessary is exactly the
+        # condition that makes it safe.
+        if not self._timeline_playing():
+            self.scene.play()
+            self.scene.step(4)
         self._articulation.initialize()
 
         self.groups = JointGroups.classify(self.joint_names)
+
+    @staticmethod
+    def _timeline_playing() -> bool:
+        from .._compat import get_timeline
+
+        try:
+            return bool(get_timeline().is_playing())
+        except Exception:
+            logger.debug("Could not read timeline state", exc_info=True)
+            return False
 
     def __repr__(self) -> str:
         return f"<{type(self).__name__} {self.prim_path} dof={self.dof}>"

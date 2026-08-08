@@ -151,7 +151,7 @@ def compute(db=None):
 
     if _state == OPEN:
         if _frame == 1:
-            _arm.gripper.open()
+            _arm.gripper.open()   # non-blocking: never step inside compute()
         if _frame >= GRIP_FRAMES:
             # Read the pose once, before touching it: after the grasp the cube
             # travels with the gripper and a live read would chase itself.
@@ -175,7 +175,7 @@ def compute(db=None):
 
     if _state == CLOSE:
         if _frame == 1:
-            _arm.gripper.close()
+            _arm.gripper.close()  # non-blocking: never step inside compute()
         if _frame >= GRIP_FRAMES:
             _go(LIFT)
         return True
@@ -205,7 +205,7 @@ def compute(db=None):
 
     if _state == RELEASE:
         if _frame == 1:
-            _arm.gripper.open()
+            _arm.gripper.open()   # non-blocking: never step inside compute()
         if _frame >= GRIP_FRAMES:
             _go(PLAN_CLEAR)
         return True
