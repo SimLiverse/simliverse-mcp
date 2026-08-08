@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from .._compat import as_quat, as_vec3, get_stage, motion_generation
+from .._compat import articulation_action, as_quat, as_vec3, get_stage, motion_generation
 from .base import Morphology, Robot
 
 if TYPE_CHECKING:
@@ -341,7 +341,15 @@ class Manipulator(Robot):
         self._rmpflow: Any = None
         self._policy: Any = None
         self._ik: Any = None
+        # Two structures on purpose. `_obstacle_paths` is what the caller said
+        # the arm must avoid, and is backend-agnostic; `_obstacles` is what the
+        # reactive policy managed to represent, which is a strict subset — Lula
+        # holds no cylinders or cones, while the planner's world does.
+        self._obstacle_paths: set[str] = set()
         self._obstacles: dict[str, Any] = {}
+        self._planner: Any = None
+        self._plan: Any = None
+        self._plan_time = 0.0
         self._servo_target: Any = None
         self._servo_orientation: Any = None
         self._servo_settled = 0
@@ -558,22 +566,115 @@ class Manipulator(Robot):
     def move_ee_by(self, delta: Any, **kwargs: Any) -> MotionResult:
         return self.move_ee_to(self.ee_position + as_vec3(delta, name="delta"), **kwargs)
 
+    # ── Planned motion ────────────────────────────────────────────────────────
+
+    def planner(self) -> Any:
+        """The global planner for this arm, built on first use.
+
+        Separate from `servo_to` on purpose. The reactive policy and the planner
+        answer different questions — "which way do I move now" versus "is there
+        a route at all" — and a task normally wants both: plan the transfer,
+        servo the last centimetres onto the object.
+        """
+        from .planning import CuMotionPlanner
+
+        if self._planner is None:
+            self._planner = CuMotionPlanner(
+                self._planner_robot_name(),
+                self.joint_names,
+                obstacles=lambda: sorted(self._obstacle_paths),
+            )
+        return self._planner
+
+    def _planner_robot_name(self) -> str:
+        """Which cuMotion configuration describes this arm.
+
+        Taken from the catalogue entry the robot was spawned from where there is
+        one, so a second arm needs a registry line rather than a code change.
+        Falls back to the prim's own name, which is right often enough to be
+        worth trying and produces a listing of valid names when it is not.
+        """
+        for source in (getattr(self, "_robot_type", None), getattr(self, "asset_name", None)):
+            if source:
+                return str(source).lower()
+        return self.prim_path.rstrip("/").rsplit("/", 1)[-1].lower()
+
+    def plan_to(self, position: Any, orientation: Any = None) -> Any:
+        """Plan a collision-free route to a Cartesian target. Does not move.
+
+        Returns a `MotionPlan`; drive it with `follow` one tick at a time inside
+        a controller, or `move_along` while exploring. Raises `NoPathFound` when
+        there is no route, which is a real answer and not a reason to fall back
+        to reactive control silently — RMPflow would drive at the same target
+        and stall against whatever the planner just told you is in the way.
+        """
+        planner = self.planner()
+        planner.set_base_pose(self.base_position, self.base_orientation)
+        q_initial = planner.joint_subset(self.joint_positions, self.joint_names)
+        return planner.plan_to_pose(
+            q_initial,
+            as_vec3(position, name="position"),
+            as_quat(orientation) if orientation is not None else None,
+        )
+
+    def follow(self, plan: Any, *, restart: bool = False) -> bool:
+        """Advance one control tick along a plan. Returns True when it is done.
+
+        Same contract as `servo_to` — one tick, no blocking, no stepping — so a
+        controller state that plans instead of servoing keeps exactly the same
+        shape. The clock advances by the scene's physics step per call rather
+        than by wall time, so a replay is deterministic.
+        """
+        if restart or self._plan is not plan:
+            self._plan = plan
+            self._plan_time = 0.0
+
+        dt = getattr(self.scene, "dt", None) or 1.0 / 60.0
+        self._plan_time += float(dt)
+        positions, velocities = plan.sample(self._plan_time)
+
+        index = {name: i for i, name in enumerate(self.joint_names)}
+        indices = np.asarray([index[n] for n in plan.joint_names], dtype=int)
+        self._controller().apply_action(
+            articulation_action(
+                joint_positions=np.asarray(positions, dtype=float),
+                joint_velocities=np.asarray(velocities, dtype=float),
+                joint_indices=indices,
+            )
+        )
+        return self._plan_time >= plan.duration
+
+    def move_along(self, plan: Any, *, settle: int = 30) -> bool:
+        """Follow a plan to completion, stepping physics. For exploration only.
+
+        The controller equivalent is `follow` in a state that returns each tick;
+        this one blocks and is the wrong thing inside a ScriptNode.
+        """
+        self.follow(plan, restart=True)
+        while not self.follow(plan):
+            self.scene.step(1)
+        self.scene.step(settle)
+        return True
+
     # ── Obstacles ─────────────────────────────────────────────────────────────
 
+    # Measured against Lula, not taken from the Visual* class list. Every one of
+    # the five core primitives has a Visual* wrapper and constructs happily, but
+    # Lula's world model only understands three of them — `add_obstacle` returns
+    # False for a cylinder or a cone and logs nothing above debug. Listing them
+    # here meant a registered pillar was silently not an obstacle, and the arm
+    # swept it off the table on the first traverse.
     _OBSTACLE_WRAPPERS = {
         "Cube": "VisualCuboid",
         "Sphere": "VisualSphere",
-        "Cylinder": "VisualCylinder",
         "Capsule": "VisualCapsule",
-        "Cone": "VisualCone",
     }
 
     def add_obstacle(self, target: Any, *, static: bool = False) -> bool:
-        """Register a body RMPflow must plan around.
+        """Register a body the arm must not hit.
 
-        RMPflow avoids obstacles, but only ones it has been told about — an
-        empty obstacle set means the arm plans straight through the scene. It
-        still *reaches* its target, so this failure looks like success right up
+        An empty obstacle set means the arm moves straight through the scene. It
+        still *reaches* its target, so that failure looks like success right up
         until the elbow sweeps a finished stack off the table.
 
         `target` may be a `RigidObject`, a prim path, or an already-wrapped
@@ -582,20 +683,79 @@ class Manipulator(Robot):
         every step.
 
         Note the object being *manipulated* should not be registered — the arm
-        has to touch that one.
+        has to touch that one. The same goes for a surface it must place *onto*:
+        a registered obstacle is somewhere the tool will not be taken, so
+        registering the table makes putting anything down impossible.
+
+        The two backends do not see the same world. The planner holds cuboids,
+        spheres, capsules and planes; Lula holds the first three. Where only the
+        planner can represent something, the path is still recorded and a
+        warning says the reactive policy will not avoid it —
+        `unavoidable_by_servo()` lists those, so a caller can check rather than
+        discover it by collision.
+
+        Where *neither* can represent it this raises, because the alternative is
+        worse than a rejection: a cylinder handed to the planner does not fail
+        politely, it makes every later plan fail for as long as it stays
+        registered.
+
+        Returns True when the reactive policy accepted it too.
         """
-        self._ensure_motion_policy()
+        from .planning import UNREPRESENTABLE_TYPES
 
-        obstacle = target
-        if hasattr(target, "prim_path") and not hasattr(target, "geom"):
-            obstacle = self._wrap_obstacle(target.prim_path)
-        elif isinstance(target, str):
-            obstacle = self._wrap_obstacle(target)
+        path = target if isinstance(target, str) else getattr(target, "prim_path", str(target))
+        prim = get_stage().GetPrimAtPath(path)
+        if not prim.IsValid():
+            raise ValueError(f"No prim at {path!r} to use as an obstacle")
 
-        added = bool(self._rmpflow.add_obstacle(obstacle, static=static))
-        if added:
-            self._obstacles[getattr(obstacle, "prim_path", str(target))] = obstacle
-        return added
+        kind = str(prim.GetTypeName())
+        if kind in UNREPRESENTABLE_TYPES:
+            raise ValueError(
+                f"{path} is a {kind}, which neither the planner nor the reactive "
+                f"policy can represent — both hold cuboids, spheres and capsules, "
+                f"and the planner adds planes.\n\n"
+                f"Cover the same volume with a capsule or a cuboid and register "
+                f"that instead. The proxy needs a collider and a pose; it does not "
+                f"need to be visible, and the real {kind} can stay as it is."
+            )
+
+        self._obstacle_paths.add(path)
+        # A changed obstacle set invalidates the planner's world; it is rebound
+        # on the next plan rather than here, so adding several costs one rebind.
+        self._plan = None
+
+        try:
+            self._ensure_motion_policy()
+            obstacle = self._wrap_obstacle(path)
+            accepted = bool(self._rmpflow.add_obstacle(obstacle, static=static))
+        except Exception as exc:
+            logger.warning(
+                "%s is registered as an obstacle for planning, but the reactive "
+                "policy cannot represent it (%s). servo_to will drive straight "
+                "through it; use plan_to for motions that pass near it.",
+                path,
+                exc,
+            )
+            return False
+
+        if not accepted:
+            logger.warning(
+                "%s is registered as an obstacle for planning, but Lula would not "
+                "accept it, so servo_to will not avoid it.",
+                path,
+            )
+            return False
+
+        self._obstacles[path] = obstacle
+        return True
+
+    def unavoidable_by_servo(self) -> list[str]:
+        """Registered obstacles the reactive policy cannot see.
+
+        These are avoided by `plan_to` and ignored by `servo_to`. A non-empty
+        list means gross motion has to be planned rather than servoed.
+        """
+        return sorted(self._obstacle_paths - set(self._obstacles))
 
     def _wrap_obstacle(self, prim_path: str) -> Any:
         """Wrap an existing prim in the core-API type RMPflow expects."""
@@ -620,12 +780,24 @@ class Manipulator(Robot):
         )
 
     def remove_obstacle(self, target: Any) -> bool:
+        """Stop avoiding a body, in both backends.
+
+        Needed before touching something that was previously being avoided —
+        and before placing onto it, which is the same thing from the tool's
+        point of view.
+        """
         path = getattr(target, "prim_path", target)
+        known = path in self._obstacle_paths
+        self._obstacle_paths.discard(path)
+        self._plan = None
+
         obstacle = self._obstacles.pop(path, None)
-        if obstacle is None:
-            return False
-        self._rmpflow.remove_obstacle(obstacle)
-        return True
+        if obstacle is not None:
+            try:
+                self._rmpflow.remove_obstacle(obstacle)
+            except Exception:  # noqa: BLE001 — the registry is what must end up right
+                logger.debug("Could not remove obstacle %s from RMPflow", path, exc_info=True)
+        return known
 
     def clear_obstacles(self) -> None:
         for obstacle in list(self._obstacles.values()):
@@ -634,9 +806,12 @@ class Manipulator(Robot):
             except Exception:  # noqa: BLE001 — the registry is what must end up empty
                 logger.debug("Could not remove obstacle", exc_info=True)
         self._obstacles.clear()
+        self._obstacle_paths.clear()
+        self._plan = None
 
     def obstacles(self) -> list[str]:
-        return sorted(self._obstacles)
+        """Everything the arm has been told to avoid, whichever backend sees it."""
+        return sorted(self._obstacle_paths)
 
     # ── Grasping ──────────────────────────────────────────────────────────────
 
