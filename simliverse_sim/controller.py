@@ -789,6 +789,10 @@ def verify(
     # Who touched what, sampled throughout rather than only at the end. A body
     # that is struck and comes to rest somewhere plausible is invisible to a
     # before/after comparison of that body alone; the contact is the evidence.
+    # Anything named as a robot, whether it was asked to hold still or to
+    # travel. Attribution used to look only at `robots`, so a task that used
+    # `traveled` got `first_touched_at: None` for every collision it caused.
+    attributable = set(handles_robots) | set(movers)
     touched: dict[str, set[str]] = {p: set() for p in keep_still}
     first_touch: dict[str, float] = {}
     while timeline.get_current_time() - start < seconds + settle:
@@ -801,7 +805,7 @@ def verify(
             # body resting on the ground is in contact from the first frame and
             # would otherwise stamp every obstacle at t=0.
             if path not in first_touch and any(
-                b.startswith(r) for b in bodies for r in handles_robots
+                b.startswith(r) for b in bodies for r in attributable
             ):
                 first_touch[path] = round(timeline.get_current_time() - start, 2)
         ticks += 1
@@ -843,7 +847,7 @@ def verify(
     for path, obj in keep_still.items():
         shift = float(np.linalg.norm(np.asarray(obj.position, dtype=float) - before_still[path]))
         if shift > 0.005 or path in first_touch:
-            hits = _by_robot(touched[path], handles_robots)
+            hits = _by_robot(touched[path], attributable)
             disturbed[path] = {
                 "moved_by": round(shift, 4),
                 "first_touched_at": first_touch.get(path),
