@@ -653,6 +653,56 @@ def deliver(
     return report
 
 
+def _body_position(robot: Any) -> np.ndarray:
+    """Where the robot actually is, however its base is modelled.
+
+    `base_position` is the articulation *root*, which is right for a robot whose
+    root is the thing that moves and useless for one whose root is not. A
+    Ridgeback carries its base motion on a planar joint triple inside the
+    articulation, so its root prim sits at the origin however far it drives —
+    measured: the arm's mounting link travelled 0.975 m while `base_position`
+    reported [0, 0, 0] throughout.
+
+    Distance is therefore taken from the links rather than the root.
+
+    NOT YET VERIFIED for the planar-base case. Link transforms are only written
+    back to USD when something syncs them, so this pushes physics results across
+    first — but the test that would prove it drove the base with a command the
+    joint did not take, so both samples came from the same pose and the result
+    was uninformative. For a robot whose root *is* the moving body (every
+    wheeled base tested so far) this is equivalent to the old behaviour and is
+    exercised by the slalom and gate demos.
+    """
+    root = np.asarray(robot.base_position, dtype=float)
+    try:
+        from pxr import UsdGeom
+
+        from ._compat import get_physx, get_stage
+
+        # Push physics results into USD before reading them. Link transforms are
+        # only written back when something syncs, so a bare read returns
+        # whatever was there last time — measured: a joint at 1.191 while the
+        # link it drives still reported the pose it had at 0.013.
+        try:
+            get_physx().update_transformations(False, True, True, False)
+        except Exception:
+            logger.debug("Could not sync transforms before reading links", exc_info=True)
+
+        stage = get_stage()
+        points = []
+        for link in robot.links():
+            prim = stage.GetPrimAtPath(str(link))
+            if not prim.IsValid():
+                continue
+            matrix = UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(0)
+            points.append(np.asarray(matrix.ExtractTranslation(), dtype=float))
+        if points:
+            return np.mean(np.asarray(points), axis=0)
+    except Exception:
+        logger.debug("Could not read link poses for %s", robot.prim_path, exc_info=True)
+    return root
+
+
 def _is_articulation(path: str) -> bool:
     from pxr import UsdPhysics
 
@@ -775,7 +825,7 @@ def verify(
     before = _sample(handles_objects, handles_robots)
     before_still = {p: np.asarray(o.position, dtype=float) for p, o in keep_still.items()}
     before_travel = {
-        p: (np.asarray(r.base_position, dtype=float),
+        p: (_body_position(r),
             np.asarray(r.joint_positions, dtype=float))
         for p, r in movers.items()
     }
@@ -868,7 +918,7 @@ def verify(
     travelled = {}
     for path, robot in movers.items():
         start_base, start_joints = before_travel[path]
-        now_base = np.asarray(robot.base_position, dtype=float)
+        now_base = _body_position(robot)
         now_joints = np.asarray(robot.joint_positions, dtype=float)
         distance = float(np.linalg.norm(now_base[:2] - start_base[:2]))
         joint_delta = (
