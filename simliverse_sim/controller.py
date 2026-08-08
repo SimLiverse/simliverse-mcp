@@ -571,6 +571,7 @@ def deliver(
     objects: list[str] | None = None,
     robots: list[str] | None = None,
     undisturbed: list[str] | None = None,
+    traveled: list[str] | None = None,
     seconds: float = 30.0,
     graph_path: str = "/World/TaskGraph",
 ) -> dict[str, Any]:
@@ -613,7 +614,7 @@ def deliver(
         )
     attach(path, graph_path=graph_path)
     report = verify(seconds=seconds, objects=objects, robots=robots,
-                    undisturbed=undisturbed)
+                    undisturbed=undisturbed, traveled=traveled)
     report["controller_path"] = path
     report["graph_path"] = graph_path
     report["record_path"] = _record(report, script_path=path, graph_path=graph_path)
@@ -719,6 +720,7 @@ def verify(
     objects: list[str] | None = None,
     robots: list[str] | None = None,
     undisturbed: list[str] | None = None,
+    traveled: list[str] | None = None,
     settle: float = 2.0,
     scene: Any = None,
 ) -> dict[str, Any]:
@@ -769,8 +771,14 @@ def verify(
             ) from exc
     handles_robots = {p: Robot(p, scene=scene) for p in robot_paths}
     keep_still = {p: RigidObject(p, scene=scene) for p in (undisturbed or [])}
+    movers = {p: Robot(p, scene=scene) for p in (traveled or [])}
     before = _sample(handles_objects, handles_robots)
     before_still = {p: np.asarray(o.position, dtype=float) for p, o in keep_still.items()}
+    before_travel = {
+        p: (np.asarray(r.base_position, dtype=float),
+            np.asarray(r.joint_positions, dtype=float))
+        for p, r in movers.items()
+    }
 
     scene.play()
     start = timeline.get_current_time()
@@ -844,11 +852,43 @@ def verify(
                 "touched_by": hits,
             }
 
+    # A robot that was supposed to go somewhere. Deliberately separate from
+    # `moved`, which excludes robots on purpose: an arm waving its joints has
+    # demonstrated nothing. For a base, arriving *is* the task, and without this
+    # a working rover controller reports `reproduced: False` with a hint telling
+    # its author to go fix a state machine that is already correct.
+    #
+    # Distance alone is not enough either. A base whose joints never moved was
+    # repositioned rather than driven, so the joints are checked too — that is
+    # the difference between locomotion and a teleport.
+    travelled = {}
+    for path, robot in movers.items():
+        start_base, start_joints = before_travel[path]
+        now_base = np.asarray(robot.base_position, dtype=float)
+        now_joints = np.asarray(robot.joint_positions, dtype=float)
+        distance = float(np.linalg.norm(now_base[:2] - start_base[:2]))
+        joint_delta = (
+            float(np.max(np.abs(now_joints - start_joints))) if now_joints.size else 0.0
+        )
+        travelled[path] = {
+            "distance": round(distance, 4),
+            "joints_moved": round(joint_delta, 4),
+            "from": start_base.round(4).tolist(),
+            "to": now_base.round(4).tolist(),
+            "under_own_power": bool(distance > 0.05 and joint_delta > 0.05),
+        }
+
     report = {
         "moved": sorted(moved),
-        "reproduced": bool(moved) and not diverged and not disturbed,
+        "reproduced": (
+            (bool(moved) or bool(travelled))
+            and all(t["under_own_power"] for t in travelled.values())
+            and not diverged
+            and not disturbed
+        ),
         "diverged": diverged,
         "disturbed": disturbed,
+        "travelled": travelled,
         "at_rest": at_rest,
         "simulated_seconds": round(float(timeline.get_current_time() - start), 2),
         "before": before,

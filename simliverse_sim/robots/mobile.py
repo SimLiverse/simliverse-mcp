@@ -137,8 +137,22 @@ class WheeledRobot(Robot):
         A simple turn-then-go controller: it is not a path planner and will drive
         into obstacles. For anything with clutter, plan waypoints and call this
         for each leg.
+
+        `position` may be [x, y] or [x, y, z]; the height is ignored either way.
+        It used to demand three components while the docstring said XY, which is
+        the first call anyone makes.
+
+        The return value is measured after stopping, not before. A base with
+        momentum coasts through the settle, so checking the tolerance and then
+        braking reported arrival at 0.128 m against a tolerance of 0.10 — true
+        when it was checked and false by the time the caller saw it.
         """
-        target = as_vec3(position, name="position")[:2]
+        wanted = np.asarray(position, dtype=float).reshape(-1)
+        if wanted.size not in (2, 3):
+            raise ValueError(
+                f"position must be [x, y] or [x, y, z], got {wanted.size}: {position!r}"
+            )
+        target = wanted[:2]
         self.scene.play()
 
         for _ in range(max_steps):
@@ -147,7 +161,13 @@ class WheeledRobot(Robot):
             distance = float(np.linalg.norm(offset))
             if distance < tolerance:
                 self.stop()
-                return True
+                settled = float(np.linalg.norm(target - self.base_position[:2]))
+                if settled > tolerance:
+                    logger.info(
+                        "%s coasted to %.3f m from the goal while stopping "
+                        "(tolerance %.3f)", self.prim_path, settled, tolerance
+                    )
+                return settled <= tolerance
 
             heading = self._heading()
             desired = float(np.arctan2(offset[1], offset[0]))
