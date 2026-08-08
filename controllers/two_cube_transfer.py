@@ -42,7 +42,11 @@ TRANSIT_Z = 0.40
 PLACE_Z = 0.125
 WARMUP_FRAMES = 30
 GRIP_FRAMES = 100   # closing takes real time; the state waits instead of stepping
-LIMIT = 900
+# A state that cannot converge should say so in about four seconds, not
+# fifteen. The old 900 frames meant a single stuck servo burned 15 s of the
+# run thrashing before falling through in a bad pose, and three of those is
+# most of the window — the arm ends up contorted and the cubes get flung.
+LIMIT = 250
 FINE = 0.007
 
 POST = "/World/Post"
