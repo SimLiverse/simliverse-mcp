@@ -132,6 +132,20 @@ class Gripper:
             highs = [limits[i][1] for i in self.joint_indices if limits[i][1] is not None]
             # Prismatic fingers open at the upper limit; revolute finger joints
             # on a dexterous hand usually curl toward the upper limit instead.
+            if not lows or not highs:
+                # Say so once, loudly. Guessing 0.0/0.04 is right for a Panda and
+                # wrong for anything else, and the way it is wrong is a grasp that
+                # closes, appears to hold, and drops the object — which reads as a
+                # control problem for as long as anyone is willing to look.
+                logger.warning(
+                    "%s: gripper joints %s declare no travel limits, so open() and "
+                    "close() are falling back to 0.04 and 0.0 m. If this gripper's "
+                    "real travel differs, grasps will fail in a way that looks like "
+                    "bad control. This is the asset, not the controller — see "
+                    "describe()['asset_problems'].",
+                    self._robot.prim_path,
+                    self.joint_names,
+                )
             self._closed_value = float(max(lows)) if lows else 0.0
             self._open_value = float(min(highs)) if highs else 0.04
         return self._open_value, self._closed_value

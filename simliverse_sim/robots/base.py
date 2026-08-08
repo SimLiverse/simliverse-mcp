@@ -455,8 +455,97 @@ class Robot:
             "joint_groups": self.groups.to_dict(self.joint_names),
             "base_position": self.base_position.round(4).tolist(),
             "drive_problems": self.drive_health(),
+            "asset_problems": self.asset_problems(),
             "capabilities": self.capabilities(),
         }
+
+    def asset_problems(self) -> list[dict[str, str]]:
+        """Defects in the robot asset itself, and what each one prevents.
+
+        Reported, never repaired or worked around. A robot that cannot do
+        something should say so plainly, in the first call an agent makes, so
+        the answer is "this task is not possible with this asset and here is
+        why" rather than a controller that has been bent around a broken
+        gripper and works for nothing else.
+
+        Editing the asset would be worse than failing: a policy trained against
+        a robot we silently modified does not transfer to the real one, and the
+        failure resurfaces as bad hardware long after anyone can connect it to
+        this. Changing the robot is the user's call.
+        """
+        problems: list[dict[str, str]] = []
+        limits = self.joint_limits
+        names = self.joint_names
+
+        gripper = getattr(getattr(self, "gripper", None), "joint_indices", None) or []
+        unbounded = [names[i] for i in gripper if limits[i][0] is None or limits[i][1] is None]
+        if unbounded:
+            problems.append({
+                "issue": "gripper joints have no travel limits",
+                "detail": ", ".join(unbounded),
+                "consequence": (
+                    "open() and close() have nothing to open or close *to*, so "
+                    "they fall back to 0.0 and 0.04 m. If this gripper's real "
+                    "travel differs, it will close past the object or stop short "
+                    "of it, and a grasp will look like it formed and then drop."
+                ),
+            })
+
+        problems.extend(self._pose_feedback_problems())
+        return problems
+
+    def _pose_feedback_problems(self) -> list[dict[str, str]]:
+        """Links whose USD transform disagrees with where physics has them.
+
+        Isaac writes physics results back to USD for most articulations and not
+        for all of them. When it does not, the viewport shows a robot standing
+        still while it drives, and every measurement taken from a link transform
+        is wrong by however far it has actually moved — silently, because a
+        stale number looks exactly like a real one.
+
+        Only detectable once the robot has moved. At its authored pose the two
+        sources agree by construction, so an empty result here means "nothing to
+        see yet", not "these transforms are trustworthy". Call it again after
+        the robot has driven somewhere if the answer matters.
+        """
+        try:
+            from pxr import UsdGeom
+
+            from isaacsim.core.prims import SingleRigidPrim
+
+            from .._compat import get_stage
+
+            stage = get_stage()
+            worst_name, worst = None, 0.0
+            for link in list(self.links())[:12]:
+                path = str(link)
+                prim = stage.GetPrimAtPath(path)
+                if not prim.IsValid():
+                    continue
+                usd = np.asarray(
+                    UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(0).ExtractTranslation(),
+                    dtype=float,
+                )
+                view = SingleRigidPrim(prim_path=path)
+                view.initialize()
+                physics = np.asarray(view.get_world_pose()[0], dtype=float)
+                gap = float(np.linalg.norm(physics - usd))
+                if gap > worst:
+                    worst_name, worst = path, gap
+            if worst > 0.02:
+                return [{
+                    "issue": "link transforms are not written back from physics",
+                    "detail": f"{worst_name} is {worst:.3f} m from where physics has it",
+                    "consequence": (
+                        "The viewport will show this robot in the wrong place, and "
+                        "anything measured from a link transform — distance "
+                        "travelled, where the base is — reads the stale value. "
+                        "Read poses through the physics view instead."
+                    ),
+                }]
+        except Exception:
+            logger.debug("Could not compare USD and physics poses", exc_info=True)
+        return []
 
     def capabilities(self) -> list[str]:
         """Control methods available on this handle, so an agent need not guess."""

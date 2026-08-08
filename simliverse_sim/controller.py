@@ -641,6 +641,20 @@ def deliver(
             f"not have it — an articulation root, or a body with no valid mass. "
             f"Check the prim's applied schemas before blaming the controller."
         )
+    elif report.get("asset_problems"):
+        faults = [
+            f"{path}: {fault['issue']} — {fault['consequence']}"
+            for path, found in report["asset_problems"].items()
+            for fault in found
+        ]
+        report["hint"] = (
+            "The scene did not do the task, and the robot has defects that would "
+            "account for it:" + "".join("\n  " + line for line in faults)
+            + "\n\nThese are faults in the asset, not in the controller. Do not "
+            "write code around them. Report the task as blocked, quote these "
+            "measurements, and say what would have to change about the robot for "
+            "it to be possible."
+        )
     elif not report["reproduced"]:
         report["hint"] = (
             "Nothing moved when the scene played on its own. The controller is "
@@ -827,9 +841,13 @@ def verify(
             raise ControllerError(
                 f"objects={path!r} cannot be measured as a rigid body.\n\n{exc}"
             ) from exc
-    handles_robots = {p: Robot(p, scene=scene) for p in robot_paths}
+    # `attach` rather than `Robot(...)`: the plain constructor gives a base
+    # handle with no gripper and no morphology-specific checks, so a robot
+    # measured here reported no asset problems while `describe()` on the same
+    # robot reported them plainly.
+    handles_robots = {p: Robot.attach(p, scene=scene) for p in robot_paths}
     keep_still = {p: RigidObject(p, scene=scene) for p in (undisturbed or [])}
-    movers = {p: Robot(p, scene=scene) for p in (traveled or [])}
+    movers = {p: Robot.attach(p, scene=scene) for p in (traveled or [])}
     before = _sample(handles_objects, handles_robots)
     before_still = {p: np.asarray(o.position, dtype=float) for p, o in keep_still.items()}
     before_travel = {
@@ -956,6 +974,21 @@ def verify(
         "before": before,
         "after": after,
     }
+
+    # Whatever is already known to be wrong with the robots in this scene. The
+    # evidence exists at the moment of failure and was otherwise discarded,
+    # leaving the author to debug a controller that was never the problem.
+    faults: dict[str, Any] = {}
+    for path, robot in list(handles_robots.items()) + list(movers.items()):
+        try:
+            found = robot.asset_problems()
+        except Exception:  # noqa: BLE001 — a missing check is not itself a fault
+            continue
+        if found:
+            faults[path] = found
+    if faults:
+        report["asset_problems"] = faults
+
     if rerouted:
         report["rerouted"] = rerouted
         report["note"] = (
