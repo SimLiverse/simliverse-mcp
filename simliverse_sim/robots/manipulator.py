@@ -508,6 +508,63 @@ class Manipulator(Robot):
         self._end_effector_frame = frame
         self._sync_base_pose()
 
+    def _arm_base_pose(self) -> tuple[Any, Any]:
+        """World pose of the link the solver treats as the robot's base.
+
+        Not the articulation root. On a fixed arm the two are the same link and
+        the distinction never shows; on a mobile base they are not, and the
+        difference is exactly how far the robot has driven.
+
+        Measured on a Ridgeback-Franka: the articulation root is `world`, which
+        sits *before* the base's prismatic joints and therefore never moves,
+        while the arm's mount travels with the base. Feeding the root pose to
+        Lula told it the arm was at the origin while the arm was at x = 0.886,
+        so a target at x = 1.90 was solved as 1.90 in a frame already 0.886 out
+        — 2.79 in world, unreachable, reported as "did not reach".
+
+        Read through the physics view rather than USD. Physics results are not
+        written back to USD for every articulation: the same link that reads
+        0.886 from the physics view reports a constant 0.308 in USD, before or
+        after an explicit transform sync, which is also why such a base looks
+        stationary in the viewport while it is driving.
+        """
+        link = self._arm_base_link()
+        if link is not None:
+            try:
+                position, orientation = link.get_world_pose()
+                return np.asarray(position, dtype=float), np.asarray(orientation, dtype=float)
+            except Exception:
+                logger.debug("Could not read the arm base link pose", exc_info=True)
+        return self.base_position, self.base_orientation
+
+    def _arm_base_link(self) -> Any:
+        """The physics handle for the arm's mounting link, found once."""
+        if getattr(self, "_arm_base_view", "unset") != "unset":
+            return self._arm_base_view
+
+        self._arm_base_view = None
+        candidates = [str(l) for l in self.links()]
+        # `*_link0` is the convention for an arm's root frame (panda_link0,
+        # ur_link0); `base_link` is the usual fallback for the body an arm is
+        # bolted to. Anything else and the articulation root is as good a guess
+        # as any.
+        chosen = next((c for c in candidates if c.rsplit("/", 1)[-1].endswith("link0")), None)
+        if chosen is None:
+            chosen = next((c for c in candidates if c.rsplit("/", 1)[-1] == "base_link"), None)
+        if chosen is None:
+            return None
+
+        try:
+            from isaacsim.core.prims import SingleRigidPrim
+
+            view = SingleRigidPrim(prim_path=chosen)
+            view.initialize()
+            self._arm_base_view = view
+            logger.info("Solving in the frame of %s", chosen)
+        except Exception:
+            logger.debug("Could not bind the arm base link %s", chosen, exc_info=True)
+        return self._arm_base_view
+
     def _sync_base_pose(self) -> None:
         """Tell RMPflow and Lula where the robot actually stands.
 
@@ -522,8 +579,7 @@ class Manipulator(Robot):
         base moves, and a stale base pose is the same bug with extra steps.
         """
         try:
-            position = self.base_position
-            orientation = self.base_orientation
+            position, orientation = self._arm_base_pose()
         except Exception:
             logger.debug("Could not read base pose for %s", self.prim_path, exc_info=True)
             return
