@@ -36,7 +36,10 @@ PLACE_HOVER = 0.19
 # it also plans far better: from down at the table the same transfer took
 # 2.8 s to find and sometimes failed outright, against 0.9 s from up here.
 TRANSIT_Z = 0.40
-PLACE_Z = 0.145                  # platform top 0.10 + half a cube + clearance
+# Touch-down height, not hover height: platform top 0.10 + half a 4 cm cube
+# is 0.12, so this leaves 5 mm. The old 0.145 released with the underside
+# 2.5 cm clear and the cube was dropped rather than set down.
+PLACE_Z = 0.125
 WARMUP_FRAMES = 30
 GRIP_FRAMES = 100   # closing takes real time; the state waits instead of stepping
 LIMIT = 900
@@ -285,11 +288,27 @@ def _compute(db=None):
             # near it while reaching across and nothing else protects the links.
             _arm.remove_obstacle(PLATFORM)
             _arm.add_obstacle(PLATFORM, reactive=False)
+            _trace("  arrived over place; still holding: %s" % _arm.is_grasping(cube))
             _go(LOWER)
         return True
 
     if _state == LOWER:
+        # Stop on contact, not on arriving at a number.
+        #
+        # The cube resting on the platform is the actual end condition, and it
+        # is measurable — so a descent that converges early, late, or not at all
+        # still releases at the right moment. Releasing on a position target
+        # meant a servo that timed out let go from wherever it had got to, which
+        # is how a cube ends up on the floor beside the platform rather than on
+        # it.
+        if PLATFORM in cube.contact_bodies():
+            _trace("  touched down: cube on platform at %s"
+                   % [round(float(v), 3) for v in cube.position])
+            _go(RELEASE)
+            return True
         if _arm.servo_to([px, py, PLACE_Z], DOWN, tolerance=FINE) or _timeout():
+            _trace("  lowered without contact; releasing anyway at %s"
+                   % [round(float(v), 3) for v in cube.position])
             _go(RELEASE)
         return True
 
