@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import ast
 import glob
+import inspect
 import hashlib
 import json
 import logging
@@ -481,6 +482,48 @@ def audit(name: str | None = None) -> dict[str, Any]:
     return report
 
 
+def _stale_modules() -> list[str]:
+    """simliverse_sim modules whose source on disk differs from what is running.
+
+    Python imports a module once. Deploying a new file into a long-lived Kit
+    session therefore changes nothing until something purges `sys.modules` — and
+    a controller then executes the *old* library while every inspection of the
+    file on disk confirms the fix is present.
+
+    That is not a hypothetical and it was not cheap. Two experiments returned
+    byte-identical results and were read as "the thing I changed is not the
+    cause", when the changed code had never run. A delivered controller later
+    failed on a bug that had already been fixed, and the scene simply sat still,
+    which reads as the robot being stuck.
+    """
+    import sys
+
+    stale = []
+    for name, module in list(sys.modules.items()):
+        if not name.startswith("simliverse_sim"):
+            continue
+        path = getattr(module, "__file__", None)
+        if not path or not os.path.isfile(path):
+            continue
+        try:
+            with open(path, encoding="utf-8") as handle:
+                on_disk = handle.read()
+            running = inspect.getsource(module)
+        except Exception:  # noqa: BLE001 — unreadable source is not a mismatch
+            continue
+        if on_disk.replace("\r\n", "\n") != running.replace("\r\n", "\n"):
+            stale.append(name)
+    return sorted(stale)
+
+
+PURGE_SNIPPET = (
+    "    import importlib, sys\n"
+    "    for m in [k for k in sys.modules if k.startswith('simliverse_sim')]:\n"
+    "        del sys.modules[m]\n"
+    "    importlib.invalidate_caches()"
+)
+
+
 def deliver(
     name: str,
     code: str,
@@ -501,6 +544,18 @@ def deliver(
     user actually keeps. Only a controller makes the stage perform the task, and
     only `reproduced: True` here shows that it does.
     """
+    stale = _stale_modules()
+    if stale:
+        raise ControllerError(
+            "The running library is not the one on disk: "
+            + ", ".join(stale)
+            + "\n\nPython imports a module once, so a file deployed into a "
+            "long-lived session changes nothing until it is re-imported. "
+            "Delivering now would run the old code and fail on bugs that are "
+            "already fixed, leaving a scene that does nothing.\n\n"
+            "Purge and re-import first:\n\n" + PURGE_SNIPPET
+        )
+
     path = write(name, code)
     foreign = [entry for entry in graphs() if entry["script"] and entry["graph"] != graph_path]
     if foreign:
