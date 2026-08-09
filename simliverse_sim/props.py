@@ -101,24 +101,46 @@ def list_props(query: str | None = None, *, physics: str | None = None) -> list[
         # agent reading that empty result concludes no box exists and builds one
         # out of primitives. One unrecognised adjective should not hide the
         # asset the rest of the query clearly names.
-        hits = sum(1 for w in words if w in haystack)
+        missed = [w for w in words if w not in haystack]
+        hits = len(words) - len(missed)
         if not hits:
             continue
-        scored.append((-hits, -PHYSICS_KINDS.index(entry["physics"]), entry["key"], entry))
+        # ...but scoring alone just trades a silent absence for a silent
+        # approximation, which is no better. "wooden crate" reaches `small_klt`,
+        # a *plastic* bin, on the strength of "crate"; "glass jar" reaches a lab
+        # beaker on the strength of "glass". Handed back unlabelled, those get
+        # spawned and reported as the thing that was asked for. So every result
+        # carries what did not match, and callers can refuse to guess.
+        annotated = dict(
+            entry,
+            match="exact" if not missed else "partial",
+            unmatched=missed,
+        )
+        scored.append(
+            (-hits, -PHYSICS_KINDS.index(entry["physics"]), entry["key"], annotated)
+        )
 
     return [entry for *_rank, entry in sorted(scored, key=lambda row: row[:3])]
 
 
-def find_prop(query: str) -> dict[str, Any]:
+def find_prop(query: str, *, allow_partial: bool = False) -> dict[str, Any]:
     """The single best match, or raise naming what was searched for.
 
-    Raises rather than returning a near-miss: substituting a different prop for
-    the one asked for changes what the scene is made of, and that is the user's
-    decision. `list_props(query)` when you want to see the alternatives.
+    Raises on a partial match by default, and that default is the point. The
+    library has no wooden crate and no glass jar, but it has a plastic bin and a
+    lab beaker, and both score well enough to come back first. Returned quietly,
+    they get spawned and then reported as the thing that was asked for — which
+    is a substitution nobody decided on, in a scene the user believes contains
+    something else.
+
+    So a partial match raises, saying what it found and what it could not
+    account for. Pass `allow_partial=True` when the caller has already put the
+    substitution to the user, or use `list_props(query)` to show the options.
     """
     exact = _index()["props"].get(query.strip().lower())
     if exact:
-        return exact
+        return dict(exact, match="exact", unmatched=[])
+
     matches = list_props(query)
     if not matches:
         raise PropNotFound(
@@ -127,12 +149,25 @@ def find_prop(query: str) -> dict[str, Any]:
             f"say so rather than standing in a primitive — swapping the asset "
             f"changes what the scene is made of."
         )
-    return matches[0]
+
+    best = matches[0]
+    if best["match"] == "partial" and not allow_partial:
+        alternatives = ", ".join(m["key"] for m in matches[:4])
+        raise PropNotFound(
+            f"No prop matches all of {query!r}. The closest is {best['key']!r} "
+            f"({best['path']}), which does not account for "
+            f"{', '.join(repr(w) for w in best['unmatched'])}. Nearest: "
+            f"{alternatives}. Substituting one of these changes what the scene "
+            f"is made of, so it is the user's call — ask, or pass "
+            f"allow_partial=True once they have chosen."
+        )
+    return best
 
 
 def spawn_prop(
     query: str,
     *,
+    allow_partial: bool = False,
     prim_path: str | None = None,
     position: Any = (0.0, 0.0, 0.0),
     scene: Any = None,
@@ -144,7 +179,7 @@ def spawn_prop(
     """
     from .scene import Scene as _Scene
 
-    entry = find_prop(query)
+    entry = find_prop(query, allow_partial=allow_partial)
     scene = scene or _Scene.get()
     prim_path = prim_path or f"/World/{entry['key']}"
 

@@ -156,3 +156,40 @@ def test_a_query_matching_nothing_still_returns_nothing() -> None:
 def test_more_query_words_matched_ranks_higher() -> None:
     hits = props.list_props("tomato soup")
     assert hits[0]["key"] == "005_tomato_soup_can"
+
+
+def test_a_partial_match_refuses_rather_than_substituting_quietly() -> None:
+    """Scoring alone traded a silent absence for a silent approximation.
+
+    There is no wooden crate in this library. There is a plastic KLT bin, and
+    it scores well on "crate" — so it came back first, unlabelled, and would be
+    spawned and then reported as the wooden crate that was asked for. A
+    substitution nobody decided on, in a scene the user believes contains
+    something else.
+    """
+    with pytest.raises(props.PropNotFound) as excinfo:
+        props.find_prop("wooden crate")
+    message = str(excinfo.value)
+    assert "small_klt" in message, "the near miss should still be named"
+    assert "'wooden'" in message, "and what it failed to account for"
+
+
+def test_a_partial_match_is_available_once_the_choice_is_made() -> None:
+    entry = props.find_prop("wooden crate", allow_partial=True)
+    assert entry["key"] == "small_klt"
+    assert entry["match"] == "partial"
+    assert entry["unmatched"] == ["wooden"]
+
+
+def test_every_query_word_matching_is_exact() -> None:
+    for query in ("conveyor belt", "cardboard box", "banana"):
+        entry = props.find_prop(query)
+        assert entry["match"] == "exact", query
+        assert entry["unmatched"] == []
+
+
+def test_listing_labels_how_well_each_result_matched() -> None:
+    """The caller cannot weigh a result it cannot tell apart from an exact one."""
+    hits = props.list_props("glass jar")
+    assert hits and all("match" in h and "unmatched" in h for h in hits)
+    assert hits[0]["match"] == "partial"
