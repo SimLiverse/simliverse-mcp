@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from .._compat import add_reference, as_vec3, assets_root, get_stage
@@ -67,9 +67,13 @@ CATALOGUE: dict[str, RobotAsset] = {
         "kuka_kr210", "/Isaac/Robots/Kuka/KR210_L150/kr210_l150.usd", Morphology.MANIPULATOR,
         "Kuka_KR210", "6-DOF industrial arm, 150 kg payload. No gripper by default.",
     ),
+    # No motion config: Lula ships 21 and `Kinova_Gen3` is not one of them. It
+    # was seeded here anyway, so `list_robots()` advertised Cartesian control
+    # this arm does not have and `move_ee_to` failed at runtime on a robot an
+    # agent picked *because* the catalogue said it could reach.
     "kinova_gen3": RobotAsset(
         "kinova_gen3", "/Isaac/Robots/Kinova/Gen3/gen3n7_instanceable.usd", Morphology.MANIPULATOR,
-        "Kinova_Gen3", "7-DOF arm.",
+        None, "7-DOF arm. Joint control only — no Cartesian motion config ships for it.",
     ),
     # ── Dexterous hands ───────────────────────────────────────────────────────
     "allegro_hand": RobotAsset(
@@ -332,6 +336,27 @@ def discover_robots(refresh: bool = False) -> dict[str, RobotAsset]:
     # Seeded entries win on key collision: they carry a hand-checked morphology,
     # a motion config, and a written description that discovery cannot infer.
     merged = {**found, **CATALOGUE}
+
+    # ...but "hand-checked" is a claim, not a guarantee, and this is where a
+    # typo becomes a promise. `kinova_gen3` was seeded with the config
+    # `Kinova_Gen3`, which Lula does not ship. `list_robots()` therefore
+    # advertised Cartesian control for an arm that has none, and `move_ee_to`
+    # failed at runtime on a robot an agent had picked *because* the catalogue
+    # said it could reach.
+    #
+    # Inferred configs cannot be wrong this way — they are chosen from the
+    # supported list. Only seeded ones can, so they are the ones checked.
+    if supported:
+        for key, asset in list(merged.items()):
+            if asset.motion_config and asset.motion_config not in supported:
+                logger.warning(
+                    "%s claims motion config %r, which this Isaac Sim does not "
+                    "ship (it has %d). Dropping the claim: the robot stays, but "
+                    "it is reported as joint-control only rather than failing "
+                    "later inside move_ee_to.",
+                    key, asset.motion_config, len(supported),
+                )
+                merged[key] = replace(asset, motion_config=None)
     logger.info(
         "Robot catalogue: %d discovered, %d seeded, %d total",
         len(found), len(CATALOGUE), len(merged),
