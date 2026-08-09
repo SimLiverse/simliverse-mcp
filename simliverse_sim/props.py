@@ -183,6 +183,18 @@ def spawn_prop(
     scene = scene or _Scene.get()
     prim_path = prim_path or f"/World/{entry['key']}"
 
+    # Clear the path first. Referencing over a prim that already exists keeps
+    # the old prim's applied schemas, and props do not all carry physics in the
+    # same place: `004_sugar_box` puts RigidBodyAPI on its default prim,
+    # `basic_block` puts it on a child. Spawn the first, then respawn the second
+    # at the same path, and the leftover API leaves a rigid body containing a
+    # rigid body. PhysX does not allow that, so the object simply never falls —
+    # measured, on a block that sat at z=0.30 above the floor with zero
+    # velocity while reporting itself dynamic.
+    stage = get_stage()
+    if stage.GetPrimAtPath(prim_path).IsValid():
+        stage.RemovePrim(prim_path)
+
     add_reference(assets_root() + entry["path"], prim_path)
 
     from pxr import Gf, UsdGeom
@@ -203,7 +215,83 @@ def spawn_prop(
             query,
         )
 
-    return {**entry, "prim_path": prim_path}
+    # Returned, not only logged. The physics warning above goes to a logger and
+    # I missed my own — twice — because a log line is something you have to
+    # think to read. An overlap is a fact about the scene that was just built,
+    # so it comes back with the thing that built it.
+    result = {**entry, "prim_path": prim_path}
+    overlaps = _overlapping_robots(prim_path)
+    if overlaps:
+        result["overlaps"] = overlaps
+        for hit in overlaps:
+            logger.warning(
+                "%s at %s intersects %s. The prop is %.2f m across and is placed "
+                "by its centre, so its near edge sits behind the robot's base. "
+                "PhysX reports invalid transforms on the arm links when this "
+                "happens and the scene is unusable without saying so. Offset it "
+                "by at least half its extent plus the base radius.",
+                entry["key"], prim_path, hit["robot"],
+                max(entry.get("extent") or [0.0]),
+            )
+    return result
+
+
+def _world_bounds(prim_path: str) -> tuple[Any, Any] | None:
+    """Axis-aligned world bounds of a prim, or None if it has no extent."""
+    from pxr import Usd, UsdGeom
+
+    prim = get_stage().GetPrimAtPath(prim_path)
+    if not prim or not prim.IsValid():
+        return None
+    cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), ["default"])
+    rng = cache.ComputeWorldBound(prim).ComputeAlignedRange()
+    if rng.IsEmpty():
+        return None
+    return rng.GetMin(), rng.GetMax()
+
+
+def _overlapping_robots(prim_path: str) -> list[dict[str, Any]]:
+    """Robots whose base this prop has been placed on top of.
+
+    A prop is positioned by its centre and most of them are large: a pallet is
+    1.21 m long, so centring one 0.5 m in front of an arm puts its near edge at
+    -0.055 — behind the robot, with the base inside the pallet. PhysX then
+    reported invalid transforms on seven arm links and the scene was quietly
+    unusable.
+
+    Nothing about that was hard to catch. The extent is in the index and the
+    robot's position is on the stage; the check is two axis-aligned boxes. It
+    belongs here rather than in whoever is calling, because a rule that has to
+    be remembered is a rule that gets skipped — this one was, by the author of
+    the index it needed.
+    """
+    from pxr import UsdPhysics
+
+    bounds = _world_bounds(prim_path)
+    if bounds is None:
+        return []
+    low, high = bounds
+
+    hits: list[dict[str, Any]] = []
+    for prim in get_stage().Traverse():
+        if not prim.HasAPI(UsdPhysics.ArticulationRootAPI):
+            continue
+        robot_path = str(prim.GetPath())
+        if robot_path.startswith(prim_path):
+            continue
+        robot_bounds = _world_bounds(robot_path)
+        if robot_bounds is None:
+            continue
+        rlow, rhigh = robot_bounds
+        if all(low[i] <= rhigh[i] and high[i] >= rlow[i] for i in range(3)):
+            hits.append({
+                "robot": robot_path,
+                "prop_bounds": [[round(float(v), 3) for v in low],
+                                [round(float(v), 3) for v in high]],
+                "robot_bounds": [[round(float(v), 3) for v in rlow],
+                                 [round(float(v), 3) for v in rhigh]],
+            })
+    return hits
 
 
 def verify_index() -> dict[str, Any]:
