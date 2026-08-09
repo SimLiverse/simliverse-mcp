@@ -754,9 +754,24 @@ class Manipulator(Robot):
             return UsdGeom.Xformable(stage.GetPrimAtPath(path)).ComputeLocalToWorldTransform(0)
 
         tool = world(tool_link)
-        step = np.asarray(tool.ExtractTranslation(), dtype=float) - np.asarray(
-            world(previous).ExtractTranslation(), dtype=float
-        )
+        tip = np.asarray(tool.ExtractTranslation(), dtype=float)
+
+        # Walk back to the last link that is not sitting on top of the tool.
+        #
+        # A pure tool frame carries no offset from the link it hangs off, so the
+        # immediate step is zero and says nothing. This used to answer "Z" in
+        # that case, which is measurably wrong on a UR10: `ee_link` sits exactly
+        # on `wrist_3_link`, and the last real offset — `wrist_2_link` to
+        # `wrist_3_link` — lies along the tool's own X with a projection of
+        # 1.000. Z is ninety degrees off, and the only symptom is a suction cup
+        # mounted across the flange instead of along it.
+        index = links.index(tool_link) if tool_link in links else len(links) - 1
+        step = np.zeros(3)
+        for candidate in reversed(links[:index]):
+            step = tip - np.asarray(world(candidate).ExtractTranslation(), dtype=float)
+            if float(np.linalg.norm(step)) >= 1e-6:
+                break
+
         if float(np.linalg.norm(step)) < 1e-6:
             return "Z"
         step /= float(np.linalg.norm(step))
@@ -914,6 +929,50 @@ class Manipulator(Robot):
             logger.debug("Could not bind the arm base link %s", chosen, exc_info=True)
         return self._arm_base_view
 
+    def _require_solvable(self) -> None:
+        """Refuse to solve when the answer could only be nonsense.
+
+        Two states produce a plausible-looking `MotionResult` that means nothing,
+        and both were found the hard way — by reading Isaac's own log after the
+        library had already reported a number.
+
+        **A stopped timeline de-initialises the articulation.** A handle bound
+        before `scene.stop()` keeps `is_valid == True`, so nothing looks wrong,
+        but `handles_initialized` goes False and Lula cannot read joint
+        positions. Isaac logs it:
+
+            [Warning] [articulation_subset] Attempting to access an
+                      uninitialized robot Articulation.
+            [Error]   [articulation_kinematics_solver] Attempted to compute
+                      inverse kinematics for an uninitialized robot
+                      Articulation. Cannot get joint positions
+
+        and the solve comes back as a pose error of `inf` at 180 degrees, for
+        every target, including ones well inside the workspace. Read as data
+        that is a workspace boundary; it is a stale handle.
+
+        **No solver was ever built.** A UR10 whose end-effector frame does not
+        resolve leaves `_ik` as None, and every `pose_to` on it fails while
+        looking like a motion problem.
+        """
+        if self._ik is None:
+            raise MotionError(
+                f"{self.prim_path}: no inverse-kinematics solver. The end-effector "
+                f"frame did not resolve for this robot, so `pose_to` and "
+                f"`command_pose` cannot be used on it. `move_ee_to` and `servo_to` "
+                f"go through RMPflow and may still work; check "
+                f"describe()['end_effector_frame'] and pass `rmp_config=` if the "
+                f"motion configuration was not matched."
+            )
+        if getattr(self._articulation, "handles_initialized", True) is False:
+            raise MotionError(
+                f"{self.prim_path}: this handle was bound before the timeline "
+                f"stopped and its articulation is no longer initialised, so the "
+                f"solver cannot read joint positions. Every solve from here "
+                f"returns an infinite error at 180 degrees regardless of the "
+                f"target. Play the timeline and re-bind with Robot.attach()."
+            )
+
     def _sync_base_pose(self) -> None:
         """Tell RMPflow and Lula where the robot actually stands.
 
@@ -1044,6 +1103,7 @@ class Manipulator(Robot):
         28 m. Warm-started, consecutive solutions differ by about 0.07 rad for a
         10 cm step, and the arm simply travels.
         """
+        self._require_solvable()
         self._ensure_motion_policy()
         self._sync_base_pose()
         target = as_vec3(position, name="position")
