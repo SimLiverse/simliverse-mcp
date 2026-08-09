@@ -75,6 +75,11 @@ class _Arm:
     def _pose_feedback_problems(self):
         return []
 
+    def _inertia_problems(self):
+        # Needs a live USD stage; covered where the stage exists, stubbed here so
+        # these cases stay pure logic.
+        return []
+
 
 def problems(arm) -> list[dict[str, str]]:
     return Robot.asset_problems(arm)

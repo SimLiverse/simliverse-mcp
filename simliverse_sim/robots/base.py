@@ -631,8 +631,64 @@ class Robot:
                     "registered with PhysX."
                 ),
             })
+        problems.extend(self._inertia_problems())
         problems.extend(self._pose_feedback_problems())
         return problems
+
+    def _inertia_problems(self) -> list[dict[str, str]]:
+        """Links PhysX had to invent an inertia tensor for.
+
+        Isaac says so, once, at Info level and never again:
+
+            The rigid body at /World/Arm/ee_link has a possibly invalid inertia
+            tensor of {1.0, 1.0, 1.0}, small sphere approximated inertia was
+            used. Either specify correct values...
+
+        Note the mismatch: {1.0, 1.0, 1.0} is the tensor PhysX *substituted*,
+        not the one the asset declares. A UR10's `ee_link` actually carries
+        `diagonalInertia = (0, 0, 0)` with a mass of 1e-4, which is what a
+        converter writes for a frame it has no inertia for. Checking for the
+        number in the log message finds nothing; checking for the zero finds it.
+
+        The link is then simulated with dynamics nobody chose, and on a wrist
+        that carries a tool that shows up as a joint that will not settle.
+
+        This is reported and never repaired: correcting an asset's inertia
+        changes the dynamics being simulated, and a policy trained against a
+        robot we quietly edited does not transfer.
+        """
+        try:
+            from pxr import UsdPhysics
+        except Exception:  # noqa: BLE001 — no USD, no check
+            return []
+
+        stage = get_stage()
+        suspect: list[str] = []
+        for link in self.links():
+            prim = stage.GetPrimAtPath(str(link))
+            if not prim or not prim.IsValid():
+                continue
+            if not prim.HasAPI(UsdPhysics.MassAPI):
+                continue
+            attr = UsdPhysics.MassAPI(prim).GetDiagonalInertiaAttr()
+            value = attr.Get() if attr else None
+            if value is not None and all(abs(float(v)) < 1e-12 for v in value):
+                suspect.append(str(link))
+
+        if not suspect:
+            return []
+        return [{
+            "issue": "links carry a placeholder inertia tensor",
+            "detail": ", ".join(suspect),
+            "consequence": (
+                "PhysX reports these as possibly invalid and substitutes a small "
+                "sphere approximation, so they are simulated with dynamics the "
+                "asset never specified. Expect joints that oscillate or refuse to "
+                "settle, worst on a wrist carrying a tool. Fixing it means editing "
+                "the asset, which changes what is being simulated — the user's "
+                "call, not a repair to make in passing."
+            ),
+        }]
 
     def _pose_feedback_problems(self) -> list[dict[str, str]]:
         """Links whose USD transform disagrees with where physics has them.
