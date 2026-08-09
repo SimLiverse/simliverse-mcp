@@ -61,7 +61,7 @@ _SUPPORT_SUFFIXES = (
 # entries — it can never introduce an asset that the walk did not find.
 _KEYWORDS = {
     "conveyors": ["conveyor", "belt", "conveyor belt", "transport", "line"],
-    "klt_bin": ["bin", "box", "tote", "crate", "container", "klt", "logistics"],
+    "klt_bin": ["bin", "box", "tote", "crate", "container", "klt", "logistics", "cardboard", "plastic"],
     "pallet": ["pallet", "skid", "warehouse"],
     "forklift": ["forklift", "truck", "warehouse", "vehicle"],
     "packingtable": ["table", "workbench", "bench", "packing", "surface"],
@@ -70,7 +70,7 @@ _KEYWORDS = {
     "shapes": ["shape", "primitive", "cube", "sphere", "cone", "cylinder"],
     "mugs": ["mug", "cup", "drink"],
     "food": ["food", "package", "box", "grocery"],
-    "ycb": ["ycb", "benchmark", "grocery", "household", "manipulation"],
+    "ycb": ["ycb", "benchmark", "grocery", "household", "manipulation", "cardboard", "carton"],
     "sektion_cabinet": ["cabinet", "drawer", "cupboard", "furniture"],
     "beaker": ["beaker", "glass", "lab", "laboratory"],
     "factory": ["bolt", "nut", "fastener", "assembly", "peg"],

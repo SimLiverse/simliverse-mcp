@@ -86,16 +86,27 @@ def list_props(query: str | None = None, *, physics: str | None = None) -> list[
     the majority of this library cannot.
     """
     words = [w for w in (query or "").lower().replace("-", " ").split() if w]
-    out = []
+    scored: list[tuple[int, int, str, dict[str, Any]]] = []
+
     for entry in _index()["props"].values():
         if physics and entry["physics"] != physics:
             continue
-        if words:
-            haystack = f"{entry['key']} {' '.join(entry['keywords'])} {entry['category']}"
-            if not all(w in haystack for w in words):
-                continue
-        out.append(entry)
-    return sorted(out, key=lambda e: (PHYSICS_KINDS.index(e["physics"]) * -1, e["key"]))
+        if not words:
+            scored.append((0, -PHYSICS_KINDS.index(entry["physics"]), entry["key"], entry))
+            continue
+
+        haystack = f"{entry['key']} {' '.join(entry['keywords'])} {entry['category']}"
+        # Scored, not all-or-nothing. Requiring every word meant "cardboard box"
+        # matched nothing at all -- "cardboard" is in no keyword list -- and an
+        # agent reading that empty result concludes no box exists and builds one
+        # out of primitives. One unrecognised adjective should not hide the
+        # asset the rest of the query clearly names.
+        hits = sum(1 for w in words if w in haystack)
+        if not hits:
+            continue
+        scored.append((-hits, -PHYSICS_KINDS.index(entry["physics"]), entry["key"], entry))
+
+    return [entry for *_rank, entry in sorted(scored, key=lambda row: row[:3])]
 
 
 def find_prop(query: str) -> dict[str, Any]:

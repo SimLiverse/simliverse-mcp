@@ -133,3 +133,26 @@ def test_the_index_declares_what_it_was_generated_against() -> None:
 def test_index_is_valid_json_on_disk() -> None:
     with props._INDEX_PATH.open(encoding="utf-8") as handle:
         assert json.load(handle)["count"] > 100
+
+
+def test_an_unknown_adjective_does_not_hide_the_asset() -> None:
+    """"cardboard box" used to match nothing at all.
+
+    `list_props` required *every* word, and "cardboard" appears in no keyword
+    list, so the query returned empty — from which an agent concludes no box
+    exists and builds one out of primitives. Scoring instead of requiring means
+    one unrecognised adjective cannot hide what the rest of the query names.
+    """
+    keys = [p["key"] for p in props.list_props("cardboard box")]
+    assert keys, "an unknown adjective emptied the result"
+    assert "003_cracker_box" in keys[:3]
+
+
+def test_a_query_matching_nothing_still_returns_nothing() -> None:
+    """Scoring must not degrade into matching everything."""
+    assert props.list_props("teleporter") == []
+
+
+def test_more_query_words_matched_ranks_higher() -> None:
+    hits = props.list_props("tomato soup")
+    assert hits[0]["key"] == "005_tomato_soup_can"
