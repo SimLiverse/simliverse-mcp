@@ -502,6 +502,32 @@ class SuctionGripper:
         joint.CreateLocalRot0Attr().Set(Gf.Quatf(1, 0, 0, 0))
         joint.CreateLocalPos1Attr().Set(Gf.Vec3f(0.0, 0.0, 0.0))
         joint.CreateLocalRot1Attr().Set(Gf.Quatf(1, 0, 0, 0))
+        # KNOWN DEFECT, left enabled on purpose: this is the only setting that
+        # grips, and it is also the one that wobbles.
+        #
+        # An attachment point holds nothing at rest, so `body1` is empty — and
+        # PhysX reads an empty body as *the world*. Enabled, this becomes a joint
+        # anchoring the cup to a fixed world pose, with live drives, while the
+        # mount joint drags the same cup along with the arm. The two fight, and
+        # on an arm left to sag under gravity the cup-to-flange gap swings
+        # between 0.008 m and 0.180 m instead of holding at its authored 0.010 m.
+        #
+        # Four configurations were measured on a UR10, over 200 steps of
+        # playback (idle spread / does it latch):
+        #
+        #   body1 empty, enabled, drives on   0.1717   yes   <- this one
+        #   body1 empty, disabled             0.0000   no
+        #   body1 = flange, enabled           0.0000   no
+        #   body1 empty, enabled, drives 0    0.0031   no
+        #
+        # Only the first grips. The gripper needs `body1` free to fill in with
+        # whatever it latches onto, and needs the joint live to do it.
+        #
+        # Toggling `physics:jointEnabled` around `close()` looks like the answer
+        # and is not: PhysX drops the write, which Kit reports as
+        # "PxConstraint::setFlag() not allowed while simulation is running. Call
+        # will be ignored." A real fix has to change the flag while the timeline
+        # is paused, or go through Isaac's gripper API rather than USD.
         joint.CreateJointEnabledAttr().Set(True)
         joint.CreateExcludeFromArticulationAttr().Set(True)
         joint.CreateCollisionEnabledAttr().Set(False)
@@ -591,7 +617,15 @@ class SuctionGripper:
             self.scene.step(settle_steps)
 
     def close(self, *, settle_steps: int = 30) -> None:
-        """Engage suction. Latches onto whatever is within `max_grip_distance`."""
+        """Engage suction. Latches onto whatever is within `max_grip_distance`.
+
+        Gating the attachment joint around this call — enabling it here and
+        disabling it in `open()` — is the obvious cure for the cup wobble
+        documented in `create`, and it does not work. PhysX ignores a constraint
+        flag written while the simulation is running, silently, so the joint is
+        still disabled when the gripper looks for something to hold and the
+        status never leaves Closing. Measured, not assumed.
+        """
         self._act(self.CLOSE, settle_steps)
 
     def open(self, *, settle_steps: int = 15) -> None:
