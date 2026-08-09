@@ -573,7 +573,35 @@ class Robot:
         limits = self.joint_limits
         names = self.joint_names
 
-        gripper = getattr(getattr(self, "gripper", None), "joint_indices", None) or []
+        # An arm with no end effector at all. This has to come first, and it has
+        # to be here rather than left to the caller's judgement: the check below
+        # is for a gripper whose *limits* are broken, and it iterates over the
+        # finger joints — so a robot with zero finger joints passes it silently.
+        # The worse defect was invisible while the milder one was reported.
+        #
+        # It reads as an ordinary arm otherwise. A UR10 answers `hasattr(arm,
+        # "gripper")` with True and hands back a Gripper holding an empty joint
+        # list, whose open() and close() then succeed by doing nothing. That is
+        # the shape of the failure worth naming: not a crash, a no-op that
+        # everything downstream treats as a working hand.
+        end_effector = getattr(self, "gripper", None)
+        if end_effector is not None and not getattr(end_effector, "joint_indices", None):
+            problems.append({
+                "issue": "this arm has no end effector",
+                "detail": (
+                    "the articulation declares no finger or jaw joints, so there is "
+                    "nothing on the flange that can hold an object"
+                ),
+                "consequence": (
+                    "open() and close() raise MotionError, and grasp() cannot form "
+                    "a grasp. Any task that involves picking something up needs a "
+                    "gripper fitted, or a different arm. Fitting one changes the "
+                    "robot, so it is the user's decision — ask rather than "
+                    "authoring one."
+                ),
+            })
+
+        gripper = getattr(end_effector, "joint_indices", None) or []
         unbounded = [names[i] for i in gripper if limits[i][0] is None or limits[i][1] is None]
         if unbounded:
             problems.append({
