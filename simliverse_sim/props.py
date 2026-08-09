@@ -203,6 +203,34 @@ def spawn_prop(
     xform.ClearXformOpOrder()
     xform.AddTranslateOp().Set(Gf.Vec3d(*as_vec3(position, name="position")))
 
+    # KNOWN BUG — props referenced here do not fall. Reproducible in a clean
+    # scene where `scene.spawn_rigid` drops a cube from 0.60 m and it rests at
+    # 0.05 m. PhysX says why:
+    #
+    #   The rigid body at /World/Box_0 has a possibly invalid inertia tensor of
+    #   {1.0, 1.0, 1.0} and a negative mass, small sphere approximated inertia
+    #   was used. Either specify correct values in the mass properties, or add
+    #   collider(s) to any subordinate prims.
+    #
+    # The prim this path creates carries PhysicsRigidBodyAPI, PhysxRigidBodyAPI
+    # and PhysxContactReportAPI, none of which its source asset declares —
+    # `basic_block.usd` puts RigidBodyAPI only on `/Root/Cube`. So it becomes a
+    # rigid body with no collider of its own, hence no computable mass. That is
+    # not one prop misbehaving: a single degenerate body stops dynamics for the
+    # entire scene, and everything afterwards reports plausible numbers that
+    # mean nothing.
+    #
+    # Ruled out by measurement, so as not to be retried:
+    #   * stale prim paths — a never-used path behaves identically
+    #   * constructing RigidObject on the wrapper — happens without it
+    #   * applying MassAPI to prims tagged RigidBodyAPI — no effect, and
+    #     applying it to the wrapper makes props fall through the floor to
+    #     -45 m, which confirms the wrapper is wrongly a body rather than
+    #     fixing anything
+    #
+    # Next step: bisect this function. Call `add_reference_to_stage` directly
+    # and read the prim's applied schemas immediately, before anything else
+    # touches it, to find what applies RigidBodyAPI to the wrapper.
     if entry["physics"] != "dynamic":
         logger.warning(
             "%s is a %s asset: it declares %s. It will not behave like an object "
