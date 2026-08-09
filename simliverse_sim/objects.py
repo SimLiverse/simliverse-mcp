@@ -32,7 +32,48 @@ class RigidObject:
         if not self.prim.IsValid():
             raise ValueError(f"No prim at {prim_path!r}")
         self._reject_articulation()
+        self._reject_wrapper()
         self._enable_contact_reporting()
+
+    def _reject_wrapper(self) -> None:
+        """Refuse to make a rigid body out of a prim that only contains one.
+
+        Also destructive, and quietly so. A referenced asset puts its body on a
+        child — `basic_block.usd` on `/Root/Cube` — so the prim a caller holds
+        is an Xform wrapping the body, not the body. Wrapping *that* applies
+        RigidBodyAPI to a prim with no collider beneath it, and PhysX then
+        computes a negative mass:
+
+            The rigid body at /World/Box_0 has a possibly invalid inertia
+            tensor of {1.0, 1.0, 1.0} and a negative mass
+
+        The blast radius is what makes this worth a refusal rather than a
+        warning. One degenerate body stops dynamics for the *whole scene*:
+        measured here, reading three props' positions froze a Franka scene so
+        completely that an unrelated control cube dropped from 0.6 m never
+        moved, while every read kept returning well-formed numbers. The
+        measurement destroyed what it was measuring, and nothing said so.
+
+        `scene.spawn_rigid` is unaffected — it puts body and collider on the one
+        prim it creates, which is why cube-stacking always worked and props
+        never did.
+        """
+        from pxr import Usd, UsdPhysics
+
+        prim = self.prim
+        if prim.HasAPI(UsdPhysics.RigidBodyAPI) or prim.HasAPI(UsdPhysics.CollisionAPI):
+            return
+
+        for child in Usd.PrimRange(prim):
+            if child == prim or not child.HasAPI(UsdPhysics.RigidBodyAPI):
+                continue
+            raise ValueError(
+                f"{self.prim_path!r} is not a rigid body — it contains one, at "
+                f"{child.GetPath()}. Wrapping it here would apply RigidBodyAPI to "
+                f"a prim with no collider, which PhysX reads as a negative mass, "
+                f"and one such body stops dynamics for the entire scene. Use the "
+                f"inner path (spawn_prop returns it as `body_path`)."
+            )
 
     def _reject_articulation(self) -> None:
         """Refuse to treat a robot as a rigid body.
