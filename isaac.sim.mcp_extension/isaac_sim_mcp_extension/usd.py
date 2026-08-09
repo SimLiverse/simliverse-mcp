@@ -423,6 +423,14 @@ class USDLoader:
             print(f"Error testing absolute paths: {str(e)}")
 
 
+class USDSearchUnavailable(RuntimeError):
+    """The search service could not answer. Says nothing about the asset."""
+
+
+class USDSearchNoResults(LookupError):
+    """The service answered, and has no such asset. A real absence."""
+
+
 class USDSearch3d:
     def __init__(self):
         """Initialize Beaver3d with model name and API key from environment variables"""
@@ -455,9 +463,61 @@ class USDSearch3d:
             ),
         )
         carb.log_info(f"usd_search_3d_from_text return code: {response.status_code}")
-        details = json.dumps(response.json(), indent=2)
-        details = json.loads(details)
-        url = details[0]["url"]
+
+        # The status code used to be logged and then ignored, so an error body
+        # was parsed as if it were results. A 404 payload is a dict, `details[0]`
+        # raised `KeyError: 0`, and the caller's `str(e)` rendered that as the
+        # message "0" -- which tells nobody anything.
+        #
+        # The distinction below is the point. "The service is unavailable" and
+        # "this asset does not exist" are different answers with different
+        # correct responses: the first is a blocked task to report, the second is
+        # a decision to put to the user, who may want a different prop or a
+        # primitive stand-in. Collapsing them into one opaque failure is how an
+        # agent ends up building a conveyor belt out of cubes.
+        if response.status_code in (401, 403, 404):
+            raise USDSearchUnavailable(
+                f"USD Search returned HTTP {response.status_code}. The endpoint is "
+                f"current, so this is almost always the API key lacking the "
+                f"'Public API Endpoints' entitlement -- NVIDIA does not grant it "
+                f"with the key, and personal-org accounts have to request it. "
+                f"Asset search is unavailable; this is NOT evidence that "
+                f"'{text_prompt}' does not exist. Server said: "
+                f"{response.text[:300]}"
+            )
+        if response.status_code >= 400:
+            raise USDSearchUnavailable(
+                f"USD Search returned HTTP {response.status_code}: "
+                f"{response.text[:300]}"
+            )
+
+        payload = response.json()
+        # Documented as a list of results; tolerate an object wrapper rather than
+        # index blindly into whichever shape arrives.
+        if isinstance(payload, dict):
+            for key in ("items", "results", "data"):
+                if isinstance(payload.get(key), list):
+                    payload = payload[key]
+                    break
+        if not isinstance(payload, list):
+            raise USDSearchUnavailable(
+                f"USD Search returned {type(payload).__name__}, not a list of "
+                f"results: {str(payload)[:300]}"
+            )
+        if not payload:
+            raise USDSearchNoResults(
+                f"USD Search has no asset matching '{text_prompt}'. The service "
+                f"answered normally, so this is a real absence rather than a "
+                f"failure: choosing a different asset, or standing in a primitive, "
+                f"changes what the scene is made of and is the user's call."
+            )
+
+        first = payload[0]
+        if not isinstance(first, dict) or "url" not in first:
+            raise USDSearchUnavailable(
+                f"USD Search result has no 'url' field: {str(first)[:300]}"
+            )
+        url = first["url"]
 
         # Convert S3 URL to HTTPS URL if needed
         if url.startswith("s3://deepsearch-demo-content"):
