@@ -1243,21 +1243,44 @@ class Manipulator(Robot):
         target = as_vec3(position, name="position")
         self.scene.play()
 
+        # The closest approach over the whole run, not just the last sample. A
+        # tool hovering on the tolerance boundary dips in and out, so the error
+        # at the moment the loop gives up is an arbitrary point in that
+        # oscillation — and reporting it produced the message
+        # "final error 0.0049 m > 0.005 m", which is not an inequality that can
+        # hold. Measured on a UR10: the arm was arriving every few ticks and
+        # never staying for three, and the message sent me looking for a
+        # workspace problem that did not exist.
+        best = float("inf")
+
         for step in range(max_steps):
             reached = self.servo_to(
                 target, orientation, tolerance=tolerance, hold=hold_steps
             )
             self.scene.step(1)
+            best = min(best, self._servo_error)
             if reached:
                 return MotionResult(True, step + 1, self._servo_error, target.tolist())
 
         error = self._servo_error
-        result = MotionResult(False, max_steps, error, target.tolist())
+        result = MotionResult(False, max_steps, best, target.tolist())
         if raise_on_fail:
+            if best <= tolerance:
+                # It got there. It would not settle, which is a different fault
+                # with a different fix: damp the approach or relax `hold_steps`,
+                # rather than go looking for an obstacle.
+                raise MotionError(
+                    f"End effector reached {target.round(3).tolist()} (closest "
+                    f"approach {best:.4f} m, inside the {tolerance} m tolerance) but "
+                    f"never held it for {hold_steps} consecutive steps in "
+                    f"{max_steps}. It is oscillating around the target, not blocked: "
+                    f"raise `tolerance`, lower `hold_steps`, or damp the approach."
+                )
             raise MotionError(
                 f"End effector did not reach {target.round(3).tolist()} within "
-                f"{max_steps} steps (final error {error:.4f} m > {tolerance} m). The "
-                f"target is likely outside the workspace or blocked by a collision."
+                f"{max_steps} steps (closest approach {best:.4f} m, last "
+                f"{error:.4f} m, tolerance {tolerance} m). The target is likely "
+                f"outside the workspace or blocked by a collision."
             )
         return result
 
