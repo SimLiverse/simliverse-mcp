@@ -81,6 +81,8 @@ def search_usd(
     position: Optional[Sequence[float]] = None,
     scale: Optional[Sequence[float]] = None,
 ) -> Dict[str, Any]:
+    from ..usd import USDSearchNoResults, USDSearchUnavailable
+
     try:
         if not text_prompt:
             return {"status": "error", "message": "text_prompt is required"}
@@ -94,8 +96,27 @@ def search_usd(
             "prim_path": prim_path,
             "url": url,
         }
+    # Kept apart on purpose. "The service is down" and "no such asset exists"
+    # lead to different correct behaviour -- report a blocked task, or put the
+    # substitution to the user -- and this verb is the only place that still
+    # knows which one happened. Flattening both to `str(e)` is what produced the
+    # message "0" and left an agent with no way to tell them apart.
+    except USDSearchNoResults as exc:
+        return {
+            "status": "not_found",
+            "message": str(exc),
+            "searched_for": text_prompt,
+            "service_available": True,
+        }
+    except USDSearchUnavailable as exc:
+        return {
+            "status": "unavailable",
+            "message": str(exc),
+            "searched_for": text_prompt,
+            "service_available": False,
+        }
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        return {"status": "error", "message": f"{type(e).__name__}: {e}"}
 
 
 def generate_3d(

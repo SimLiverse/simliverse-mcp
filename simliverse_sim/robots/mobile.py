@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from .._compat import as_vec3
+from .._compat import articulation_action, as_vec3
 from .base import Morphology, Robot
 
 if TYPE_CHECKING:
@@ -123,6 +123,64 @@ class WheeledRobot(Robot):
 
     # ── Closed-loop navigation ────────────────────────────────────────────────
 
+    # ── Path following ────────────────────────────────────────────────────────
+
+    def apply_wheel_action(self, action: Any) -> None:
+        """Apply wheel commands produced by an Isaac wheeled controller.
+
+        `WheelBasePoseController` returns an ArticulationAction sized for the
+        wheels it was told about, not for this articulation, so the velocities
+        are mapped onto the wheel joints by position rather than passed through.
+        """
+        velocities = getattr(action, "joint_velocities", None)
+        if velocities is None:
+            return
+        values = np.asarray(velocities, dtype=float).reshape(-1)
+        left, right = self._split_wheels()
+        ordered = list(left) + list(right)
+        targets = np.zeros(self.dof)
+        for slot, value in zip(ordered, values):
+            targets[slot] = float(value)
+        self._controller().apply_action(
+            articulation_action(joint_velocities=targets)
+        )
+
+    def plan_path(self, waypoints: Any, **kwargs: Any) -> Any:
+        """Smooth a route into a followable path. Does not drive.
+
+        The waypoints *are* the route: this smooths and speed-profiles them, it
+        does not find a way around anything. Nothing in the wheeled stack does —
+        see `simliverse_sim.robots.navigation`.
+        """
+        from .navigation import plan_path as _plan_path
+
+        # A path has to start where the robot is. Handing over a list of
+        # destinations is the obvious way to write a route, and it produced a
+        # path beginning 0.85 m to the side of the base — the tracker then
+        # locked onto whichever point was nearest and drove into a wall. The
+        # current position is prepended unless the caller already began there.
+        points = [np.asarray(w, dtype=float).reshape(-1)[:2] for w in waypoints]
+        here = np.asarray(self.base_position, dtype=float)[:2]
+        if not points or float(np.linalg.norm(points[0] - here)) > 1e-3:
+            points = [here] + points
+            logger.info(
+                "Route did not start at the base; prepending %s", here.round(3).tolist()
+            )
+        kwargs.setdefault("start_yaw", self._heading())
+        return _plan_path(points, **kwargs)
+
+    def follower(self, plan: Any, **kwargs: Any) -> Any:
+        """A `PathFollower` for `plan`; call `.step()` once per tick."""
+        from .navigation import PathFollower
+
+        return PathFollower(self, plan, **kwargs)
+
+    def pose_driver(self, **kwargs: Any) -> Any:
+        """A `PoseDriver`; call `.step(goal)` once per tick to close on a pose."""
+        from .navigation import PoseDriver
+
+        return PoseDriver(self, **kwargs)
+
     def drive_to(
         self,
         position: Any,
@@ -137,8 +195,22 @@ class WheeledRobot(Robot):
         A simple turn-then-go controller: it is not a path planner and will drive
         into obstacles. For anything with clutter, plan waypoints and call this
         for each leg.
+
+        `position` may be [x, y] or [x, y, z]; the height is ignored either way.
+        It used to demand three components while the docstring said XY, which is
+        the first call anyone makes.
+
+        The return value is measured after stopping, not before. A base with
+        momentum coasts through the settle, so checking the tolerance and then
+        braking reported arrival at 0.128 m against a tolerance of 0.10 — true
+        when it was checked and false by the time the caller saw it.
         """
-        target = as_vec3(position, name="position")[:2]
+        wanted = np.asarray(position, dtype=float).reshape(-1)
+        if wanted.size not in (2, 3):
+            raise ValueError(
+                f"position must be [x, y] or [x, y, z], got {wanted.size}: {position!r}"
+            )
+        target = wanted[:2]
         self.scene.play()
 
         for _ in range(max_steps):
@@ -147,7 +219,13 @@ class WheeledRobot(Robot):
             distance = float(np.linalg.norm(offset))
             if distance < tolerance:
                 self.stop()
-                return True
+                settled = float(np.linalg.norm(target - self.base_position[:2]))
+                if settled > tolerance:
+                    logger.info(
+                        "%s coasted to %.3f m from the goal while stopping "
+                        "(tolerance %.3f)", self.prim_path, settled, tolerance
+                    )
+                return settled <= tolerance
 
             heading = self._heading()
             desired = float(np.arctan2(offset[1], offset[0]))

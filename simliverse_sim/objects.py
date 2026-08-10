@@ -32,7 +32,69 @@ class RigidObject:
         if not self.prim.IsValid():
             raise ValueError(f"No prim at {prim_path!r}")
         self._reject_articulation()
+        self._reject_wrapper()
         self._enable_contact_reporting()
+
+    def _reject_wrapper(self) -> None:
+        """Refuse to make a rigid body out of a prim that only contains one.
+
+        Also destructive, and quietly so. A referenced asset puts its body on a
+        child — `basic_block.usd` on `/Root/Cube` — so the prim a caller holds
+        is an Xform wrapping the body, not the body. Wrapping *that* applies
+        RigidBodyAPI to a prim with no collider beneath it, and PhysX then
+        computes a negative mass:
+
+            The rigid body at /World/Box_0 has a possibly invalid inertia
+            tensor of {1.0, 1.0, 1.0} and a negative mass
+
+        The blast radius is what makes this worth a refusal rather than a
+        warning. One degenerate body stops dynamics for the *whole scene*:
+        measured here, reading three props' positions froze a Franka scene so
+        completely that an unrelated control cube dropped from 0.6 m never
+        moved, while every read kept returning well-formed numbers. The
+        measurement destroyed what it was measuring, and nothing said so.
+
+        `scene.spawn_rigid` is unaffected — it puts body and collider on the one
+        prim it creates, which is why cube-stacking always worked and props
+        never did.
+        """
+        from pxr import Usd, UsdPhysics
+
+        prim = self.prim
+        if prim.HasAPI(UsdPhysics.RigidBodyAPI) or prim.HasAPI(UsdPhysics.CollisionAPI):
+            return
+
+        bodies = [
+            str(child.GetPath())
+            for child in Usd.PrimRange(prim)
+            if child != prim and child.HasAPI(UsdPhysics.RigidBodyAPI)
+        ]
+        if not bodies:
+            return
+
+        # One body, no ambiguity: retarget to it silently. Refusing here was the
+        # first fix and it is the worse one — it makes every caller remember
+        # which spawn path they used and look up an inner path by hand, to avoid
+        # a trap they cannot see. There is nothing to decide when a wrapper
+        # contains exactly one body, so the library decides it.
+        if len(bodies) == 1:
+            logger.debug(
+                "%s contains its rigid body at %s; measuring that instead",
+                self.prim_path, bodies[0],
+            )
+            self.prim_path = bodies[0]
+            return
+
+        # Several bodies is a real choice, and guessing would put the caller
+        # back where they started — holding a number from something they did not
+        # pick.
+        raise ValueError(
+            f"{self.prim_path!r} is not a rigid body — it contains {len(bodies)}: "
+            f"{', '.join(bodies[:4])}. Name the one you mean; wrapping the "
+            f"container would apply RigidBodyAPI to a prim with no collider, "
+            f"which PhysX reads as a negative mass, and one such body stops "
+            f"dynamics for the entire scene."
+        )
 
     def _reject_articulation(self) -> None:
         """Refuse to treat a robot as a rigid body.
@@ -69,15 +131,48 @@ class RigidObject:
         return get_stage().GetPrimAtPath(self.prim_path)
 
     def _rigid_view(self) -> Any:
-        if self._view is None:
-            from isaacsim.core.prims import SingleRigidPrim
+        """The PhysX view of this body, or None while physics is not running.
 
-            self._view = SingleRigidPrim(prim_path=self.prim_path)
+        `SingleRigidPrim` reaches into the physics simulation view, which does
+        not exist until the timeline plays. Built any earlier it raises
+
+            AttributeError: 'NoneType' object has no attribute 'max_shapes'
+
+        from somewhere inside isaacsim.core, naming neither this prim nor the
+        timeline nor anything the caller wrote. That is the whole failure: the
+        object is fine, the code is fine, and the only problem is that it was
+        asked one line too soon — which is the *natural* order to write, since
+        creating an object and then reading it back is how anyone checks their
+        own work.
+
+        So this returns None rather than raising, is cached only once it really
+        worked, and is retried on the next call. Readers fall back to USD;
+        writers say plainly what is wrong.
+        """
+        if self._view is None:
             try:
-                self._view.initialize()
+                from isaacsim.core.prims import SingleRigidPrim
+
+                view = SingleRigidPrim(prim_path=self.prim_path)
+            except Exception:
+                logger.debug("No physics view for %s yet", self.prim_path, exc_info=True)
+                return None
+            try:
+                view.initialize()
             except Exception:
                 logger.debug("RigidPrim init deferred for %s", self.prim_path, exc_info=True)
+            self._view = view
         return self._view
+
+    def _require_view(self, action: str) -> Any:
+        view = self._rigid_view()
+        if view is None:
+            raise RuntimeError(
+                f"Cannot {action} on {self.prim_path!r}: PhysX has no view of it. "
+                f"Rigid-body state only exists while the simulation is running — "
+                f"call scene.play() first."
+            )
+        return view
 
     def _enable_contact_reporting(self, threshold: float = 0.0) -> None:
         """Opt this body into PhysX contact reports.
@@ -116,8 +211,18 @@ class RigidObject:
     @property
     def orientation(self) -> np.ndarray:
         """World-space orientation as a (w, x, y, z) quaternion."""
-        _, quat = self._rigid_view().get_world_pose()
-        return np.asarray(quat, dtype=float)
+        try:
+            _, quat = self._rigid_view().get_world_pose()
+            return np.asarray(quat, dtype=float)
+        except Exception:
+            from pxr import UsdGeom
+
+            matrix = UsdGeom.Xformable(self.prim).ComputeLocalToWorldTransform(0)
+            rotation = matrix.ExtractRotationQuat()
+            imaginary = rotation.GetImaginary()
+            return np.asarray(
+                [rotation.GetReal(), imaginary[0], imaginary[1], imaginary[2]], dtype=float
+            )
 
     @property
     def linear_velocity(self) -> np.ndarray:
@@ -151,7 +256,7 @@ class RigidObject:
         view = self._rigid_view()
         # SingleRigidPrim exposes get_mass(); the batched RigidPrim view
         # exposes get_masses(). Which one is here depends on the backend.
-        for method in ("get_mass", "get_masses"):
+        for method in ("get_mass", "get_masses") if view is not None else ():
             getter = getattr(view, method, None)
             if getter is None:
                 continue
@@ -175,7 +280,7 @@ class RigidObject:
         gripper is not a grasp — that shortcut is precisely why the previous
         skills never generalised (ADR 012 §1.2).
         """
-        view = self._rigid_view()
+        view = self._require_view("set a pose")
         pos = as_vec3(position, name="position") if position is not None else None
         view.set_world_pose(
             position=pos,
@@ -183,7 +288,7 @@ class RigidObject:
         )
 
     def set_velocity(self, linear: Any = None, angular: Any = None) -> None:
-        view = self._rigid_view()
+        view = self._require_view("set a velocity")
         if linear is not None:
             view.set_linear_velocity(as_vec3(linear, name="linear"))
         if angular is not None:

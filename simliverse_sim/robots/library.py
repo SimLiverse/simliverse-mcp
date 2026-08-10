@@ -11,7 +11,8 @@ the right controller.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, replace
 from typing import Any
 
 from .._compat import add_reference, as_vec3, assets_root, get_stage
@@ -56,13 +57,23 @@ CATALOGUE: dict[str, RobotAsset] = {
         "ur5", "/Isaac/Robots/UniversalRobots/ur5/ur5.usd", Morphology.MANIPULATOR,
         "UR5", "6-DOF arm, no gripper by default.",
     ),
-    "kuka_iiwa": RobotAsset(
-        "kuka_iiwa", "/Isaac/Robots/Kuka/KR210_L150/kr210_l150.usd", Morphology.MANIPULATOR,
-        "Kuka_iiwa7", "7-DOF arm.",
+    # The key said iiwa, the asset is a KR210, and the motion config named a
+    # third robot — `Kuka_iiwa7`, which Isaac does not ship. The result was an
+    # arm that spawned cleanly, classified as a Manipulator, advertised
+    # `move_ee_to`, and then failed on the first Cartesian call with "No RMPflow
+    # configuration matches". `Kuka_KR210` is supported; the asset was right all
+    # along and only the config name was wrong.
+    "kuka_kr210": RobotAsset(
+        "kuka_kr210", "/Isaac/Robots/Kuka/KR210_L150/kr210_l150.usd", Morphology.MANIPULATOR,
+        "Kuka_KR210", "6-DOF industrial arm, 150 kg payload. No gripper by default.",
     ),
+    # No motion config: Lula ships 21 and `Kinova_Gen3` is not one of them. It
+    # was seeded here anyway, so `list_robots()` advertised Cartesian control
+    # this arm does not have and `move_ee_to` failed at runtime on a robot an
+    # agent picked *because* the catalogue said it could reach.
     "kinova_gen3": RobotAsset(
         "kinova_gen3", "/Isaac/Robots/Kinova/Gen3/gen3n7_instanceable.usd", Morphology.MANIPULATOR,
-        "Kinova_Gen3", "7-DOF arm.",
+        None, "7-DOF arm. Joint control only — no Cartesian motion config ships for it.",
     ),
     # ── Dexterous hands ───────────────────────────────────────────────────────
     "allegro_hand": RobotAsset(
@@ -181,6 +192,85 @@ def _preferred_usd(files: list[str], model: str) -> str | None:
     return sorted(exact or usable, key=len)[0]
 
 
+def _supported_motion_configs() -> list[str]:
+    """The RMPflow configurations Lula actually ships, or [] if it cannot be asked."""
+    try:
+        from .._compat import motion_generation
+
+        pairs = motion_generation().interface_config_loader.get_supported_robot_policy_pairs()
+        return list(pairs)
+    except Exception:  # noqa: BLE001 — no Lula is a degraded mode, not an error
+        logger.debug("Could not list RMPflow configurations", exc_info=True)
+        return []
+
+
+_CAMEL = re.compile(r"(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])|(?<=[A-Za-z])(?=\d)|(?<=\d)(?=[A-Za-z])")
+
+
+def _tokens(*parts: str) -> list[str]:
+    """Split names the way a model number is actually written.
+
+    On separators, on camelCase, and on letter/digit boundaries — so `KR210_L150`
+    is {kr, 210, l, 150} and `UR3` is {ur, 3}. That last split is what keeps a
+    UR30 from answering to the UR3 configuration: as whole strings "ur3" is a
+    prefix of "ur30", but as tokens {ur, 3} is not a subset of {ur, 30}.
+    """
+    out: list[str] = []
+    for part in parts:
+        for chunk in re.split(r"[^0-9A-Za-z]+", part):
+            for piece in _CAMEL.split(chunk):
+                if piece:
+                    out.append(piece.lower())
+    return out
+
+
+def _infer_motion_config(vendor: str, model: str, supported: list[str]) -> str | None:
+    """Which RMPflow config, if any, belongs to `vendor/model`.
+
+    The only thing the seeded catalogue still contributed over discovery was this
+    name — and a hand-written table is exactly what went wrong with the Kuka,
+    where the seed claimed `Kuka_iiwa7` for an asset that is a KR210 and a config
+    Isaac does not ship. Lula publishes its own list; matching against that
+    cannot name a config that does not exist.
+
+    Every token of the config name must appear in the asset's vendor+model
+    tokens **exactly**. Substring matching was tried and is not safe here: it
+    gave `UR30` the UR3 configuration, which is a different arm with different
+    link lengths, and would have surfaced as an arm that misses everything it
+    reaches for rather than as a configuration error.
+
+    Where several configs qualify, the more model-specific one wins — measured by
+    how many of its matched tokens are *not* also in the vendor name. `FrankaFR3`
+    matches both `Franka` and `FR3`, and "franka" is a brand token the vendor
+    directory already carries, so FR3 is the specific one. A genuine tie returns
+    None: no Cartesian control and a legible error beats a confident guess at
+    which arm this is.
+    """
+    brand = set(_tokens(vendor))
+    asset = set(_tokens(vendor, model))
+    if not asset:
+        return None
+
+    ranked: list[tuple[tuple[int, int, int], str]] = []
+    for config in supported:
+        wanted = _tokens(config)
+        if wanted and all(token in asset for token in wanted):
+            specific = sum(1 for token in wanted if token not in brand)
+            ranked.append(((specific, len(wanted), len(config)), config))
+    if not ranked:
+        return None
+
+    ranked.sort(reverse=True)
+    if len(ranked) > 1 and ranked[0][0] == ranked[1][0]:
+        logger.info(
+            "%s/%s matches several RMPflow configs (%s) equally well; leaving it "
+            "without one rather than guessing.",
+            vendor, model, ", ".join(c for _, c in ranked),
+        )
+        return None
+    return ranked[0][1]
+
+
 def discover_robots(refresh: bool = False) -> dict[str, RobotAsset]:
     """Walk the Isaac asset server and build the catalogue from what is there.
 
@@ -207,6 +297,8 @@ def discover_robots(refresh: bool = False) -> dict[str, RobotAsset]:
         return sorted(e.relative_path for e in entries)
 
     found: dict[str, RobotAsset] = {}
+    # Asked once: it loads Lula, and the walk visits a couple of hundred models.
+    supported = _supported_motion_configs()
     base = "/Isaac/Robots"
     for vendor in ls(base):
         if vendor.startswith(".") or vendor.lower() in _SKIP_DIRS:
@@ -225,7 +317,9 @@ def discover_robots(refresh: bool = False) -> dict[str, RobotAsset]:
                 # Morphology is classified from the articulation after loading —
                 # a directory listing cannot know, and does not need to.
                 morphology=Morphology.UNKNOWN,
-                motion_config=None,
+                # Derived, not seeded — see `_infer_motion_config`. This is what
+                # gives Cartesian control to arms nobody wrote an entry for.
+                motion_config=_infer_motion_config(vendor, model, supported),
                 description=f"{vendor} {model}",
                 manufacturer=vendor,
             )
@@ -234,9 +328,35 @@ def discover_robots(refresh: bool = False) -> dict[str, RobotAsset]:
         logger.warning("Asset walk returned nothing; using the seeded catalogue")
         return dict(CATALOGUE)
 
+    logger.info(
+        "Matched RMPflow configs for %d of %d discovered robots",
+        sum(1 for a in found.values() if a.motion_config), len(found),
+    )
+
     # Seeded entries win on key collision: they carry a hand-checked morphology,
     # a motion config, and a written description that discovery cannot infer.
     merged = {**found, **CATALOGUE}
+
+    # ...but "hand-checked" is a claim, not a guarantee, and this is where a
+    # typo becomes a promise. `kinova_gen3` was seeded with the config
+    # `Kinova_Gen3`, which Lula does not ship. `list_robots()` therefore
+    # advertised Cartesian control for an arm that has none, and `move_ee_to`
+    # failed at runtime on a robot an agent had picked *because* the catalogue
+    # said it could reach.
+    #
+    # Inferred configs cannot be wrong this way — they are chosen from the
+    # supported list. Only seeded ones can, so they are the ones checked.
+    if supported:
+        for key, asset in list(merged.items()):
+            if asset.motion_config and asset.motion_config not in supported:
+                logger.warning(
+                    "%s claims motion config %r, which this Isaac Sim does not "
+                    "ship (it has %d). Dropping the claim: the robot stays, but "
+                    "it is reported as joint-control only rather than failing "
+                    "later inside move_ee_to.",
+                    key, asset.motion_config, len(supported),
+                )
+                merged[key] = replace(asset, motion_config=None)
     logger.info(
         "Robot catalogue: %d discovered, %d seeded, %d total",
         len(found), len(CATALOGUE), len(merged),
@@ -269,7 +389,9 @@ def specialize(probe: Robot, **kwargs: Any) -> Robot:
     """Re-wrap a generic `Robot` as the subclass matching its actual structure."""
     from .base import classify_morphology
 
-    morphology = classify_morphology(probe.joint_names, probe.groups)
+    morphology = classify_morphology(
+        probe.joint_names, probe.groups, [str(l) for l in probe.links()]
+    )
     controller = _controller_class(morphology)
     if controller is Robot:
         logger.info(
@@ -282,42 +404,82 @@ def specialize(probe: Robot, **kwargs: Any) -> Robot:
 
 
 def _register_articulation(scene: Any, prim_path: str) -> None:
-    """Make PhysX parse a robot that was added while the timeline was running.
+    """Make PhysX parse a robot that has just been added to the stage.
 
-    PhysX builds its articulation metadata when the timeline starts. A robot
-    referenced onto the stage mid-play is never parsed, so the prim looks
-    perfectly healthy in USD while every handle built from it dies on
+    PhysX builds articulation metadata *when the timeline starts*, and only
+    then. Until that has happened the prim looks perfectly healthy in USD while
+    every handle built from it dies on
 
         AttributeError: 'NoneType' object has no attribute 'link_names'
 
     raised several frames inside isaacsim.core, naming nothing the caller did.
-    A stop/play cycle is the only thing that fixes it, and an agent that has to
-    discover that empirically spends its whole budget doing so — one measured
-    run burned six turns and a failed subagent on exactly this.
+    Rigid bodies are parsed as they are added and have no such problem, which is
+    why this bites only robots and reads as the library being broken.
 
-    Only runs when the timeline is playing, so the ordinary build-then-play
-    flow pays nothing. Note the cycle resets dynamic bodies to their spawn
-    poses; that is why this is loud rather than silent, and why robots belong
-    at the start of a scene rather than in the middle of a task.
+    Both ways of getting there need fixing, because between them they cover
+    every order a caller can write the code in:
+
+      * **Timeline playing.** The robot arrived after the parse and was never
+        seen. A stop/play cycle is the only repair, and it resets dynamic bodies
+        to their spawn poses — hence the warning, and hence robots belonging at
+        the start of a scene rather than in the middle of a task.
+      * **Timeline stopped.** Nothing has been parsed yet at all. This is the
+        *natural* order — configure, spawn, then play — so it has to work:
+        `Robot.spawn(...)` followed by `scene.play()` is what anyone writes
+        first, and it used to fail on the spawn, before the play it was about
+        to do anyway. The timeline is started here and left playing; the
+        caller's own `play()` is then a no-op.
+
+    An agent that has to discover any of this empirically spends its budget
+    doing so — one measured run burned six turns and a failed subagent on it.
+
+    The cycle is repeated until the articulation actually resolves, rather than
+    performed once and assumed to have worked. A robot arrives on the stage as
+    a *reference*, and USD composes it asynchronously: cycle too early and PhysX
+    parses a prim whose links do not exist yet, which fails exactly like never
+    having cycled at all. One measured attempt did the right thing one frame too
+    soon and reported the library as broken.
     """
-    from .._compat import get_timeline
+    from .._compat import get_timeline, single_articulation, update_app
+
+    def registered() -> bool:
+        try:
+            single_articulation(prim_path)
+            return True
+        except Exception:  # noqa: BLE001 — that is the question being asked
+            return False
 
     try:
-        if not get_timeline().is_playing():
-            return
+        playing = get_timeline().is_playing()
     except Exception:  # noqa: BLE001 — no timeline is not a reason to fail a spawn
         logger.debug("Could not read timeline state", exc_info=True)
         return
 
+    if playing:
+        logger.warning(
+            "Spawned %s while the simulation was playing. PhysX only parses "
+            "articulations at play time, so the timeline is being cycled to "
+            "register it — dynamic objects will reset to their spawn poses.",
+            prim_path,
+        )
+
+    for attempt in range(3):
+        scene.stop()
+        # Let USD finish composing the reference before PhysX looks at it.
+        for _ in range(5):
+            update_app()
+        scene.play()
+        scene.step(3)
+        if registered():
+            return
+        logger.debug("Articulation %s not registered on attempt %d", prim_path, attempt + 1)
+
     logger.warning(
-        "Spawned %s while the simulation was playing. PhysX only parses "
-        "articulations at play time, so the timeline is being cycled to "
-        "register it — dynamic objects will reset to their spawn poses.",
+        "PhysX still has no articulation for %s after three timeline cycles. "
+        "The asset may not have finished loading; building a handle now will "
+        "fail with a link_names error.",
         prim_path,
     )
-    scene.stop()
-    scene.play()
-    scene.step(2)
 
 
 def spawn_robot(
@@ -354,13 +516,30 @@ def spawn_robot(
     # Load first, then classify from the real joint set — the catalogue's
     # morphology is a hint, but the articulation is the ground truth.
     probe = Robot(prim_path, scene=scene)
-    morphology = classify_morphology(probe.joint_names, probe.groups)
+    morphology = classify_morphology(
+        probe.joint_names, probe.groups, [str(l) for l in probe.links()]
+    )
     controller = _controller_class(morphology)
 
     if controller is Robot:
         return probe
     if morphology in (Morphology.MANIPULATOR, Morphology.DEXTEROUS_HAND):
         kwargs.setdefault("rmp_config", asset.motion_config)
+        # Record it on the prim as well. `spawn` knows the catalogue and
+        # `attach` does not, so Cartesian control was being lost the moment a
+        # robot was picked up again — and every controller picks its robot up
+        # again with `attach` at INIT. A KR210 spawned with a working config
+        # reported "No RMPflow configuration matches" one call later.
+        if asset.motion_config:
+            try:
+                from pxr import Sdf
+
+                prim = get_stage().GetPrimAtPath(prim_path)
+                attr = prim.CreateAttribute("simliverse:motion_config", Sdf.ValueTypeNames.String)
+                attr.Set(str(asset.motion_config))
+            except Exception:  # noqa: BLE001 — a hint that cannot be stored is not fatal
+                logger.debug("Could not record the motion config on %s", prim_path,
+                             exc_info=True)
         if morphology is Morphology.DEXTEROUS_HAND:
             kwargs.pop("rmp_config", None)
     return controller(prim_path, scene=scene, **kwargs)

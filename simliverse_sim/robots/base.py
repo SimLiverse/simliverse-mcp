@@ -113,11 +113,27 @@ class JointGroups:
         }
 
 
-def classify_morphology(joint_names: list[str], groups: JointGroups) -> Morphology:
-    """Infer what kind of robot this is from its joint structure."""
-    dof = len(joint_names)
+def classify_morphology(
+    joint_names: list[str],
+    groups: JointGroups,
+    link_names: list[str] | None = None,
+) -> Morphology:
+    """Infer what kind of robot this is from its joint structure.
 
-    if groups.rotors and len(groups.rotors) >= 3:
+    Link names are consulted as well, because a joint set alone is often not
+    descriptive enough. Isaac's quadcopter names its joints `m1_joint`..`m4_joint`
+    — matching no rotor token — while its links are `m1_prop`..`m4_prop`, which
+    say plainly what the robot is. Classified from joints alone it came back
+    UNKNOWN, so `attach` returned a bare handle with no `fly_to`, `hover` or
+    `altitude`, while `spawn` returned a working AerialRobot because it reads the
+    morphology from the catalogue instead. The same robot answered differently
+    depending on how you got hold of it, and every controller uses `attach`.
+    """
+    dof = len(joint_names)
+    links = [n.rsplit("/", 1)[-1] for n in (link_names or [])]
+
+    rotor_links = [n for n in links if any(t in n.lower() for t in ROTOR_TOKENS)]
+    if len(groups.rotors) >= 3 or len(rotor_links) >= 3:
         return Morphology.AERIAL
 
     has_legs = len(groups.legs) >= 8      # four limbs x >= 2 joints
@@ -159,13 +175,32 @@ class Robot:
         self.scene = scene or _Scene.get()
 
         self._articulation = single_articulation(prim_path)
-        self.scene.play()
-        # An articulation cannot initialize before physics has ticked; doing this
-        # here removes a whole class of "the robot ignores my commands" reports.
-        self.scene.step(4)
+        # An articulation cannot initialize before physics has ticked, and
+        # building a handle on a stopped timeline is the common way to get a
+        # robot that ignores every command. But this runs inside controllers
+        # too, where the timeline is already playing and physics is mid-step:
+        # play/step from there is re-entrant and silently desynchronises the
+        # run. When it is already playing there is nothing to arrange, so do
+        # nothing — the condition that makes the wait necessary is exactly the
+        # condition that makes it safe.
+        if not self._timeline_playing():
+            self.scene.play()
+            self.scene.step(4)
         self._articulation.initialize()
 
+        self._root_body: Any = None
+        self._pose_source = "unknown"
         self.groups = JointGroups.classify(self.joint_names)
+
+    @staticmethod
+    def _timeline_playing() -> bool:
+        from .._compat import get_timeline
+
+        try:
+            return bool(get_timeline().is_playing())
+        except Exception:
+            logger.debug("Could not read timeline state", exc_info=True)
+            return False
 
     def __repr__(self) -> str:
         return f"<{type(self).__name__} {self.prim_path} dof={self.dof}>"
@@ -208,11 +243,34 @@ class Robot:
 
     @property
     def joint_positions(self) -> np.ndarray:
-        return np.asarray(self._articulation.get_joint_positions(), dtype=float)
+        return self._joint_state("get_joint_positions", "positions")
 
     @property
     def joint_velocities(self) -> np.ndarray:
-        return np.asarray(self._articulation.get_joint_velocities(), dtype=float)
+        return self._joint_state("get_joint_velocities", "velocities")
+
+    def _joint_state(self, method: str, kind: str) -> np.ndarray:
+        """Joint state, rebuilding the articulation view if it has gone stale.
+
+        The tensor backend can refuse a view that was built across a timeline
+        cycle — "Failed to get DOF positions from backend", raised from inside
+        the physics API, naming neither the robot nor the reason. It is the same
+        failure that made a quadruped's `stand()` unusable while the identical
+        articulation, bound freshly, answered immediately.
+
+        So the view is rebuilt once and the read retried. If that fails too the
+        problem is real rather than stale, and the original error is what the
+        caller should see.
+        """
+        try:
+            return np.asarray(getattr(self._articulation, method)(), dtype=float)
+        except Exception:
+            logger.debug("Rebuilding the articulation view for %s", self.prim_path,
+                         exc_info=True)
+
+        self._articulation = single_articulation(self.prim_path)
+        self._articulation.initialize()
+        return np.asarray(getattr(self._articulation, method)(), dtype=float)
 
     @property
     def joint_limits(self) -> list[tuple[float | None, float | None]]:
@@ -270,24 +328,79 @@ class Robot:
 
     # ── Base pose ─────────────────────────────────────────────────────────────
 
+    def _root_pose(self) -> tuple[np.ndarray, np.ndarray]:
+        """World pose of the articulation root, from whichever source can answer.
+
+        Three sources, tried in order of how much they can be trusted, because
+        each of them has been observed failing on a different robot:
+
+        1. **The articulation view.** Correct when it works, and it does not
+           always: a quadruped spawned through the library raises "Failed to get
+           root link transforms from backend" from inside the tensor API, while
+           the identical articulation referenced by hand answers fine. The view
+           built during the spawn's timeline cycling is the broken one.
+        2. **The root link as a rigid body.** The physics pose of the same body,
+           by a different route, and it answered every time the view above did
+           not.
+        3. **USD.** Last, because physics results are not written back to USD
+           for every articulation — a Ridgeback reports a constant 0.308 for a
+           link that physics has at 1.44, before or after a transform sync.
+
+        `base_orientation` used to have no fallback at all, so a robot whose
+        view was unusable could not report which way up it was, and every
+        legged check — `is_upright`, `tilt_degrees`, `describe` — raised from
+        four frames down with a message about tensor backends.
+        """
+        try:
+            position, quaternion = self._articulation.get_world_pose()
+            self._pose_source = "articulation"
+            return np.asarray(position, dtype=float), np.asarray(quaternion, dtype=float)
+        except Exception:
+            logger.debug("Articulation view has no root pose for %s", self.prim_path,
+                         exc_info=True)
+
+        try:
+            from .._compat import articulation_root
+
+            if self._root_body is None:
+                from isaacsim.core.prims import SingleRigidPrim
+
+                self._root_body = SingleRigidPrim(prim_path=articulation_root(self.prim_path))
+                self._root_body.initialize()
+            position, quaternion = self._root_body.get_world_pose()
+            self._pose_source = "root body"
+            return np.asarray(position, dtype=float), np.asarray(quaternion, dtype=float)
+        except Exception:
+            logger.debug("Root body has no pose for %s", self.prim_path, exc_info=True)
+
+        # Neither physics source could answer, so this is the authored pose:
+        # what the scene was built with, not where the robot is. Recorded so
+        # `asset_problems` can say so — a humanoid reporting exactly its spawn
+        # height and exactly zero tilt after three seconds of settling is not
+        # standing still, it is not being simulated.
+        self._pose_source = "usd (authored)"
+        from pxr import Gf, UsdGeom
+
+        matrix = UsdGeom.Xformable(
+            get_stage().GetPrimAtPath(self.prim_path)
+        ).ComputeLocalToWorldTransform(0)
+        rotation = Gf.Transform(matrix).GetRotation().GetQuat()
+        imaginary = rotation.GetImaginary()
+        return (
+            np.asarray(matrix.ExtractTranslation(), dtype=float),
+            np.asarray(
+                [rotation.GetReal(), imaginary[0], imaginary[1], imaginary[2]], dtype=float
+            ),
+        )
+
     @property
     def base_position(self) -> np.ndarray:
         """World position of the articulation root."""
-        try:
-            position, _ = self._articulation.get_world_pose()
-            return np.asarray(position, dtype=float)
-        except Exception:
-            from pxr import UsdGeom
-
-            matrix = UsdGeom.Xformable(
-                get_stage().GetPrimAtPath(self.prim_path)
-            ).ComputeLocalToWorldTransform(0)
-            return np.asarray(matrix.ExtractTranslation(), dtype=float)
+        return self._root_pose()[0]
 
     @property
     def base_orientation(self) -> np.ndarray:
-        _, quaternion = self._articulation.get_world_pose()
-        return np.asarray(quaternion, dtype=float)
+        return self._root_pose()[1]
 
     def set_base_pose(self, position: Any = None, orientation: Any = None) -> None:
         self._articulation.set_world_pose(
@@ -438,8 +551,197 @@ class Robot:
             "joint_groups": self.groups.to_dict(self.joint_names),
             "base_position": self.base_position.round(4).tolist(),
             "drive_problems": self.drive_health(),
+            "asset_problems": self.asset_problems(),
             "capabilities": self.capabilities(),
         }
+
+    def asset_problems(self) -> list[dict[str, str]]:
+        """Defects in the robot asset itself, and what each one prevents.
+
+        Reported, never repaired or worked around. A robot that cannot do
+        something should say so plainly, in the first call an agent makes, so
+        the answer is "this task is not possible with this asset and here is
+        why" rather than a controller that has been bent around a broken
+        gripper and works for nothing else.
+
+        Editing the asset would be worse than failing: a policy trained against
+        a robot we silently modified does not transfer to the real one, and the
+        failure resurfaces as bad hardware long after anyone can connect it to
+        this. Changing the robot is the user's call.
+        """
+        problems: list[dict[str, str]] = []
+        limits = self.joint_limits
+        names = self.joint_names
+
+        # An arm with no end effector at all. This has to come first, and it has
+        # to be here rather than left to the caller's judgement: the check below
+        # is for a gripper whose *limits* are broken, and it iterates over the
+        # finger joints — so a robot with zero finger joints passes it silently.
+        # The worse defect was invisible while the milder one was reported.
+        #
+        # It reads as an ordinary arm otherwise. A UR10 answers `hasattr(arm,
+        # "gripper")` with True and hands back a Gripper holding an empty joint
+        # list, whose open() and close() then succeed by doing nothing. That is
+        # the shape of the failure worth naming: not a crash, a no-op that
+        # everything downstream treats as a working hand.
+        end_effector = getattr(self, "gripper", None)
+        if end_effector is not None and not getattr(end_effector, "joint_indices", None):
+            problems.append({
+                "issue": "this arm has no end effector",
+                "detail": (
+                    "the articulation declares no finger or jaw joints, so there is "
+                    "nothing on the flange that can hold an object"
+                ),
+                "consequence": (
+                    "open() and close() raise MotionError, and grasp() cannot form "
+                    "a grasp. Any task that involves picking something up needs a "
+                    "gripper fitted, or a different arm. Fitting one changes the "
+                    "robot, so it is the user's decision — ask rather than "
+                    "authoring one."
+                ),
+            })
+
+        gripper = getattr(end_effector, "joint_indices", None) or []
+        unbounded = [names[i] for i in gripper if limits[i][0] is None or limits[i][1] is None]
+        if unbounded:
+            problems.append({
+                "issue": "gripper joints have no travel limits",
+                "detail": ", ".join(unbounded),
+                "consequence": (
+                    "open() and close() have nothing to open or close *to*, so "
+                    "they fall back to 0.0 and 0.04 m. If this gripper's real "
+                    "travel differs, it will close past the object or stop short "
+                    "of it, and a grasp will look like it formed and then drop."
+                ),
+            })
+
+        self.base_position  # refresh `_pose_source`
+        if self._pose_source == "usd (authored)":
+            problems.append({
+                "issue": "physics cannot see this robot",
+                "detail": (
+                    "neither the articulation view nor the root body would report a "
+                    "pose, so positions come from the authored USD transform"
+                ),
+                "consequence": (
+                    "Every pose reading is the value the scene was built with, not "
+                    "where the robot is: it will report itself upright and at its "
+                    "spawn height forever, including while it falls over. Joint "
+                    "commands will not be tracked either. The articulation is not "
+                    "registered with PhysX."
+                ),
+            })
+        problems.extend(self._inertia_problems())
+        problems.extend(self._pose_feedback_problems())
+        return problems
+
+    def _inertia_problems(self) -> list[dict[str, str]]:
+        """Links PhysX had to invent an inertia tensor for.
+
+        Isaac says so, once, at Info level and never again:
+
+            The rigid body at /World/Arm/ee_link has a possibly invalid inertia
+            tensor of {1.0, 1.0, 1.0}, small sphere approximated inertia was
+            used. Either specify correct values...
+
+        Note the mismatch: {1.0, 1.0, 1.0} is the tensor PhysX *substituted*,
+        not the one the asset declares. A UR10's `ee_link` actually carries
+        `diagonalInertia = (0, 0, 0)` with a mass of 1e-4, which is what a
+        converter writes for a frame it has no inertia for. Checking for the
+        number in the log message finds nothing; checking for the zero finds it.
+
+        The link is then simulated with dynamics nobody chose, and on a wrist
+        that carries a tool that shows up as a joint that will not settle.
+
+        This is reported and never repaired: correcting an asset's inertia
+        changes the dynamics being simulated, and a policy trained against a
+        robot we quietly edited does not transfer.
+        """
+        try:
+            from pxr import UsdPhysics
+        except Exception:  # noqa: BLE001 — no USD, no check
+            return []
+
+        stage = get_stage()
+        suspect: list[str] = []
+        for link in self.links():
+            prim = stage.GetPrimAtPath(str(link))
+            if not prim or not prim.IsValid():
+                continue
+            if not prim.HasAPI(UsdPhysics.MassAPI):
+                continue
+            attr = UsdPhysics.MassAPI(prim).GetDiagonalInertiaAttr()
+            value = attr.Get() if attr else None
+            if value is not None and all(abs(float(v)) < 1e-12 for v in value):
+                suspect.append(str(link))
+
+        if not suspect:
+            return []
+        return [{
+            "issue": "links carry a placeholder inertia tensor",
+            "detail": ", ".join(suspect),
+            "consequence": (
+                "PhysX reports these as possibly invalid and substitutes a small "
+                "sphere approximation, so they are simulated with dynamics the "
+                "asset never specified. Expect joints that oscillate or refuse to "
+                "settle, worst on a wrist carrying a tool. Fixing it means editing "
+                "the asset, which changes what is being simulated — the user's "
+                "call, not a repair to make in passing."
+            ),
+        }]
+
+    def _pose_feedback_problems(self) -> list[dict[str, str]]:
+        """Links whose USD transform disagrees with where physics has them.
+
+        Isaac writes physics results back to USD for most articulations and not
+        for all of them. When it does not, the viewport shows a robot standing
+        still while it drives, and every measurement taken from a link transform
+        is wrong by however far it has actually moved — silently, because a
+        stale number looks exactly like a real one.
+
+        Only detectable once the robot has moved. At its authored pose the two
+        sources agree by construction, so an empty result here means "nothing to
+        see yet", not "these transforms are trustworthy". Call it again after
+        the robot has driven somewhere if the answer matters.
+        """
+        try:
+            from pxr import UsdGeom
+
+            from isaacsim.core.prims import SingleRigidPrim
+
+            from .._compat import get_stage
+
+            stage = get_stage()
+            worst_name, worst = None, 0.0
+            for link in list(self.links())[:12]:
+                path = str(link)
+                prim = stage.GetPrimAtPath(path)
+                if not prim.IsValid():
+                    continue
+                usd = np.asarray(
+                    UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(0).ExtractTranslation(),
+                    dtype=float,
+                )
+                view = SingleRigidPrim(prim_path=path)
+                view.initialize()
+                physics = np.asarray(view.get_world_pose()[0], dtype=float)
+                gap = float(np.linalg.norm(physics - usd))
+                if gap > worst:
+                    worst_name, worst = path, gap
+            if worst > 0.02:
+                return [{
+                    "issue": "link transforms are not written back from physics",
+                    "detail": f"{worst_name} is {worst:.3f} m from where physics has it",
+                    "consequence": (
+                        "The viewport will show this robot in the wrong place, and "
+                        "anything measured from a link transform — distance "
+                        "travelled, where the base is — reads the stale value. "
+                        "Read poses through the physics view instead."
+                    ),
+                }]
+        except Exception:
+            logger.debug("Could not compare USD and physics poses", exc_info=True)
+        return []
 
     def capabilities(self) -> list[str]:
         """Control methods available on this handle, so an agent need not guess."""

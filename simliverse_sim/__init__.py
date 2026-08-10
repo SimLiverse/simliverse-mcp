@@ -80,6 +80,13 @@ from .robots import (
     list_robots,
     spawn_robot,
 )
+from .props import (
+    PropNotFound,
+    find_prop,
+    list_props,
+    spawn_prop,
+    verify_index,
+)
 from .scene import PhysicsConfig, Scene
 
 __all__ = [
@@ -111,6 +118,10 @@ __all__ = [
     "grasped",
     "isaac_version",
     "list_robots",
+    "list_props",
+    "find_prop",
+    "spawn_prop",
+    "PropNotFound",
     "spawn_robot",
     "not_teleported",
     "physics_running",

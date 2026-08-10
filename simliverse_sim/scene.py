@@ -40,6 +40,45 @@ class PhysicsConfig:
     gpu_dynamics: bool = False
 
 
+def _refuse_reentrant_step() -> None:
+    """Refuse to step physics from inside a controller's compute().
+
+    A controller runs from the simulator's own step callback. Stepping from
+    there is re-entrant, and PhysX does not complain — the run simply
+    desynchronises, and the symptom appears somewhere else entirely: a
+    controller that behaves differently when played than when replayed
+    headless, and an arm that moves through an obstacle it planned around.
+
+    The call that does this is almost never `scene.step`. It is a helper that
+    waits — a gripper command with settle steps, `move_ee_to`, `grasp`, all of
+    which are right when driving the sim from outside and wrong inside
+    `compute`, where waiting means staying in a state for more ticks. So the
+    error names the alternatives rather than the mechanism.
+
+    Detected by walking frames for a `compute` that has a `setup` beside it,
+    which is the ScriptNode contract. Cheap, and `step` is not called at all on
+    the path this protects.
+    """
+    import sys
+
+    frame = sys._getframe(1)
+    for _ in range(20):
+        frame = frame.f_back
+        if frame is None:
+            return
+        if frame.f_code.co_name == "compute" and "setup" in frame.f_globals:
+            raise RuntimeError(
+                "Physics cannot be stepped from inside a controller's compute(): "
+                "it runs in the simulator's own step callback, so this is "
+                "re-entrant and silently desynchronises the run.\n\n"
+                "Something called here is a blocking helper. Use the non-blocking "
+                "form, and wait by staying in the state for more ticks:\n"
+                "    gripper.open() / gripper.close()   (no settle_steps)\n"
+                "    servo_to(target)                   not move_ee_to\n"
+                "    follow(plan)                       not move_along\n"
+            )
+
+
 class Scene:
     """The live stage: physics setup, timeline control, and stepping."""
 
@@ -188,6 +227,7 @@ class Scene:
         timeline already running (ADR 012 §1.5). This advances physics itself, by
         a known dt, whether or not anything is rendering.
         """
+        _refuse_reentrant_step()
         physx = get_physx()
         for _ in range(max(0, int(count))):
             physx.update_simulation(self._dt, self._sim_time)

@@ -1,0 +1,3473 @@
+{
+  "assets_root": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/6.0",
+  "by_physics": {
+    "dynamic": 97,
+    "static": 11,
+    "visual": 61
+  },
+  "count": 169,
+  "generated_from": "/Isaac/Props",
+  "props": {
+    "002_master_chef_can": {
+      "category": "ycb",
+      "extent": [
+        0.1024,
+        0.1402,
+        0.1023
+      ],
+      "key": "002_master_chef_can",
+      "keywords": [
+        "aligned",
+        "axis",
+        "benchmark",
+        "can",
+        "cardboard",
+        "carton",
+        "chef",
+        "grocery",
+        "household",
+        "manipulation",
+        "master",
+        "ycb"
+      ],
+      "path": "/Isaac/Props/YCB/Axis_Aligned/002_master_chef_can.usd",
+      "physics": "visual"
+    },
+    "003_cracker_box": {
+      "category": "ycb",
+      "extent": [
+        0.164,
+        0.2134,
+        0.0718
+      ],
+      "key": "003_cracker_box",
+      "keywords": [
+        "aligned",
+        "axis",
+        "benchmark",
+        "box",
+        "cardboard",
+        "carton",
+        "cracker",
+        "grocery",
+        "household",
+        "manipulation",
+        "physics",
+        "ycb"
+      ],
+      "path": "/Isaac/Props/YCB/Axis_Aligned_Physics/003_cracker_box.usd",
+      "physics": "dynamic"
+    },
+    "004_sugar_box": {
+      "category": "ycb",
+      "extent": [
+        0.0927,
+        0.1763,
+        0.0451
+      ],
+      "key": "004_sugar_box",
+      "keywords": [
+        "aligned",
+        "axis",
+        "benchmark",
+        "box",
+        "cardboard",
+        "carton",
+        "grocery",
+        "household",
+        "manipulation",
+        "physics",
+        "sugar",
+        "ycb"
+      ],
+      "path": "/Isaac/Props/YCB/Axis_Aligned_Physics/004_sugar_box.usd",
+      "physics": "dynamic"
+    },
+    "005_tomato_soup_can": {
+      "category": "ycb",
+      "extent": [
+        0.0677,
+        0.1019,
+        0.0677
+      ],
+      "key": "005_tomato_soup_can",
+      "keywords": [
+        "aligned",
+        "axis",
+        "benchmark",
+        "can",
+        "cardboard",
+        "carton",
+        "grocery",
+        "household",
+        "manipulation",
+        "physics",
+        "soup",
+        "tomato",
+        "ycb"
+      ],
+      "path": "/Isaac/Props/YCB/Axis_Aligned_Physics/005_tomato_soup_can.usd",
+      "physics": "dynamic"
+    },
+    "006_mustard_bottle": {
+      "category": "ycb",
+      "extent": [
+        0.096,
+        0.1913,
+        0.0582
+      ],
+      "key": "006_mustard_bottle",
+      "keywords": [
+        "aligned",
+        "axis",
+        "benchmark",
+        "bottle",
+        "cardboard",
+        "carton",
+        "grocery",
+        "household",
+        "manipulation",
+        "mustard",
+        "physics",
+        "ycb"
+      ],
+      "path": "/Isaac/Props/YCB/Axis_Aligned_Physics/006_mustard_bottle.usd",
+      "physics": "dynamic"
+    },
+    "007_tuna_fish_can": {
+      "category": "ycb",
+      "extent": [
+        0.0856,
+        0.0335,
+        0.0855
+      ],
+      "key": "007_tuna_fish_can",
+      "keywords": [
+        "aligned",
+        "axis",
+        "benchmark",
+        "can",
+        "cardboard",
+        "carton",
+        "fish",
+        "grocery",
+        "household",
+        "manipulation",
+        "tuna",
+        "ycb"
+      ],
+      "path": "/Isaac/Props/YCB/Axis_Aligned/007_tuna_fish_can.usd",
+      "physics": "visual"
+    },
+    "008_pudding_box": {
+      "category": "ycb",
+      "extent": [
+        0.1137,
+        0.0898,
+        0.0385
+      ],
+      "key": "008_pudding_box",
+      "keywords": [
+        "aligned",
+        "axis",
+        "benchmark",
+        "box",
+        "cardboard",
+        "carton",
+        "grocery",
+        "household",
+        "manipulation",
+        "pudding",
+        "ycb"
+      ],
+      "path": "/Isaac/Props/YCB/Axis_Aligned/008_pudding_box.usd",
+      "physics": "visual"
+    },
+    "009_gelatin_box": {
+      "category": "ycb",
+      "extent": [
+        0.0892,
+        0.0731,
+        0.03
+      ],
+      "key": "009_gelatin_box",
+      "keywords": [
+        "aligned",
+        "axis",
+        "benchmark",
+        "box",
+        "cardboard",
+        "carton",
+        "gelatin",
+        "grocery",
+        "household",
+        "manipulation",
+        "ycb"
+      ],
+      "path": "/Isaac/Props/YCB/Axis_Aligned/009_gelatin_box.usd",
+      "physics": "visual"
+    },
+    "010_potted_meat_can": {
+      "category": "ycb",
+      "extent": [
+        0.1016,
+        0.0835,
+        0.0576
+      ],
+      "key": "010_potted_meat_can",
+      "keywords": [
+        "aligned",
+        "axis",
+        "benchmark",
+        "can",
+        "cardboard",
+        "carton",
+        "grocery",
+        "household",
+        "manipulation",
+        "meat",
+        "potted",
+        "ycb"
+      ],
+      "path": "/Isaac/Props/YCB/Axis_Aligned/010_potted_meat_can.usd",
+      "physics": "visual"
+    },
+    "011_banana": {
+      "category": "ycb",
+      "extent": [
+        0.1972,
+        0.0386,
+        0.0741
+      ],
+      "key": "011_banana",
+      "keywords": [
+        "aligned",
+        "axis",
+        "banana",
+        "benchmark",
+        "cardboard",
+        "carton",
+        "grocery",
+        "household",
+        "manipulation",
+        "ycb"
+      ],
+      "path": "/Isaac/Props/YCB/Axis_Aligned/011_banana.usd",
+      "physics": "visual"
+    },
+    "019_pitcher_base": {
+      "category": "ycb",
+      "extent": [
+        0.1886,
+        0.2424,
+        0.1331
+      ],
+      "key": "019_pitcher_base",
+      "keywords": [
+        "aligned",
+        "axis",
+        "base",
+        "benchmark",
+        "cardboard",
+        "carton",
+        "grocery",
+        "household",
+        "manipulation",
+        "pitcher",
+        "ycb"
+      ],
+      "path": "/Isaac/Props/YCB/Axis_Aligned/019_pitcher_base.usd",
+      "physics": "visual"
+    },
+    "021_bleach_cleanser": {
+      "category": "ycb",
+      "extent": [
+        0.1024,
+        0.2506,
+        0.0677
+      ],
+      "key": "021_bleach_cleanser",
+      "keywords": [
+        "aligned",
+        "axis",
+        "benchmark",
+        "bleach",
+        "cardboard",
+        "carton",
+        "cleanser",
+        "grocery",
+        "household",
+        "manipulation",
+        "ycb"
+      ],
+      "path": "/Isaac/Props/YCB/Axis_Aligned/021_bleach_cleanser.usd",
+      "physics": "visual"
+    },
+    "024_bowl": {
+      "category": "ycb",
+      "extent": [
+        0.1612,
+        0.055,
+        0.1615
+      ],
+      "key": "024_bowl",
+      "keywords": [
+        "aligned",
+        "axis",
+        "benchmark",
+        "bowl",
+        "cardboard",
+        "carton",
+        "grocery",
+        "household",
+        "manipulation",
+        "ycb"
+      ],
+      "path": "/Isaac/Props/YCB/Axis_Aligned/024_bowl.usd",
+      "physics": "visual"
+    },
+    "025_mug": {
+      "category": "ycb",
+      "extent": [
+        0.117,
+        0.0813,
+        0.0931
+      ],
+      "key": "025_mug",
+      "keywords": [
+        "aligned",
+        "axis",
+        "benchmark",
+        "cardboard",
+        "carton",
+        "grocery",
+        "household",
+        "manipulation",
+        "mug",
+        "ycb"
+      ],
+      "path": "/Isaac/Props/YCB/Axis_Aligned/025_mug.usd",
+      "physics": "visual"
+    },
+    "035_power_drill": {
+      "category": "ycb",
+      "extent": [
+        0.1844,
+        0.1868,
+        0.0572
+      ],
+      "key": "035_power_drill",
+      "keywords": [
+        "aligned",
+        "axis",
+        "benchmark",
+        "cardboard",
+        "carton",
+        "drill",
+        "grocery",
+        "household",
+        "manipulation",
+        "power",
+        "ycb"
+      ],
+      "path": "/Isaac/Props/YCB/Axis_Aligned/035_power_drill.usd",
+      "physics": "visual"
+    },
+    "036_wood_block": {
+      "category": "ycb",
+      "extent": [
+        0.0897,
+        0.2061,
+        0.0908
+      ],
+      "key": "036_wood_block",
+      "keywords": [
+        "aligned",
+        "axis",
+        "benchmark",
+        "block",
+        "cardboard",
+        "carton",
+        "grocery",
+        "household",
+        "manipulation",
+        "wood",
+        "ycb"
+      ],
+      "path": "/Isaac/Props/YCB/Axis_Aligned/036_wood_block.usd",
+      "physics": "visual"
+    },
+    "037_scissors": {
+      "category": "ycb",
+      "extent": [
+        0.0911,
+        0.1972,
+        0.0172
+      ],
+      "key": "037_scissors",
+      "keywords": [
+        "aligned",
+        "axis",
+        "benchmark",
+        "cardboard",
+        "carton",
+        "grocery",
+        "household",
+        "manipulation",
+        "scissors",
+        "ycb"
+      ],
+      "path": "/Isaac/Props/YCB/Axis_Aligned/037_scissors.usd",
+      "physics": "visual"
+    },
+    "040_large_marker": {
+      "category": "ycb",
+      "extent": [
+        0.0188,
+        0.1209,
+        0.0195
+      ],
+      "key": "040_large_marker",
+      "keywords": [
+        "aligned",
+        "axis",
+        "benchmark",
+        "cardboard",
+        "carton",
+        "grocery",
+        "household",
+        "large",
+        "manipulation",
+        "marker",
+        "ycb"
+      ],
+      "path": "/Isaac/Props/YCB/Axis_Aligned/040_large_marker.usd",
+      "physics": "visual"
+    },
+    "051_large_clamp": {
+      "category": "ycb",
+      "extent": [
+        0.1649,
+        0.1217,
+        0.0364
+      ],
+      "key": "051_large_clamp",
+      "keywords": [
+        "aligned",
+        "axis",
+        "benchmark",
+        "cardboard",
+        "carton",
+        "clamp",
+        "grocery",
+        "household",
+        "large",
+        "manipulation",
+        "ycb"
+      ],
+      "path": "/Isaac/Props/YCB/Axis_Aligned/051_large_clamp.usd",
+      "physics": "visual"
+    },
+    "052_extra_large_clamp": {
+      "category": "ycb",
+      "extent": [
+        0.2026,
+        0.1652,
+        0.0365
+      ],
+      "key": "052_extra_large_clamp",
+      "keywords": [
+        "aligned",
+        "axis",
+        "benchmark",
+        "cardboard",
+        "carton",
+        "clamp",
+        "extra",
+        "grocery",
+        "household",
+        "large",
+        "manipulation",
+        "ycb"
+      ],
+      "path": "/Isaac/Props/YCB/Axis_Aligned/052_extra_large_clamp.usd",
+      "physics": "visual"
+    },
+    "061_foam_brick": {
+      "category": "ycb",
+      "extent": [
+        0.0779,
+        0.0512,
+        0.0526
+      ],
+      "key": "061_foam_brick",
+      "keywords": [
+        "aligned",
+        "axis",
+        "benchmark",
+        "brick",
+        "cardboard",
+        "carton",
+        "foam",
+        "grocery",
+        "household",
+        "manipulation",
+        "ycb"
+      ],
+      "path": "/Isaac/Props/YCB/Axis_Aligned/061_foam_brick.usd",
+      "physics": "visual"
+    },
+    "axis_aligned_003_cracker_box": {
+      "category": "ycb",
+      "extent": [
+        0.164,
+        0.2134,
+        0.0718
+      ],
+      "key": "axis_aligned_003_cracker_box",
+      "keywords": [
+        "aligned",
+        "axis",
+        "benchmark",
+        "box",
+        "cardboard",
+        "carton",
+        "cracker",
+        "grocery",
+        "household",
+        "manipulation",
+        "ycb"
+      ],
+      "path": "/Isaac/Props/YCB/Axis_Aligned/003_cracker_box.usd",
+      "physics": "visual"
+    },
+    "axis_aligned_004_sugar_box": {
+      "category": "ycb",
+      "extent": [
+        0.0927,
+        0.1763,
+        0.0451
+      ],
+      "key": "axis_aligned_004_sugar_box",
+      "keywords": [
+        "aligned",
+        "axis",
+        "benchmark",
+        "box",
+        "cardboard",
+        "carton",
+        "grocery",
+        "household",
+        "manipulation",
+        "sugar",
+        "ycb"
+      ],
+      "path": "/Isaac/Props/YCB/Axis_Aligned/004_sugar_box.usd",
+      "physics": "visual"
+    },
+    "axis_aligned_005_tomato_soup_can": {
+      "category": "ycb",
+      "extent": [
+        0.0677,
+        0.1019,
+        0.0677
+      ],
+      "key": "axis_aligned_005_tomato_soup_can",
+      "keywords": [
+        "aligned",
+        "axis",
+        "benchmark",
+        "can",
+        "cardboard",
+        "carton",
+        "grocery",
+        "household",
+        "manipulation",
+        "soup",
+        "tomato",
+        "ycb"
+      ],
+      "path": "/Isaac/Props/YCB/Axis_Aligned/005_tomato_soup_can.usd",
+      "physics": "visual"
+    },
+    "axis_aligned_006_mustard_bottle": {
+      "category": "ycb",
+      "extent": [
+        0.096,
+        0.1913,
+        0.0582
+      ],
+      "key": "axis_aligned_006_mustard_bottle",
+      "keywords": [
+        "aligned",
+        "axis",
+        "benchmark",
+        "bottle",
+        "cardboard",
+        "carton",
+        "grocery",
+        "household",
+        "manipulation",
+        "mustard",
+        "ycb"
+      ],
+      "path": "/Isaac/Props/YCB/Axis_Aligned/006_mustard_bottle.usd",
+      "physics": "visual"
+    },
+    "basic_block": {
+      "category": "blocks",
+      "extent": [
+        0.047,
+        0.047,
+        0.047
+      ],
+      "key": "basic_block",
+      "keywords": [
+        "basic",
+        "block",
+        "blocks",
+        "box",
+        "brick",
+        "cube"
+      ],
+      "path": "/Isaac/Props/Blocks/basic_block.usd",
+      "physics": "dynamic"
+    },
+    "beaker_500ml": {
+      "category": "beaker",
+      "extent": [
+        0.1621,
+        0.1789,
+        0.1492
+      ],
+      "key": "beaker_500ml",
+      "keywords": [
+        "500ml",
+        "beaker",
+        "glass",
+        "lab",
+        "laboratory"
+      ],
+      "path": "/Isaac/Props/Beaker/beaker_500ml.usd",
+      "physics": "dynamic"
+    },
+    "block": {
+      "category": "blocks",
+      "extent": [
+        0.05,
+        0.05,
+        0.05
+      ],
+      "key": "block",
+      "keywords": [
+        "block",
+        "blocks",
+        "box",
+        "brick",
+        "cube"
+      ],
+      "path": "/Isaac/Props/Blocks/block.usd",
+      "physics": "dynamic"
+    },
+    "block_instanceable": {
+      "category": "blocks",
+      "extent": [
+        0.05,
+        0.05,
+        0.05
+      ],
+      "key": "block_instanceable",
+      "keywords": [
+        "block",
+        "blocks",
+        "box",
+        "brick",
+        "cube",
+        "instanceable"
+      ],
+      "path": "/Isaac/Props/Blocks/block_instanceable.usd",
+      "physics": "dynamic"
+    },
+    "blocks_nvidia_cube": {
+      "category": "blocks",
+      "extent": [
+        0.065,
+        0.065,
+        0.065
+      ],
+      "key": "blocks_nvidia_cube",
+      "keywords": [
+        "block",
+        "blocks",
+        "box",
+        "brick",
+        "cube",
+        "nvidia"
+      ],
+      "path": "/Isaac/Props/Blocks/nvidia_cube.usd",
+      "physics": "dynamic"
+    },
+    "blue_block": {
+      "category": "blocks",
+      "extent": [
+        0.047,
+        0.047,
+        0.047
+      ],
+      "key": "blue_block",
+      "keywords": [
+        "block",
+        "blocks",
+        "blue",
+        "box",
+        "brick",
+        "cube"
+      ],
+      "path": "/Isaac/Props/Blocks/blue_block.usd",
+      "physics": "dynamic"
+    },
+    "camera": {
+      "category": "camera",
+      "extent": [
+        0.3675,
+        0.421,
+        1.0049
+      ],
+      "key": "camera",
+      "keywords": [
+        "camera"
+      ],
+      "path": "/Isaac/Props/Camera/camera.usd",
+      "physics": "visual"
+    },
+    "camera_checkerboard_6x10": {
+      "category": "camera",
+      "extent": [
+        0.01,
+        0.8,
+        1.2
+      ],
+      "key": "camera_checkerboard_6x10",
+      "keywords": [
+        "6x10",
+        "camera",
+        "checkerboard"
+      ],
+      "path": "/Isaac/Props/Camera/checkerboard_6x10.usd",
+      "physics": "visual"
+    },
+    "configurations_cabinet_default_physics": {
+      "category": "sektion_cabinet",
+      "key": "configurations_cabinet_default_physics",
+      "keywords": [
+        "cabinet",
+        "configurations",
+        "cupboard",
+        "default",
+        "drawer",
+        "furniture",
+        "physics",
+        "sektion"
+      ],
+      "path": "/Isaac/Props/Sektion_Cabinet/configurations/cabinet_default_physics.usd",
+      "physics": "dynamic"
+    },
+    "configurations_cabinet_lab": {
+      "category": "sektion_cabinet",
+      "key": "configurations_cabinet_lab",
+      "keywords": [
+        "cabinet",
+        "configurations",
+        "cupboard",
+        "drawer",
+        "furniture",
+        "lab",
+        "sektion"
+      ],
+      "path": "/Isaac/Props/Sektion_Cabinet/configurations/cabinet_lab.usd",
+      "physics": "visual"
+    },
+    "conveyorbelt_a01": {
+      "category": "conveyors",
+      "extent": [
+        2.0714,
+        2.1007,
+        2.311
+      ],
+      "key": "conveyorbelt_a01",
+      "keywords": [
+        "a01",
+        "belt",
+        "conveyor",
+        "conveyor belt",
+        "conveyorbelt",
+        "conveyors",
+        "line",
+        "transport"
+      ],
+      "path": "/Isaac/Props/Conveyors/ConveyorBelt_A01.usd",
+      "physics": "dynamic"
+    },
+    "conveyorbelt_a02": {
+      "category": "conveyors",
+      "extent": [
+        2.0714,
+        2.1007,
+        1.1663
+      ],
+      "key": "conveyorbelt_a02",
+      "keywords": [
+        "a02",
+        "belt",
+        "conveyor",
+        "conveyor belt",
+        "conveyorbelt",
+        "conveyors",
+        "line",
+        "transport"
+      ],
+      "path": "/Isaac/Props/Conveyors/ConveyorBelt_A02.usd",
+      "physics": "dynamic"
+    },
+    "conveyorbelt_a03": {
+      "category": "conveyors",
+      "extent": [
+        2.0713,
+        2.0975,
+        2.3109
+      ],
+      "key": "conveyorbelt_a03",
+      "keywords": [
+        "a03",
+        "belt",
+        "conveyor",
+        "conveyor belt",
+        "conveyorbelt",
+        "conveyors",
+        "line",
+        "transport"
+      ],
+      "path": "/Isaac/Props/Conveyors/ConveyorBelt_A03.usd",
+      "physics": "dynamic"
+    },
+    "conveyorbelt_a04": {
+      "category": "conveyors",
+      "extent": [
+        2.0007,
+        1.151,
+        2.311
+      ],
+      "key": "conveyorbelt_a04",
+      "keywords": [
+        "a04",
+        "belt",
+        "conveyor",
+        "conveyor belt",
+        "conveyorbelt",
+        "conveyors",
+        "line",
+        "transport"
+      ],
+      "path": "/Isaac/Props/Conveyors/ConveyorBelt_A04.usd",
+      "physics": "dynamic"
+    },
+    "conveyorbelt_a05": {
+      "category": "conveyors",
+      "extent": [
+        2.0001,
+        1.151,
+        1.1663
+      ],
+      "key": "conveyorbelt_a05",
+      "keywords": [
+        "a05",
+        "belt",
+        "conveyor",
+        "conveyor belt",
+        "conveyorbelt",
+        "conveyors",
+        "line",
+        "transport"
+      ],
+      "path": "/Isaac/Props/Conveyors/ConveyorBelt_A05.usd",
+      "physics": "dynamic"
+    },
+    "conveyorbelt_a06": {
+      "category": "conveyors",
+      "extent": [
+        2.0007,
+        1.151,
+        2.3109
+      ],
+      "key": "conveyorbelt_a06",
+      "keywords": [
+        "a06",
+        "belt",
+        "conveyor",
+        "conveyor belt",
+        "conveyorbelt",
+        "conveyors",
+        "line",
+        "transport"
+      ],
+      "path": "/Isaac/Props/Conveyors/ConveyorBelt_A06.usd",
+      "physics": "dynamic"
+    },
+    "conveyorbelt_a07": {
+      "category": "conveyors",
+      "extent": [
+        4.003,
+        1.2256,
+        2.311
+      ],
+      "key": "conveyorbelt_a07",
+      "keywords": [
+        "a07",
+        "belt",
+        "conveyor",
+        "conveyor belt",
+        "conveyorbelt",
+        "conveyors",
+        "line",
+        "transport"
+      ],
+      "path": "/Isaac/Props/Conveyors/ConveyorBelt_A07.usd",
+      "physics": "dynamic"
+    },
+    "conveyorbelt_a08": {
+      "category": "conveyors",
+      "extent": [
+        2.7188,
+        1.151,
+        1.1663
+      ],
+      "key": "conveyorbelt_a08",
+      "keywords": [
+        "a08",
+        "belt",
+        "conveyor",
+        "conveyor belt",
+        "conveyorbelt",
+        "conveyors",
+        "line",
+        "transport"
+      ],
+      "path": "/Isaac/Props/Conveyors/ConveyorBelt_A08.usd",
+      "physics": "dynamic"
+    },
+    "conveyorbelt_a09": {
+      "category": "conveyors",
+      "extent": [
+        4.003,
+        1.1768,
+        2.3109
+      ],
+      "key": "conveyorbelt_a09",
+      "keywords": [
+        "a09",
+        "belt",
+        "conveyor",
+        "conveyor belt",
+        "conveyorbelt",
+        "conveyors",
+        "line",
+        "transport"
+      ],
+      "path": "/Isaac/Props/Conveyors/ConveyorBelt_A09.usd",
+      "physics": "dynamic"
+    },
+    "conveyorbelt_a10": {
+      "category": "conveyors",
+      "extent": [
+        2.0714,
+        4.0012,
+        2.311
+      ],
+      "key": "conveyorbelt_a10",
+      "keywords": [
+        "a10",
+        "belt",
+        "conveyor",
+        "conveyor belt",
+        "conveyorbelt",
+        "conveyors",
+        "line",
+        "transport"
+      ],
+      "path": "/Isaac/Props/Conveyors/ConveyorBelt_A10.usd",
+      "physics": "dynamic"
+    },
+    "conveyorbelt_a11": {
+      "category": "conveyors",
+      "extent": [
+        2.0714,
+        4.0011,
+        1.1663
+      ],
+      "key": "conveyorbelt_a11",
+      "keywords": [
+        "a11",
+        "belt",
+        "conveyor",
+        "conveyor belt",
+        "conveyorbelt",
+        "conveyors",
+        "line",
+        "transport"
+      ],
+      "path": "/Isaac/Props/Conveyors/ConveyorBelt_A11.usd",
+      "physics": "dynamic"
+    },
+    "conveyorbelt_a12": {
+      "category": "conveyors",
+      "extent": [
+        2.0713,
+        3.995,
+        2.3109
+      ],
+      "key": "conveyorbelt_a12",
+      "keywords": [
+        "a12",
+        "belt",
+        "conveyor",
+        "conveyor belt",
+        "conveyorbelt",
+        "conveyors",
+        "line",
+        "transport"
+      ],
+      "path": "/Isaac/Props/Conveyors/ConveyorBelt_A12.usd",
+      "physics": "dynamic"
+    },
+    "conveyorbelt_a13": {
+      "category": "conveyors",
+      "extent": [
+        2.571,
+        4.9281,
+        2.311
+      ],
+      "key": "conveyorbelt_a13",
+      "keywords": [
+        "a13",
+        "belt",
+        "conveyor",
+        "conveyor belt",
+        "conveyorbelt",
+        "conveyors",
+        "line",
+        "transport"
+      ],
+      "path": "/Isaac/Props/Conveyors/ConveyorBelt_A13.usd",
+      "physics": "dynamic"
+    },
+    "conveyorbelt_a14": {
+      "category": "conveyors",
+      "extent": [
+        2.571,
+        4.9281,
+        1.1663
+      ],
+      "key": "conveyorbelt_a14",
+      "keywords": [
+        "a14",
+        "belt",
+        "conveyor",
+        "conveyor belt",
+        "conveyorbelt",
+        "conveyors",
+        "line",
+        "transport"
+      ],
+      "path": "/Isaac/Props/Conveyors/ConveyorBelt_A14.usd",
+      "physics": "dynamic"
+    },
+    "conveyorbelt_a15": {
+      "category": "conveyors",
+      "extent": [
+        2.5709,
+        4.9213,
+        2.3109
+      ],
+      "key": "conveyorbelt_a15",
+      "keywords": [
+        "a15",
+        "belt",
+        "conveyor",
+        "conveyor belt",
+        "conveyorbelt",
+        "conveyors",
+        "line",
+        "transport"
+      ],
+      "path": "/Isaac/Props/Conveyors/ConveyorBelt_A15.usd",
+      "physics": "dynamic"
+    },
+    "conveyorbelt_a16": {
+      "category": "conveyors",
+      "extent": [
+        4.0817,
+        8.0291,
+        2.3111
+      ],
+      "key": "conveyorbelt_a16",
+      "keywords": [
+        "a16",
+        "belt",
+        "conveyor",
+        "conveyor belt",
+        "conveyorbelt",
+        "conveyors",
+        "line",
+        "transport"
+      ],
+      "path": "/Isaac/Props/Conveyors/ConveyorBelt_A16.usd",
+      "physics": "dynamic"
+    },
+    "conveyorbelt_a17": {
+      "category": "conveyors",
+      "extent": [
+        4.0817,
+        8.0291,
+        1.1673
+      ],
+      "key": "conveyorbelt_a17",
+      "keywords": [
+        "a17",
+        "belt",
+        "conveyor",
+        "conveyor belt",
+        "conveyorbelt",
+        "conveyors",
+        "line",
+        "transport"
+      ],
+      "path": "/Isaac/Props/Conveyors/ConveyorBelt_A17.usd",
+      "physics": "dynamic"
+    },
+    "conveyorbelt_a18": {
+      "category": "conveyors",
+      "extent": [
+        4.0816,
+        8.0147,
+        2.3109
+      ],
+      "key": "conveyorbelt_a18",
+      "keywords": [
+        "a18",
+        "belt",
+        "conveyor",
+        "conveyor belt",
+        "conveyorbelt",
+        "conveyors",
+        "line",
+        "transport"
+      ],
+      "path": "/Isaac/Props/Conveyors/ConveyorBelt_A18.usd",
+      "physics": "dynamic"
+    },
+    "conveyorbelt_a19": {
+      "category": "conveyors",
+      "extent": [
+        4.0001,
+        2.8307,
+        2.311
+      ],
+      "key": "conveyorbelt_a19",
+      "keywords": [
+        "a19",
+        "belt",
+        "conveyor",
+        "conveyor belt",
+        "conveyorbelt",
+        "conveyors",
+        "line",
+        "transport"
+      ],
+      "path": "/Isaac/Props/Conveyors/ConveyorBelt_A19.usd",
+      "physics": "dynamic"
+    },
+    "conveyorbelt_a20": {
+      "category": "conveyors",
+      "extent": [
+        4.0001,
+        2.8307,
+        1.1663
+      ],
+      "key": "conveyorbelt_a20",
+      "keywords": [
+        "a20",
+        "belt",
+        "conveyor",
+        "conveyor belt",
+        "conveyorbelt",
+        "conveyors",
+        "line",
+        "transport"
+      ],
+      "path": "/Isaac/Props/Conveyors/ConveyorBelt_A20.usd",
+      "physics": "dynamic"
+    },
+    "conveyorbelt_a21": {
+      "category": "conveyors",
+      "extent": [
+        4.0,
+        2.8307,
+        2.3109
+      ],
+      "key": "conveyorbelt_a21",
+      "keywords": [
+        "a21",
+        "belt",
+        "conveyor",
+        "conveyor belt",
+        "conveyorbelt",
+        "conveyors",
+        "line",
+        "transport"
+      ],
+      "path": "/Isaac/Props/Conveyors/ConveyorBelt_A21.usd",
+      "physics": "dynamic"
+    },
+    "conveyorbelt_a22": {
+      "category": "conveyors",
+      "extent": [
+        4.0001,
+        3.0271,
+        2.311
+      ],
+      "key": "conveyorbelt_a22",
+      "keywords": [
+        "a22",
+        "belt",
+        "conveyor",
+        "conveyor belt",
+        "conveyorbelt",
+        "conveyors",
+        "line",
+        "transport"
+      ],
+      "path": "/Isaac/Props/Conveyors/ConveyorBelt_A22.usd",
+      "physics": "dynamic"
+    },
+    "conveyorbelt_a23": {
+      "category": "conveyors",
+      "extent": [
+        4.0001,
+        3.0271,
+        1.1663
+      ],
+      "key": "conveyorbelt_a23",
+      "keywords": [
+        "a23",
+        "belt",
+        "conveyor",
+        "conveyor belt",
+        "conveyorbelt",
+        "conveyors",
+        "line",
+        "transport"
+      ],
+      "path": "/Isaac/Props/Conveyors/ConveyorBelt_A23.usd",
+      "physics": "dynamic"
+    },
+    "conveyorbelt_a24": {
+      "category": "conveyors",
+      "extent": [
+        4.0,
+        3.0269,
+        2.3109
+      ],
+      "key": "conveyorbelt_a24",
+      "keywords": [
+        "a24",
+        "belt",
+        "conveyor",
+        "conveyor belt",
+        "conveyorbelt",
+        "conveyors",
+        "line",
+        "transport"
+      ],
+      "path": "/Isaac/Props/Conveyors/ConveyorBelt_A24.usd",
+      "physics": "dynamic"
+    },
+    "conveyorbelt_a25": {
+      "category": "conveyors",
+      "extent": [
+        3.4998,
+        1.151,
+        3.0511
+      ],
+      "key": "conveyorbelt_a25",
+      "keywords": [
+        "a25",
+        "belt",
+        "conveyor",
+        "conveyor belt",
+        "conveyorbelt",
+        "conveyors",
+        "line",
+        "transport"
+      ],
+      "path": "/Isaac/Props/Conveyors/ConveyorBelt_A25.usd",
+      "physics": "dynamic"
+    },
+    "conveyorbelt_a26": {
+      "category": "conveyors",
+      "extent": [
+        6.0,
+        1.151,
+        4.6008
+      ],
+      "key": "conveyorbelt_a26",
+      "keywords": [
+        "a26",
+        "belt",
+        "conveyor",
+        "conveyor belt",
+        "conveyorbelt",
+        "conveyors",
+        "line",
+        "transport"
+      ],
+      "path": "/Isaac/Props/Conveyors/ConveyorBelt_A26.usd",
+      "physics": "dynamic"
+    },
+    "conveyorbelt_a27": {
+      "category": "conveyors",
+      "extent": [
+        6.0037,
+        1.151,
+        6.9045
+      ],
+      "key": "conveyorbelt_a27",
+      "keywords": [
+        "a27",
+        "belt",
+        "conveyor",
+        "conveyor belt",
+        "conveyorbelt",
+        "conveyors",
+        "line",
+        "transport"
+      ],
+      "path": "/Isaac/Props/Conveyors/ConveyorBelt_A27.usd",
+      "physics": "dynamic"
+    },
+    "conveyorbelt_a28": {
+      "category": "conveyors",
+      "extent": [
+        10.0,
+        1.151,
+        6.9045
+      ],
+      "key": "conveyorbelt_a28",
+      "keywords": [
+        "a28",
+        "belt",
+        "conveyor",
+        "conveyor belt",
+        "conveyorbelt",
+        "conveyors",
+        "line",
+        "transport"
+      ],
+      "path": "/Isaac/Props/Conveyors/ConveyorBelt_A28.usd",
+      "physics": "dynamic"
+    },
+    "conveyorbelt_a29": {
+      "category": "conveyors",
+      "extent": [
+        4.0007,
+        1.151,
+        3.0511
+      ],
+      "key": "conveyorbelt_a29",
+      "keywords": [
+        "a29",
+        "belt",
+        "conveyor",
+        "conveyor belt",
+        "conveyorbelt",
+        "conveyors",
+        "line",
+        "transport"
+      ],
+      "path": "/Isaac/Props/Conveyors/ConveyorBelt_A29.usd",
+      "physics": "dynamic"
+    },
+    "conveyorbelt_a30": {
+      "category": "conveyors",
+      "extent": [
+        4.0007,
+        1.151,
+        4.6008
+      ],
+      "key": "conveyorbelt_a30",
+      "keywords": [
+        "a30",
+        "belt",
+        "conveyor",
+        "conveyor belt",
+        "conveyorbelt",
+        "conveyors",
+        "line",
+        "transport"
+      ],
+      "path": "/Isaac/Props/Conveyors/ConveyorBelt_A30.usd",
+      "physics": "dynamic"
+    },
+    "conveyorbelt_a31": {
+      "category": "conveyors",
+      "extent": [
+        4.0007,
+        1.151,
+        6.9045
+      ],
+      "key": "conveyorbelt_a31",
+      "keywords": [
+        "a31",
+        "belt",
+        "conveyor",
+        "conveyor belt",
+        "conveyorbelt",
+        "conveyors",
+        "line",
+        "transport"
+      ],
+      "path": "/Isaac/Props/Conveyors/ConveyorBelt_A31.usd",
+      "physics": "dynamic"
+    },
+    "conveyorbelt_a32": {
+      "category": "conveyors",
+      "extent": [
+        2.0714,
+        1.9975,
+        3.0511
+      ],
+      "key": "conveyorbelt_a32",
+      "keywords": [
+        "a32",
+        "belt",
+        "conveyor",
+        "conveyor belt",
+        "conveyorbelt",
+        "conveyors",
+        "line",
+        "transport"
+      ],
+      "path": "/Isaac/Props/Conveyors/ConveyorBelt_A32.usd",
+      "physics": "dynamic"
+    },
+    "conveyorbelt_a33": {
+      "category": "conveyors",
+      "extent": [
+        2.0714,
+        1.9975,
+        4.6008
+      ],
+      "key": "conveyorbelt_a33",
+      "keywords": [
+        "a33",
+        "belt",
+        "conveyor",
+        "conveyor belt",
+        "conveyorbelt",
+        "conveyors",
+        "line",
+        "transport"
+      ],
+      "path": "/Isaac/Props/Conveyors/ConveyorBelt_A33.usd",
+      "physics": "dynamic"
+    },
+    "conveyorbelt_a34": {
+      "category": "conveyors",
+      "extent": [
+        2.0714,
+        1.9975,
+        6.9045
+      ],
+      "key": "conveyorbelt_a34",
+      "keywords": [
+        "a34",
+        "belt",
+        "conveyor",
+        "conveyor belt",
+        "conveyorbelt",
+        "conveyors",
+        "line",
+        "transport"
+      ],
+      "path": "/Isaac/Props/Conveyors/ConveyorBelt_A34.usd",
+      "physics": "dynamic"
+    },
+    "conveyorbelt_a37": {
+      "category": "conveyors",
+      "extent": [
+        3.907,
+        1.151,
+        2.282
+      ],
+      "key": "conveyorbelt_a37",
+      "keywords": [
+        "a37",
+        "belt",
+        "conveyor",
+        "conveyor belt",
+        "conveyorbelt",
+        "conveyors",
+        "line",
+        "transport"
+      ],
+      "path": "/Isaac/Props/Conveyors/ConveyorBelt_A37.usd",
+      "physics": "dynamic"
+    },
+    "conveyorbelt_a38": {
+      "category": "conveyors",
+      "extent": [
+        2.3316,
+        1.151,
+        3.0511
+      ],
+      "key": "conveyorbelt_a38",
+      "keywords": [
+        "a38",
+        "belt",
+        "conveyor",
+        "conveyor belt",
+        "conveyorbelt",
+        "conveyors",
+        "line",
+        "transport"
+      ],
+      "path": "/Isaac/Props/Conveyors/ConveyorBelt_A38.usd",
+      "physics": "dynamic"
+    },
+    "conveyorbelt_a39": {
+      "category": "conveyors",
+      "extent": [
+        5.0133,
+        1.151,
+        4.6008
+      ],
+      "key": "conveyorbelt_a39",
+      "keywords": [
+        "a39",
+        "belt",
+        "conveyor",
+        "conveyor belt",
+        "conveyorbelt",
+        "conveyors",
+        "line",
+        "transport"
+      ],
+      "path": "/Isaac/Props/Conveyors/ConveyorBelt_A39.usd",
+      "physics": "dynamic"
+    },
+    "conveyorbelt_a40": {
+      "category": "conveyors",
+      "extent": [
+        5.0133,
+        1.151,
+        6.9045
+      ],
+      "key": "conveyorbelt_a40",
+      "keywords": [
+        "a40",
+        "belt",
+        "conveyor",
+        "conveyor belt",
+        "conveyorbelt",
+        "conveyors",
+        "line",
+        "transport"
+      ],
+      "path": "/Isaac/Props/Conveyors/ConveyorBelt_A40.usd",
+      "physics": "dynamic"
+    },
+    "conveyorbelt_a41": {
+      "category": "conveyors",
+      "extent": [
+        9.0098,
+        1.151,
+        6.9045
+      ],
+      "key": "conveyorbelt_a41",
+      "keywords": [
+        "a41",
+        "belt",
+        "conveyor",
+        "conveyor belt",
+        "conveyorbelt",
+        "conveyors",
+        "line",
+        "transport"
+      ],
+      "path": "/Isaac/Props/Conveyors/ConveyorBelt_A41.usd",
+      "physics": "dynamic"
+    },
+    "conveyorbelt_a42": {
+      "category": "conveyors",
+      "extent": [
+        2.7952,
+        1.151,
+        2.282
+      ],
+      "key": "conveyorbelt_a42",
+      "keywords": [
+        "a42",
+        "belt",
+        "conveyor",
+        "conveyor belt",
+        "conveyorbelt",
+        "conveyors",
+        "line",
+        "transport"
+      ],
+      "path": "/Isaac/Props/Conveyors/ConveyorBelt_A42.usd",
+      "physics": "dynamic"
+    },
+    "conveyorbelt_a43": {
+      "category": "conveyors",
+      "extent": [
+        4.0001,
+        2.8307,
+        1.1663
+      ],
+      "key": "conveyorbelt_a43",
+      "keywords": [
+        "a43",
+        "belt",
+        "conveyor",
+        "conveyor belt",
+        "conveyorbelt",
+        "conveyors",
+        "line",
+        "transport"
+      ],
+      "path": "/Isaac/Props/Conveyors/ConveyorBelt_A43.usd",
+      "physics": "dynamic"
+    },
+    "conveyorbelt_a44": {
+      "category": "conveyors",
+      "extent": [
+        4.0024,
+        2.8307,
+        2.311
+      ],
+      "key": "conveyorbelt_a44",
+      "keywords": [
+        "a44",
+        "belt",
+        "conveyor",
+        "conveyor belt",
+        "conveyorbelt",
+        "conveyors",
+        "line",
+        "transport"
+      ],
+      "path": "/Isaac/Props/Conveyors/ConveyorBelt_A44.usd",
+      "physics": "dynamic"
+    },
+    "conveyorbelt_a45": {
+      "category": "conveyors",
+      "extent": [
+        4.0,
+        4.5105,
+        1.1663
+      ],
+      "key": "conveyorbelt_a45",
+      "keywords": [
+        "a45",
+        "belt",
+        "conveyor",
+        "conveyor belt",
+        "conveyorbelt",
+        "conveyors",
+        "line",
+        "transport"
+      ],
+      "path": "/Isaac/Props/Conveyors/ConveyorBelt_A45.usd",
+      "physics": "dynamic"
+    },
+    "conveyorbelt_a46": {
+      "category": "conveyors",
+      "extent": [
+        4.0,
+        4.5105,
+        2.311
+      ],
+      "key": "conveyorbelt_a46",
+      "keywords": [
+        "a46",
+        "belt",
+        "conveyor",
+        "conveyor belt",
+        "conveyorbelt",
+        "conveyors",
+        "line",
+        "transport"
+      ],
+      "path": "/Isaac/Props/Conveyors/ConveyorBelt_A46.usd",
+      "physics": "dynamic"
+    },
+    "conveyorbelt_a47": {
+      "category": "conveyors",
+      "extent": [
+        4.0001,
+        3.0271,
+        1.1663
+      ],
+      "key": "conveyorbelt_a47",
+      "keywords": [
+        "a47",
+        "belt",
+        "conveyor",
+        "conveyor belt",
+        "conveyorbelt",
+        "conveyors",
+        "line",
+        "transport"
+      ],
+      "path": "/Isaac/Props/Conveyors/ConveyorBelt_A47.usd",
+      "physics": "dynamic"
+    },
+    "conveyorbelt_a48": {
+      "category": "conveyors",
+      "extent": [
+        4.0001,
+        3.0271,
+        2.311
+      ],
+      "key": "conveyorbelt_a48",
+      "keywords": [
+        "a48",
+        "belt",
+        "conveyor",
+        "conveyor belt",
+        "conveyorbelt",
+        "conveyors",
+        "line",
+        "transport"
+      ],
+      "path": "/Isaac/Props/Conveyors/ConveyorBelt_A48.usd",
+      "physics": "dynamic"
+    },
+    "conveyorbelt_a49": {
+      "category": "conveyors",
+      "extent": [
+        1.0649,
+        1.0845,
+        0.7982
+      ],
+      "key": "conveyorbelt_a49",
+      "keywords": [
+        "a49",
+        "belt",
+        "conveyor",
+        "conveyor belt",
+        "conveyorbelt",
+        "conveyors",
+        "line",
+        "transport"
+      ],
+      "path": "/Isaac/Props/Conveyors/ConveyorBelt_A49.usd",
+      "physics": "dynamic"
+    },
+    "deformabletube_tube": {
+      "category": "deformabletube",
+      "extent": [
+        0.0188,
+        0.3,
+        0.0188
+      ],
+      "key": "deformabletube_tube",
+      "keywords": [
+        "deformabletube",
+        "tube"
+      ],
+      "path": "/Isaac/Props/DeformableTube/tube.usd",
+      "physics": "visual"
+    },
+    "dex_cube_instanceable": {
+      "category": "blocks",
+      "extent": [
+        0.06,
+        0.06,
+        0.06
+      ],
+      "key": "dex_cube_instanceable",
+      "keywords": [
+        "block",
+        "blocks",
+        "box",
+        "brick",
+        "cube",
+        "dex",
+        "dexcube",
+        "instanceable"
+      ],
+      "path": "/Isaac/Props/Blocks/DexCube/dex_cube_instanceable.usd",
+      "physics": "dynamic"
+    },
+    "dolly": {
+      "category": "dolly",
+      "extent": [
+        0.8504,
+        1.2594,
+        0.4407
+      ],
+      "key": "dolly",
+      "keywords": [
+        "cart",
+        "dolly",
+        "trolley",
+        "wheeled"
+      ],
+      "path": "/Isaac/Props/Dolly/dolly.usd",
+      "physics": "visual"
+    },
+    "dolly_physics": {
+      "category": "dolly",
+      "extent": [
+        0.8645,
+        1.2424,
+        0.4945
+      ],
+      "key": "dolly_physics",
+      "keywords": [
+        "cart",
+        "dolly",
+        "physics",
+        "trolley",
+        "wheeled"
+      ],
+      "path": "/Isaac/Props/Dolly/dolly_physics.usd",
+      "physics": "dynamic"
+    },
+    "factory_bolt_m12_loose": {
+      "category": "factory",
+      "extent": [
+        0.018,
+        0.018,
+        0.032
+      ],
+      "key": "factory_bolt_m12_loose",
+      "keywords": [
+        "assembly",
+        "bolt",
+        "factory",
+        "fastener",
+        "loose",
+        "m12",
+        "nut",
+        "peg"
+      ],
+      "path": "/Isaac/Props/Factory/factory_bolt_m12_loose/factory_bolt_m12_loose.usd",
+      "physics": "dynamic"
+    },
+    "factory_bolt_m12_tight": {
+      "category": "factory",
+      "extent": [
+        0.018,
+        0.018,
+        0.032
+      ],
+      "key": "factory_bolt_m12_tight",
+      "keywords": [
+        "assembly",
+        "bolt",
+        "factory",
+        "fastener",
+        "m12",
+        "nut",
+        "peg",
+        "tight"
+      ],
+      "path": "/Isaac/Props/Factory/factory_bolt_m12_tight/factory_bolt_m12_tight.usd",
+      "physics": "dynamic"
+    },
+    "factory_bolt_m16_loose": {
+      "category": "factory",
+      "extent": [
+        0.024,
+        0.024,
+        0.041
+      ],
+      "key": "factory_bolt_m16_loose",
+      "keywords": [
+        "assembly",
+        "bolt",
+        "factory",
+        "fastener",
+        "loose",
+        "m16",
+        "nut",
+        "peg"
+      ],
+      "path": "/Isaac/Props/Factory/factory_bolt_m16_loose/factory_bolt_m16_loose.usd",
+      "physics": "dynamic"
+    },
+    "factory_bolt_m16_tight": {
+      "category": "factory",
+      "extent": [
+        0.024,
+        0.024,
+        0.041
+      ],
+      "key": "factory_bolt_m16_tight",
+      "keywords": [
+        "assembly",
+        "bolt",
+        "factory",
+        "fastener",
+        "m16",
+        "nut",
+        "peg",
+        "tight"
+      ],
+      "path": "/Isaac/Props/Factory/factory_bolt_m16_tight/factory_bolt_m16_tight.usd",
+      "physics": "dynamic"
+    },
+    "factory_bolt_m20_loose": {
+      "category": "factory",
+      "extent": [
+        0.03,
+        0.03,
+        0.065
+      ],
+      "key": "factory_bolt_m20_loose",
+      "keywords": [
+        "assembly",
+        "bolt",
+        "factory",
+        "fastener",
+        "loose",
+        "m20",
+        "nut",
+        "peg"
+      ],
+      "path": "/Isaac/Props/Factory/factory_bolt_m20_loose/factory_bolt_m20_loose.usd",
+      "physics": "dynamic"
+    },
+    "factory_bolt_m20_tight": {
+      "category": "factory",
+      "extent": [
+        0.03,
+        0.03,
+        0.065
+      ],
+      "key": "factory_bolt_m20_tight",
+      "keywords": [
+        "assembly",
+        "bolt",
+        "factory",
+        "fastener",
+        "m20",
+        "nut",
+        "peg",
+        "tight"
+      ],
+      "path": "/Isaac/Props/Factory/factory_bolt_m20_tight/factory_bolt_m20_tight.usd",
+      "physics": "dynamic"
+    },
+    "factory_bolt_m4_loose": {
+      "category": "factory",
+      "extent": [
+        0.007,
+        0.007,
+        0.02
+      ],
+      "key": "factory_bolt_m4_loose",
+      "keywords": [
+        "assembly",
+        "bolt",
+        "factory",
+        "fastener",
+        "loose",
+        "nut",
+        "peg"
+      ],
+      "path": "/Isaac/Props/Factory/factory_bolt_m4_loose/factory_bolt_m4_loose.usd",
+      "physics": "dynamic"
+    },
+    "factory_bolt_m4_tight": {
+      "category": "factory",
+      "extent": [
+        0.007,
+        0.007,
+        0.02
+      ],
+      "key": "factory_bolt_m4_tight",
+      "keywords": [
+        "assembly",
+        "bolt",
+        "factory",
+        "fastener",
+        "nut",
+        "peg",
+        "tight"
+      ],
+      "path": "/Isaac/Props/Factory/factory_bolt_m4_tight/factory_bolt_m4_tight.usd",
+      "physics": "dynamic"
+    },
+    "factory_bolt_m8_loose": {
+      "category": "factory",
+      "extent": [
+        0.013,
+        0.013,
+        0.026
+      ],
+      "key": "factory_bolt_m8_loose",
+      "keywords": [
+        "assembly",
+        "bolt",
+        "factory",
+        "fastener",
+        "loose",
+        "nut",
+        "peg"
+      ],
+      "path": "/Isaac/Props/Factory/factory_bolt_m8_loose/factory_bolt_m8_loose.usd",
+      "physics": "dynamic"
+    },
+    "factory_bolt_m8_tight": {
+      "category": "factory",
+      "extent": [
+        0.013,
+        0.013,
+        0.026
+      ],
+      "key": "factory_bolt_m8_tight",
+      "keywords": [
+        "assembly",
+        "bolt",
+        "factory",
+        "fastener",
+        "nut",
+        "peg",
+        "tight"
+      ],
+      "path": "/Isaac/Props/Factory/factory_bolt_m8_tight/factory_bolt_m8_tight.usd",
+      "physics": "dynamic"
+    },
+    "factory_nut_m12_loose": {
+      "category": "factory",
+      "extent": [
+        0.019,
+        0.0219,
+        0.01
+      ],
+      "key": "factory_nut_m12_loose",
+      "keywords": [
+        "assembly",
+        "bolt",
+        "factory",
+        "fastener",
+        "loose",
+        "m12",
+        "nut",
+        "peg"
+      ],
+      "path": "/Isaac/Props/Factory/factory_nut_m12_loose/factory_nut_m12_loose.usd",
+      "physics": "dynamic"
+    },
+    "factory_nut_m12_tight": {
+      "category": "factory",
+      "extent": [
+        0.019,
+        0.0219,
+        0.01
+      ],
+      "key": "factory_nut_m12_tight",
+      "keywords": [
+        "assembly",
+        "bolt",
+        "factory",
+        "fastener",
+        "m12",
+        "nut",
+        "peg",
+        "tight"
+      ],
+      "path": "/Isaac/Props/Factory/factory_nut_m12_tight/factory_nut_m12_tight.usd",
+      "physics": "dynamic"
+    },
+    "factory_nut_m16_loose": {
+      "category": "factory",
+      "extent": [
+        0.024,
+        0.0277,
+        0.013
+      ],
+      "key": "factory_nut_m16_loose",
+      "keywords": [
+        "assembly",
+        "bolt",
+        "factory",
+        "fastener",
+        "loose",
+        "m16",
+        "nut",
+        "peg"
+      ],
+      "path": "/Isaac/Props/Factory/factory_nut_m16_loose/factory_nut_m16_loose.usd",
+      "physics": "dynamic"
+    },
+    "factory_nut_m16_tight": {
+      "category": "factory",
+      "extent": [
+        0.024,
+        0.0277,
+        0.013
+      ],
+      "key": "factory_nut_m16_tight",
+      "keywords": [
+        "assembly",
+        "bolt",
+        "factory",
+        "fastener",
+        "m16",
+        "nut",
+        "peg",
+        "tight"
+      ],
+      "path": "/Isaac/Props/Factory/factory_nut_m16_tight/factory_nut_m16_tight.usd",
+      "physics": "dynamic"
+    },
+    "factory_nut_m20_loose": {
+      "category": "factory",
+      "extent": [
+        0.03,
+        0.0346,
+        0.016
+      ],
+      "key": "factory_nut_m20_loose",
+      "keywords": [
+        "assembly",
+        "bolt",
+        "factory",
+        "fastener",
+        "loose",
+        "m20",
+        "nut",
+        "peg"
+      ],
+      "path": "/Isaac/Props/Factory/factory_nut_m20_loose/factory_nut_m20_loose.usd",
+      "physics": "dynamic"
+    },
+    "factory_nut_m20_tight": {
+      "category": "factory",
+      "extent": [
+        0.03,
+        0.0346,
+        0.016
+      ],
+      "key": "factory_nut_m20_tight",
+      "keywords": [
+        "assembly",
+        "bolt",
+        "factory",
+        "fastener",
+        "m20",
+        "nut",
+        "peg",
+        "tight"
+      ],
+      "path": "/Isaac/Props/Factory/factory_nut_m20_tight/factory_nut_m20_tight.usd",
+      "physics": "dynamic"
+    },
+    "factory_nut_m4_loose": {
+      "category": "factory",
+      "extent": [
+        0.007,
+        0.0081,
+        0.0032
+      ],
+      "key": "factory_nut_m4_loose",
+      "keywords": [
+        "assembly",
+        "bolt",
+        "factory",
+        "fastener",
+        "loose",
+        "nut",
+        "peg"
+      ],
+      "path": "/Isaac/Props/Factory/factory_nut_m4_loose/factory_nut_m4_loose.usd",
+      "physics": "dynamic"
+    },
+    "factory_nut_m4_tight": {
+      "category": "factory",
+      "extent": [
+        0.007,
+        0.0081,
+        0.0032
+      ],
+      "key": "factory_nut_m4_tight",
+      "keywords": [
+        "assembly",
+        "bolt",
+        "factory",
+        "fastener",
+        "nut",
+        "peg",
+        "tight"
+      ],
+      "path": "/Isaac/Props/Factory/factory_nut_m4_tight/factory_nut_m4_tight.usd",
+      "physics": "dynamic"
+    },
+    "factory_nut_m8_loose": {
+      "category": "factory",
+      "extent": [
+        0.013,
+        0.015,
+        0.0065
+      ],
+      "key": "factory_nut_m8_loose",
+      "keywords": [
+        "assembly",
+        "bolt",
+        "factory",
+        "fastener",
+        "loose",
+        "nut",
+        "peg"
+      ],
+      "path": "/Isaac/Props/Factory/factory_nut_m8_loose/factory_nut_m8_loose.usd",
+      "physics": "dynamic"
+    },
+    "factory_nut_m8_tight": {
+      "category": "factory",
+      "extent": [
+        0.013,
+        0.015,
+        0.0065
+      ],
+      "key": "factory_nut_m8_tight",
+      "keywords": [
+        "assembly",
+        "bolt",
+        "factory",
+        "fastener",
+        "nut",
+        "peg",
+        "tight"
+      ],
+      "path": "/Isaac/Props/Factory/factory_nut_m8_tight/factory_nut_m8_tight.usd",
+      "physics": "dynamic"
+    },
+    "flip_stack": {
+      "category": "flip_stack",
+      "extent": [
+        0.6489,
+        0.7478,
+        1.0123
+      ],
+      "key": "flip_stack",
+      "keywords": [
+        "assembly",
+        "flip",
+        "mechanical",
+        "part",
+        "stack"
+      ],
+      "path": "/Isaac/Props/Flip_Stack/flip_stack.usd",
+      "physics": "static"
+    },
+    "flip_stack_angled_connector": {
+      "category": "flip_stack",
+      "extent": [
+        1.0,
+        1.6208,
+        4.207
+      ],
+      "key": "flip_stack_angled_connector",
+      "keywords": [
+        "angled",
+        "assembly",
+        "connector",
+        "flip",
+        "mechanical",
+        "part",
+        "stack"
+      ],
+      "path": "/Isaac/Props/Flip_Stack/angled_connector.usd",
+      "physics": "visual"
+    },
+    "flip_stack_bearing_pin": {
+      "category": "flip_stack",
+      "extent": [
+        0.0124,
+        0.0122,
+        0.0091
+      ],
+      "key": "flip_stack_bearing_pin",
+      "keywords": [
+        "assembly",
+        "bearing",
+        "flip",
+        "mechanical",
+        "part",
+        "pin",
+        "stack"
+      ],
+      "path": "/Isaac/Props/Flip_Stack/bearing_pin.usd",
+      "physics": "visual"
+    },
+    "flip_stack_caster": {
+      "category": "flip_stack",
+      "extent": [
+        0.0867,
+        0.0366,
+        0.077
+      ],
+      "key": "flip_stack_caster",
+      "keywords": [
+        "assembly",
+        "caster",
+        "flip",
+        "mechanical",
+        "part",
+        "stack"
+      ],
+      "path": "/Isaac/Props/Flip_Stack/caster.usd",
+      "physics": "static"
+    },
+    "flip_stack_caster_bearing": {
+      "category": "flip_stack",
+      "extent": [
+        0.0051,
+        0.0051,
+        0.0051
+      ],
+      "key": "flip_stack_caster_bearing",
+      "keywords": [
+        "assembly",
+        "bearing",
+        "caster",
+        "flip",
+        "mechanical",
+        "part",
+        "stack"
+      ],
+      "path": "/Isaac/Props/Flip_Stack/caster_bearing.usd",
+      "physics": "visual"
+    },
+    "flip_stack_large_corner_bracket": {
+      "category": "flip_stack",
+      "extent": [
+        0.06,
+        0.015,
+        0.06
+      ],
+      "key": "flip_stack_large_corner_bracket",
+      "keywords": [
+        "assembly",
+        "bracket",
+        "corner",
+        "flip",
+        "large",
+        "mechanical",
+        "part",
+        "stack"
+      ],
+      "path": "/Isaac/Props/Flip_Stack/large_corner_bracket.usd",
+      "physics": "visual"
+    },
+    "flip_stack_large_corner_bracket_physics": {
+      "category": "flip_stack",
+      "extent": [
+        0.06,
+        0.06,
+        0.004
+      ],
+      "key": "flip_stack_large_corner_bracket_physics",
+      "keywords": [
+        "assembly",
+        "bracket",
+        "corner",
+        "flip",
+        "large",
+        "mechanical",
+        "part",
+        "physics",
+        "stack"
+      ],
+      "path": "/Isaac/Props/Flip_Stack/large_corner_bracket_physics.usd",
+      "physics": "dynamic"
+    },
+    "flip_stack_screw_95": {
+      "category": "flip_stack",
+      "extent": [
+        0.008,
+        0.015,
+        0.008
+      ],
+      "key": "flip_stack_screw_95",
+      "keywords": [
+        "assembly",
+        "flip",
+        "mechanical",
+        "part",
+        "screw",
+        "stack"
+      ],
+      "path": "/Isaac/Props/Flip_Stack/screw_95.usd",
+      "physics": "visual"
+    },
+    "flip_stack_screw_95_physics": {
+      "category": "flip_stack",
+      "extent": [
+        0.016,
+        0.0375,
+        0.016
+      ],
+      "key": "flip_stack_screw_95_physics",
+      "keywords": [
+        "assembly",
+        "flip",
+        "mechanical",
+        "part",
+        "physics",
+        "screw",
+        "stack"
+      ],
+      "path": "/Isaac/Props/Flip_Stack/screw_95_physics.usd",
+      "physics": "dynamic"
+    },
+    "flip_stack_screw_99": {
+      "category": "flip_stack",
+      "extent": [
+        0.0064,
+        0.012,
+        0.0064
+      ],
+      "key": "flip_stack_screw_99",
+      "keywords": [
+        "assembly",
+        "flip",
+        "mechanical",
+        "part",
+        "screw",
+        "stack"
+      ],
+      "path": "/Isaac/Props/Flip_Stack/screw_99.usd",
+      "physics": "visual"
+    },
+    "flip_stack_screw_99_physics": {
+      "category": "flip_stack",
+      "extent": [
+        0.0246,
+        0.0328,
+        0.0233
+      ],
+      "key": "flip_stack_screw_99_physics",
+      "keywords": [
+        "assembly",
+        "flip",
+        "mechanical",
+        "part",
+        "physics",
+        "screw",
+        "stack"
+      ],
+      "path": "/Isaac/Props/Flip_Stack/screw_99_physics.usd",
+      "physics": "dynamic"
+    },
+    "flip_stack_screw_high_res": {
+      "category": "flip_stack",
+      "extent": [
+        0.0106,
+        0.015,
+        0.0106
+      ],
+      "key": "flip_stack_screw_high_res",
+      "keywords": [
+        "assembly",
+        "flip",
+        "high",
+        "mechanical",
+        "part",
+        "res",
+        "screw",
+        "stack"
+      ],
+      "path": "/Isaac/Props/Flip_Stack/screw_high_res.usd",
+      "physics": "visual"
+    },
+    "flip_stack_screw_m3": {
+      "category": "flip_stack",
+      "extent": [
+        0.008,
+        0.008,
+        0.015
+      ],
+      "key": "flip_stack_screw_m3",
+      "keywords": [
+        "assembly",
+        "flip",
+        "mechanical",
+        "part",
+        "screw",
+        "stack"
+      ],
+      "path": "/Isaac/Props/Flip_Stack/screw_m3.usd",
+      "physics": "visual"
+    },
+    "flip_stack_small_corner_bracket": {
+      "category": "flip_stack",
+      "extent": [
+        0.018,
+        0.018,
+        0.018
+      ],
+      "key": "flip_stack_small_corner_bracket",
+      "keywords": [
+        "assembly",
+        "bracket",
+        "corner",
+        "flip",
+        "mechanical",
+        "part",
+        "small",
+        "stack"
+      ],
+      "path": "/Isaac/Props/Flip_Stack/small_corner_bracket.usd",
+      "physics": "visual"
+    },
+    "flip_stack_small_corner_bracket_physics": {
+      "category": "flip_stack",
+      "extent": [
+        0.018,
+        0.018,
+        0.018
+      ],
+      "key": "flip_stack_small_corner_bracket_physics",
+      "keywords": [
+        "assembly",
+        "bracket",
+        "corner",
+        "flip",
+        "mechanical",
+        "part",
+        "physics",
+        "small",
+        "stack"
+      ],
+      "path": "/Isaac/Props/Flip_Stack/small_corner_bracket_physics.usd",
+      "physics": "dynamic"
+    },
+    "flip_stack_t_connector": {
+      "category": "flip_stack",
+      "extent": [
+        2.54,
+        7.62,
+        3.1346
+      ],
+      "key": "flip_stack_t_connector",
+      "keywords": [
+        "assembly",
+        "connector",
+        "flip",
+        "mechanical",
+        "part",
+        "stack"
+      ],
+      "path": "/Isaac/Props/Flip_Stack/t_connector.usd",
+      "physics": "visual"
+    },
+    "flip_stack_t_connector_physics": {
+      "category": "flip_stack",
+      "extent": [
+        0.0381,
+        0.1143,
+        0.0396
+      ],
+      "key": "flip_stack_t_connector_physics",
+      "keywords": [
+        "assembly",
+        "connector",
+        "flip",
+        "mechanical",
+        "part",
+        "physics",
+        "stack"
+      ],
+      "path": "/Isaac/Props/Flip_Stack/t_connector_physics.usd",
+      "physics": "dynamic"
+    },
+    "food_mac_n_cheese": {
+      "category": "food",
+      "extent": [
+        0.0932,
+        0.1849,
+        0.0415
+      ],
+      "key": "food_mac_n_cheese",
+      "keywords": [
+        "box",
+        "cheese",
+        "food",
+        "grocery",
+        "mac",
+        "package"
+      ],
+      "path": "/Isaac/Props/Food/mac_n_cheese.usd",
+      "physics": "visual"
+    },
+    "food_mac_n_cheese_centered": {
+      "category": "food",
+      "extent": [
+        0.0932,
+        0.1849,
+        0.0415
+      ],
+      "key": "food_mac_n_cheese_centered",
+      "keywords": [
+        "box",
+        "centered",
+        "cheese",
+        "food",
+        "grocery",
+        "mac",
+        "package"
+      ],
+      "path": "/Isaac/Props/Food/mac_n_cheese_centered.usd",
+      "physics": "visual"
+    },
+    "forklift": {
+      "category": "forklift",
+      "extent": [
+        1.2138,
+        3.4947,
+        2.1549
+      ],
+      "key": "forklift",
+      "keywords": [
+        "forklift",
+        "truck",
+        "vehicle",
+        "warehouse"
+      ],
+      "path": "/Isaac/Props/Forklift/forklift.usd",
+      "physics": "static"
+    },
+    "green_block": {
+      "category": "blocks",
+      "extent": [
+        0.047,
+        0.047,
+        0.047
+      ],
+      "key": "green_block",
+      "keywords": [
+        "block",
+        "blocks",
+        "box",
+        "brick",
+        "cube",
+        "green"
+      ],
+      "path": "/Isaac/Props/Blocks/green_block.usd",
+      "physics": "dynamic"
+    },
+    "meshes_gear_base": {
+      "category": "isaac_ros_segment_anything",
+      "extent": [
+        0.225,
+        0.1125,
+        0.0375
+      ],
+      "key": "meshes_gear_base",
+      "keywords": [
+        "anything",
+        "base",
+        "gear",
+        "isaac",
+        "meshes",
+        "ros",
+        "segment"
+      ],
+      "path": "/Isaac/Props/isaac_ros_segment_anything/meshes/gear_base.usd",
+      "physics": "dynamic"
+    },
+    "meshes_gear_large": {
+      "category": "isaac_ros_segment_anything",
+      "extent": [
+        0.093,
+        0.093,
+        0.0375
+      ],
+      "key": "meshes_gear_large",
+      "keywords": [
+        "anything",
+        "gear",
+        "isaac",
+        "large",
+        "meshes",
+        "ros",
+        "segment"
+      ],
+      "path": "/Isaac/Props/isaac_ros_segment_anything/meshes/gear_large.usd",
+      "physics": "dynamic"
+    },
+    "meshes_gear_medium": {
+      "category": "isaac_ros_segment_anything",
+      "extent": [
+        0.063,
+        0.063,
+        0.0375
+      ],
+      "key": "meshes_gear_medium",
+      "keywords": [
+        "anything",
+        "gear",
+        "isaac",
+        "medium",
+        "meshes",
+        "ros",
+        "segment"
+      ],
+      "path": "/Isaac/Props/isaac_ros_segment_anything/meshes/gear_medium.usd",
+      "physics": "dynamic"
+    },
+    "meshes_gear_small": {
+      "category": "isaac_ros_segment_anything",
+      "extent": [
+        0.033,
+        0.033,
+        0.0375
+      ],
+      "key": "meshes_gear_small",
+      "keywords": [
+        "anything",
+        "gear",
+        "isaac",
+        "meshes",
+        "ros",
+        "segment",
+        "small"
+      ],
+      "path": "/Isaac/Props/isaac_ros_segment_anything/meshes/gear_small.usd",
+      "physics": "dynamic"
+    },
+    "mounts_screw": {
+      "category": "mounts",
+      "extent": [
+        0.0128,
+        0.024,
+        0.0128
+      ],
+      "key": "mounts_screw",
+      "keywords": [
+        "bench",
+        "mount",
+        "mounts",
+        "screw",
+        "stand",
+        "surface",
+        "table"
+      ],
+      "path": "/Isaac/Props/Mounts/screw.usd",
+      "physics": "visual"
+    },
+    "mounts_screw_m3": {
+      "category": "mounts",
+      "extent": [
+        0.0128,
+        0.024,
+        0.0128
+      ],
+      "key": "mounts_screw_m3",
+      "keywords": [
+        "bench",
+        "mount",
+        "mounts",
+        "screw",
+        "stand",
+        "surface",
+        "table"
+      ],
+      "path": "/Isaac/Props/Mounts/screw_m3.usd",
+      "physics": "visual"
+    },
+    "mounts_table": {
+      "category": "mounts",
+      "extent": [
+        1.6595,
+        1.4187,
+        1.755
+      ],
+      "key": "mounts_table",
+      "keywords": [
+        "bench",
+        "mount",
+        "mounts",
+        "stand",
+        "surface",
+        "table"
+      ],
+      "path": "/Isaac/Props/Mounts/table.usd",
+      "physics": "visual"
+    },
+    "mounts_textured_table": {
+      "category": "mounts",
+      "extent": [
+        1.6595,
+        1.4187,
+        1.755
+      ],
+      "key": "mounts_textured_table",
+      "keywords": [
+        "bench",
+        "mount",
+        "mounts",
+        "stand",
+        "surface",
+        "table",
+        "textured"
+      ],
+      "path": "/Isaac/Props/Mounts/textured_table.usd",
+      "physics": "static"
+    },
+    "mounts_thor_table": {
+      "category": "mounts",
+      "extent": [
+        0.9103,
+        0.7679,
+        0.795
+      ],
+      "key": "mounts_thor_table",
+      "keywords": [
+        "bench",
+        "mount",
+        "mounts",
+        "stand",
+        "surface",
+        "table",
+        "thor"
+      ],
+      "path": "/Isaac/Props/Mounts/thor_table.usd",
+      "physics": "static"
+    },
+    "multi_color_cube_instanceable": {
+      "category": "blocks",
+      "extent": [
+        0.05,
+        0.05,
+        0.05
+      ],
+      "key": "multi_color_cube_instanceable",
+      "keywords": [
+        "block",
+        "blocks",
+        "box",
+        "brick",
+        "color",
+        "cube",
+        "instanceable",
+        "multi",
+        "multicolorcube"
+      ],
+      "path": "/Isaac/Props/Blocks/MultiColorCube/multi_color_cube_instanceable.usd",
+      "physics": "dynamic"
+    },
+    "o3dyn_pallet": {
+      "category": "pallet",
+      "extent": [
+        1.203,
+        0.8028,
+        0.5869
+      ],
+      "key": "o3dyn_pallet",
+      "keywords": [
+        "o3dyn",
+        "pallet",
+        "skid",
+        "warehouse"
+      ],
+      "path": "/Isaac/Props/Pallet/o3dyn_pallet.usd",
+      "physics": "dynamic"
+    },
+    "packing_table": {
+      "category": "packingtable",
+      "extent": [
+        2.4736,
+        0.7816,
+        1.0829
+      ],
+      "key": "packing_table",
+      "keywords": [
+        "bench",
+        "packing",
+        "packingtable",
+        "surface",
+        "table",
+        "workbench"
+      ],
+      "path": "/Isaac/Props/PackingTable/packing_table.usd",
+      "physics": "dynamic"
+    },
+    "pallet": {
+      "category": "pallet",
+      "extent": [
+        1.2132,
+        0.8023,
+        0.1425
+      ],
+      "key": "pallet",
+      "keywords": [
+        "pallet",
+        "skid",
+        "warehouse"
+      ],
+      "path": "/Isaac/Props/Pallet/pallet.usd",
+      "physics": "static"
+    },
+    "pallet_holder": {
+      "category": "pallet",
+      "extent": [
+        1.177,
+        1.8355,
+        1.3196
+      ],
+      "key": "pallet_holder",
+      "keywords": [
+        "holder",
+        "pallet",
+        "skid",
+        "warehouse"
+      ],
+      "path": "/Isaac/Props/Pallet/pallet_holder.usd",
+      "physics": "visual"
+    },
+    "pallet_holder_short": {
+      "category": "pallet",
+      "extent": [
+        1.177,
+        1.0715,
+        1.3196
+      ],
+      "key": "pallet_holder_short",
+      "keywords": [
+        "holder",
+        "pallet",
+        "short",
+        "skid",
+        "warehouse"
+      ],
+      "path": "/Isaac/Props/Pallet/pallet_holder_short.usd",
+      "physics": "static"
+    },
+    "red_block": {
+      "category": "blocks",
+      "extent": [
+        0.047,
+        0.047,
+        0.047
+      ],
+      "key": "red_block",
+      "keywords": [
+        "block",
+        "blocks",
+        "box",
+        "brick",
+        "cube",
+        "red"
+      ],
+      "path": "/Isaac/Props/Blocks/red_block.usd",
+      "physics": "dynamic"
+    },
+    "rubiks_cube": {
+      "category": "rubiks_cube",
+      "extent": [
+        0.0721,
+        0.0721,
+        0.0721
+      ],
+      "key": "rubiks_cube",
+      "keywords": [
+        "cube",
+        "puzzle",
+        "rubik",
+        "rubiks",
+        "toy"
+      ],
+      "path": "/Isaac/Props/Rubiks_Cube/rubiks_cube.usd",
+      "physics": "visual"
+    },
+    "s_forkliftfork": {
+      "category": "forklift",
+      "extent": [
+        1.149,
+        1.2632,
+        0.9917
+      ],
+      "key": "s_forkliftfork",
+      "keywords": [
+        "forklift",
+        "forkliftfork",
+        "truck",
+        "vehicle",
+        "warehouse"
+      ],
+      "path": "/Isaac/Props/Forklift/S_ForkliftFork.usd",
+      "physics": "static"
+    },
+    "seattlelabtable_table": {
+      "category": "mounts",
+      "extent": [
+        1.4187,
+        1.6595,
+        1.755
+      ],
+      "key": "seattlelabtable_table",
+      "keywords": [
+        "bench",
+        "mount",
+        "mounts",
+        "seattlelabtable",
+        "stand",
+        "surface",
+        "table"
+      ],
+      "path": "/Isaac/Props/Mounts/SeattleLabTable/table.usd",
+      "physics": "static"
+    },
+    "seattlelabtable_table_instanceable": {
+      "category": "mounts",
+      "extent": [
+        1.4187,
+        1.6595,
+        1.755
+      ],
+      "key": "seattlelabtable_table_instanceable",
+      "keywords": [
+        "bench",
+        "instanceable",
+        "mount",
+        "mounts",
+        "seattlelabtable",
+        "stand",
+        "surface",
+        "table"
+      ],
+      "path": "/Isaac/Props/Mounts/SeattleLabTable/table_instanceable.usd",
+      "physics": "visual"
+    },
+    "sektion_cabinet_instanceable": {
+      "category": "sektion_cabinet",
+      "extent": [
+        0.6678,
+        0.7638,
+        0.7861
+      ],
+      "key": "sektion_cabinet_instanceable",
+      "keywords": [
+        "cabinet",
+        "cupboard",
+        "drawer",
+        "furniture",
+        "instanceable",
+        "sektion"
+      ],
+      "path": "/Isaac/Props/Sektion_Cabinet/sektion_cabinet_instanceable.usd",
+      "physics": "dynamic"
+    },
+    "sektion_cabinet_visuals": {
+      "category": "sektion_cabinet",
+      "key": "sektion_cabinet_visuals",
+      "keywords": [
+        "cabinet",
+        "cupboard",
+        "drawer",
+        "furniture",
+        "sektion",
+        "visuals"
+      ],
+      "path": "/Isaac/Props/Sektion_Cabinet/sektion_cabinet_visuals.usd",
+      "physics": "visual"
+    },
+    "shapes_cone": {
+      "category": "shapes",
+      "extent": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "key": "shapes_cone",
+      "keywords": [
+        "cone",
+        "cube",
+        "cylinder",
+        "primitive",
+        "shape",
+        "shapes",
+        "sphere"
+      ],
+      "path": "/Isaac/Props/Shapes/cone.usd",
+      "physics": "visual"
+    },
+    "shapes_cube": {
+      "category": "shapes",
+      "extent": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "key": "shapes_cube",
+      "keywords": [
+        "cone",
+        "cube",
+        "cylinder",
+        "primitive",
+        "shape",
+        "shapes",
+        "sphere"
+      ],
+      "path": "/Isaac/Props/Shapes/cube.usd",
+      "physics": "visual"
+    },
+    "shapes_cylinder": {
+      "category": "shapes",
+      "extent": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "key": "shapes_cylinder",
+      "keywords": [
+        "cone",
+        "cube",
+        "cylinder",
+        "primitive",
+        "shape",
+        "shapes",
+        "sphere"
+      ],
+      "path": "/Isaac/Props/Shapes/cylinder.usd",
+      "physics": "visual"
+    },
+    "shapes_disk": {
+      "category": "shapes",
+      "extent": [
+        1.0,
+        1.0,
+        0.0
+      ],
+      "key": "shapes_disk",
+      "keywords": [
+        "cone",
+        "cube",
+        "cylinder",
+        "disk",
+        "primitive",
+        "shape",
+        "shapes",
+        "sphere"
+      ],
+      "path": "/Isaac/Props/Shapes/disk.usd",
+      "physics": "visual"
+    },
+    "shapes_plane": {
+      "category": "shapes",
+      "extent": [
+        1.0,
+        1.0,
+        0.0
+      ],
+      "key": "shapes_plane",
+      "keywords": [
+        "cone",
+        "cube",
+        "cylinder",
+        "plane",
+        "primitive",
+        "shape",
+        "shapes",
+        "sphere"
+      ],
+      "path": "/Isaac/Props/Shapes/plane.usd",
+      "physics": "visual"
+    },
+    "shapes_sphere": {
+      "category": "shapes",
+      "extent": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "key": "shapes_sphere",
+      "keywords": [
+        "cone",
+        "cube",
+        "cylinder",
+        "primitive",
+        "shape",
+        "shapes",
+        "sphere"
+      ],
+      "path": "/Isaac/Props/Shapes/sphere.usd",
+      "physics": "visual"
+    },
+    "shapes_torus": {
+      "category": "shapes",
+      "extent": [
+        1.5,
+        1.5,
+        0.5
+      ],
+      "key": "shapes_torus",
+      "keywords": [
+        "cone",
+        "cube",
+        "cylinder",
+        "primitive",
+        "shape",
+        "shapes",
+        "sphere",
+        "torus"
+      ],
+      "path": "/Isaac/Props/Shapes/torus.usd",
+      "physics": "visual"
+    },
+    "sm_mug_a2": {
+      "category": "mugs",
+      "extent": [
+        0.0923,
+        0.1271,
+        0.091
+      ],
+      "key": "sm_mug_a2",
+      "keywords": [
+        "cup",
+        "drink",
+        "mug",
+        "mugs"
+      ],
+      "path": "/Isaac/Props/Mugs/SM_Mug_A2.usd",
+      "physics": "visual"
+    },
+    "sm_mug_b1": {
+      "category": "mugs",
+      "extent": [
+        0.0925,
+        0.1365,
+        0.0919
+      ],
+      "key": "sm_mug_b1",
+      "keywords": [
+        "cup",
+        "drink",
+        "mug",
+        "mugs"
+      ],
+      "path": "/Isaac/Props/Mugs/SM_Mug_B1.usd",
+      "physics": "visual"
+    },
+    "sm_mug_c1": {
+      "category": "mugs",
+      "extent": [
+        0.0889,
+        0.1277,
+        0.1072
+      ],
+      "key": "sm_mug_c1",
+      "keywords": [
+        "cup",
+        "drink",
+        "mug",
+        "mugs"
+      ],
+      "path": "/Isaac/Props/Mugs/SM_Mug_C1.usd",
+      "physics": "visual"
+    },
+    "sm_mug_d1": {
+      "category": "mugs",
+      "extent": [
+        0.0888,
+        0.1276,
+        0.1101
+      ],
+      "key": "sm_mug_d1",
+      "keywords": [
+        "cup",
+        "drink",
+        "mug",
+        "mugs"
+      ],
+      "path": "/Isaac/Props/Mugs/SM_Mug_D1.usd",
+      "physics": "visual"
+    },
+    "small_klt": {
+      "category": "klt_bin",
+      "extent": [
+        0.1978,
+        0.2966,
+        0.1464
+      ],
+      "key": "small_klt",
+      "keywords": [
+        "bin",
+        "box",
+        "cardboard",
+        "container",
+        "crate",
+        "klt",
+        "logistics",
+        "plastic",
+        "small",
+        "tote"
+      ],
+      "path": "/Isaac/Props/KLT_Bin/small_KLT.usd",
+      "physics": "dynamic"
+    },
+    "sortbot_housing": {
+      "category": "sortbot_housing",
+      "extent": [
+        0.9684,
+        1.6458,
+        1.2141
+      ],
+      "key": "sortbot_housing",
+      "keywords": [
+        "housing",
+        "sortbot"
+      ],
+      "path": "/Isaac/Props/Sortbot_Housing/sortbot_housing.usd",
+      "physics": "static"
+    },
+    "stand": {
+      "category": "mounts",
+      "extent": [
+        0.324,
+        0.324,
+        0.618
+      ],
+      "key": "stand",
+      "keywords": [
+        "bench",
+        "mount",
+        "mounts",
+        "stand",
+        "surface",
+        "table"
+      ],
+      "path": "/Isaac/Props/Mounts/Stand/stand.usd",
+      "physics": "static"
+    },
+    "stand_instanceable": {
+      "category": "mounts",
+      "extent": [
+        0.324,
+        0.324,
+        0.618
+      ],
+      "key": "stand_instanceable",
+      "keywords": [
+        "bench",
+        "instanceable",
+        "mount",
+        "mounts",
+        "stand",
+        "surface",
+        "table"
+      ],
+      "path": "/Isaac/Props/Mounts/Stand/stand_instanceable.usd",
+      "physics": "visual"
+    },
+    "thorlabstable_table_instanceable": {
+      "category": "mounts",
+      "extent": [
+        0.9,
+        0.7586,
+        0.7947
+      ],
+      "key": "thorlabstable_table_instanceable",
+      "keywords": [
+        "bench",
+        "instanceable",
+        "mount",
+        "mounts",
+        "stand",
+        "surface",
+        "table",
+        "thorlabstable"
+      ],
+      "path": "/Isaac/Props/Mounts/ThorlabsTable/table_instanceable.usd",
+      "physics": "visual"
+    },
+    "uielements_arrow_x": {
+      "category": "uielements",
+      "extent": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "key": "uielements_arrow_x",
+      "keywords": [
+        "arrow",
+        "uielements"
+      ],
+      "path": "/Isaac/Props/UIElements/arrow_x.usd",
+      "physics": "visual"
+    },
+    "uielements_frame_prim": {
+      "category": "uielements",
+      "extent": [
+        1.75,
+        1.75,
+        1.75
+      ],
+      "key": "uielements_frame_prim",
+      "keywords": [
+        "frame",
+        "prim",
+        "uielements"
+      ],
+      "path": "/Isaac/Props/UIElements/frame_prim.usd",
+      "physics": "visual"
+    },
+    "ur10_mount": {
+      "category": "mounts",
+      "extent": [
+        0.27,
+        0.27,
+        0.515
+      ],
+      "key": "ur10_mount",
+      "keywords": [
+        "bench",
+        "mount",
+        "mounts",
+        "stand",
+        "surface",
+        "table",
+        "ur10"
+      ],
+      "path": "/Isaac/Props/Mounts/ur10_mount.usd",
+      "physics": "visual"
+    },
+    "yellow_block": {
+      "category": "blocks",
+      "extent": [
+        0.047,
+        0.047,
+        0.047
+      ],
+      "key": "yellow_block",
+      "keywords": [
+        "block",
+        "blocks",
+        "box",
+        "brick",
+        "cube",
+        "yellow"
+      ],
+      "path": "/Isaac/Props/Blocks/yellow_block.usd",
+      "physics": "dynamic"
+    }
+  },
+  "support_files_skipped": 23
+}

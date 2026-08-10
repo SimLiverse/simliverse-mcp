@@ -25,9 +25,12 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, List, Optional
 
 from ..adapters.base import IsaacAdapterBase
+
+logger = logging.getLogger("isaac_sim_mcp_extension.handlers.graphs")
 
 
 def register(registry: Dict[str, Any], adapter: IsaacAdapterBase) -> None:
@@ -57,14 +60,37 @@ def create_action_graph(
         # presses Play from the Isaac Sim UI.
         adapter._ensure_physics_world()
 
-        # ── script_file shortcut: create standard ScriptNode graph ─
+        # ── script_file shortcut: hand off to the library ──────────
+        #
+        # This used to build OnPlaybackTick into a push graph itself, which is
+        # wrong in a way nothing reports: the tick fires once per app update, so
+        # the controller runs at the render rate rather than the physics rate
+        # and its motion changes with frame rate. `controller.attach` triggers on
+        # the physics step in an on-demand graph, replaces an existing graph
+        # rather than failing, and refuses a graph whose trigger cannot fire.
+        # One correct implementation is worth more than two that disagree.
         if script_file is not None:
-            nodes = [
-                {"path": "OnPlaybackTick", "type": "omni.graph.action.OnPlaybackTick"},
-                {"path": "ScriptNode", "type": "omni.graph.scriptnode.ScriptNode"},
-            ]
-            connections = [["OnPlaybackTick.outputs:tick", "ScriptNode.inputs:execIn"]]
-            values = None  # usePath/scriptPath set via direct attribute set below
+            try:
+                from simliverse_sim import controller as _controller
+
+                path = _controller.attach(script_file, graph_path=graph_path)
+                return {
+                    "status": "success",
+                    "message": f"Wired {script_file} to {path}",
+                    "graph_path": path,
+                }
+            except ImportError:
+                logger.warning(
+                    "simliverse_sim is unavailable; building the graph here "
+                    "instead. It will trigger on the playback tick, so the "
+                    "controller runs at the render rate."
+                )
+                nodes = [
+                    {"path": "OnPlaybackTick", "type": "omni.graph.action.OnPlaybackTick"},
+                    {"path": "ScriptNode", "type": "omni.graph.scriptnode.ScriptNode"},
+                ]
+                connections = [["OnPlaybackTick.outputs:tick", "ScriptNode.inputs:execIn"]]
+                values = None  # usePath/scriptPath set via direct attribute set below
 
         # Build og.Controller.Keys-based edit descriptor
         edit_kwargs: Dict[str, Any] = {

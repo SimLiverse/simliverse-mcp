@@ -41,6 +41,8 @@ import sys
 import traceback
 from typing import Any, Dict, List, Optional
 
+from isaac_sim_mcp_extension import kit_log
+
 from ..adapters.base import IsaacAdapterBase
 
 # Persistent execution namespace, keyed by nothing — one live sim, one session.
@@ -144,6 +146,11 @@ def run_control(
     # does gets a NameError naming the symbol, plus this warning.
     import_warning = _NAMESPACE.get("__import_error__")
 
+    # Mark the log before running, so `isaac_log` carries only what *this* call
+    # provoked rather than the whole session's history.
+    log_path = kit_log.active_log()
+    log_start = kit_log.offset(log_path)
+
     stdout, stderr = io.StringIO(), io.StringIO()
     old_out, old_err = sys.stdout, sys.stderr
     sys.stdout, sys.stderr = stdout, stderr
@@ -161,7 +168,7 @@ def run_control(
         }
         if import_warning:
             result["warning"] = _IMPORT_WARNING.format(error=import_warning)
-        return result
+        return kit_log.attach(result, log_path, log_start)
     except Exception as exc:
         result = {
             "status": "error",
@@ -172,7 +179,7 @@ def run_control(
         }
         if import_warning:
             result["warning"] = _IMPORT_WARNING.format(error=import_warning)
-        return result
+        return kit_log.attach(result, log_path, log_start)
     finally:
         sys.stdout, sys.stderr = old_out, old_err
 
