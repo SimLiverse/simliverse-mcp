@@ -36,6 +36,21 @@ logger = logging.getLogger("IsaacMCPServer")
 
 DEFAULT_PORT = 8766
 
+# How long to wait for Isaac to answer one command.
+#
+# This has to exceed the extension's own dispatch bound (600s), or the extension
+# never gets to send the error it prepares: whoever gives up first decides what
+# the caller sees, and the caller saw `Exception("No data received")` with no
+# command, no cause and no elapsed time. That is what happened to a 140-second
+# controller replay -- the sidecar timed out at 300s while Isaac was still
+# running it, and the delivery reported a communication failure for a command
+# that may well have succeeded.
+#
+# Long by design. A physics replay, a large USD load, or a 60-turn debugging
+# session are all legitimately slow, and a short bound here does not make them
+# faster -- it only removes the answer.
+READ_TIMEOUT = float(os.environ.get("SIMLIVERSE_MCP_READ_TIMEOUT", "900"))
+
 
 class IsaacCommandError(Exception):
     """A handler inside Isaac Sim returned an error.
@@ -87,7 +102,7 @@ class IsaacConnection:
 
     def receive_full_response(self, sock: socket.socket, buffer_size: int = 16384) -> bytes:
         chunks = []
-        sock.settimeout(300.0)
+        sock.settimeout(READ_TIMEOUT)
         try:
             while True:
                 try:
@@ -116,8 +131,18 @@ class IsaacConnection:
                 json.loads(data.decode("utf-8"))
                 return data
             except json.JSONDecodeError:
-                raise Exception("Incomplete JSON response received")
-        raise Exception("No data received")
+                raise Exception(
+                    f"Incomplete JSON response received ({len(data)} bytes) after "
+                    f"{READ_TIMEOUT:.0f}s. Isaac started answering and stopped."
+                )
+        raise Exception(
+            f"No data received from Isaac after {READ_TIMEOUT:.0f}s. The command was "
+            f"delivered — Isaac simply never answered within that window, which for a "
+            f"long replay or a large asset load can mean it is still working. "
+            f"DO NOT assume the scene is unchanged and DO NOT retry blindly: the same "
+            f"command may already be running, and running it twice is worse than "
+            f"waiting. Read the scene back first, and check the Kit log."
+        )
 
     def send_command(self, command_type: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         if not self.sock and not self.connect():
@@ -126,7 +151,7 @@ class IsaacConnection:
         command = {"type": command_type, "params": params or {}}
         try:
             self.sock.sendall(json.dumps(command).encode("utf-8"))
-            self.sock.settimeout(300.0)
+            self.sock.settimeout(READ_TIMEOUT)
             response_data = self.receive_full_response(self.sock)
             response = json.loads(response_data.decode("utf-8"))
 

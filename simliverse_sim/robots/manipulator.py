@@ -1399,10 +1399,67 @@ class Manipulator(Robot):
             raise MotionError(
                 f"End effector did not reach {target.round(3).tolist()} within "
                 f"{max_steps} steps (closest approach {best:.4f} m, last "
-                f"{error:.4f} m, tolerance {tolerance} m). The target is likely "
-                f"outside the workspace or blocked by a collision."
+                f"{error:.4f} m, tolerance {tolerance} m)."
+                + self._why_it_could_not_reach(orientation)
             )
         return result
+
+    def _why_it_could_not_reach(self, orientation: Any) -> str:
+        """Name the likely cause instead of offering the same two guesses.
+
+        "outside the workspace or blocked by a collision" was the whole
+        explanation, and for the failure that actually keeps happening it is
+        wrong in a way that ends runs. Measured: a Franka asked for
+        `[0.45, 0.2, 0.135]` pointing down came back 0.095 m short, repeatedly,
+        for a target comfortably inside its envelope. The joint vector said why
+        -- joint 6 sat at 3.724 rad against a 3.752 limit. The wrist winds up
+        over a sequence of solves, and once it is against the stop RMPflow can
+        only satisfy the orientation by trading position away.
+
+        An agent read the old message, concluded "a real physical/kinematic
+        limit", and abandoned the object. Homing the arm and repeating the same
+        request solved it to 0.009 m at 0.0 degrees. So when joints are pinned,
+        say so first: the fix is a starting pose, not a different target.
+        """
+        pinned = self._joints_against_limits()
+        if pinned and orientation is not None:
+            return (
+                f" Joints are at their limits: {', '.join(pinned)}. With an "
+                f"orientation demanded as well, the solver can only satisfy it by "
+                f"driving into those stops, so it gives up position instead — "
+                f"which is what this error looks like. The target is probably "
+                f"reachable: send the arm to a neutral pose first "
+                f"(`set_joint_positions(home)`) and repeat this call. Retry "
+                f"without `orientation` to confirm before assuming the workspace "
+                f"is the problem."
+            )
+        if pinned:
+            return (
+                f" Joints are at their limits: {', '.join(pinned)}. Home the arm "
+                f"and repeat before concluding the target is unreachable."
+            )
+        return " The target is likely outside the workspace or blocked by a collision."
+
+    def _joints_against_limits(self, margin: float = 0.05) -> list[str]:
+        """Arm joints sitting within `margin` radians of a travel limit."""
+        try:
+            positions = self.joint_positions
+            limits = self.joint_limits
+            names = self.joint_names
+        except Exception:
+            return []
+
+        pinned = []
+        finger = set(getattr(getattr(self, "gripper", None), "joint_indices", []) or [])
+        for index, (low, high) in enumerate(limits):
+            if index in finger or index >= len(positions) or low is None or high is None:
+                continue
+            if high - low <= 0:          # `low > high` is USD for "locked"
+                continue
+            value = float(positions[index])
+            if value - low < margin or high - value < margin:
+                pinned.append(f"{names[index]}={value:.3f} (limits {low:.3f}..{high:.3f})")
+        return pinned
 
     def servo_to(
         self,
