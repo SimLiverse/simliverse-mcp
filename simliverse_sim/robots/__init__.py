@@ -16,7 +16,7 @@ path, so a robot spawned under any name still gets the correct controller.
 """
 
 from .aerial import AerialRobot, FlightError
-from .base import JointGroups, Morphology, Robot, classify_morphology
+from .base import JointGroups, Morphology, Robot, StaleArticulation, classify_morphology
 from .legged import Humanoid, LeggedRobot, LocomotionError
 from .library import CATALOGUE, RobotAsset, list_robots, resolve, spawn_robot
 from .manipulator import (
@@ -48,6 +48,7 @@ __all__ = [
     "NavigationError",
     "Robot",
     "RobotAsset",
+    "StaleArticulation",
     "WheeledRobot",
     "classify_morphology",
     "list_robots",
