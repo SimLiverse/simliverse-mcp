@@ -134,13 +134,33 @@ class IsaacAdapterV5(IsaacAdapterBase):
         if not prim.IsValid():
             raise ValueError(f"Prim not found: {prim_path}")
         xformable = UsdGeom.Xformable(prim)
+
+        # Merge with what is already authored. ClearXformOpOrder() drops every
+        # op, so re-adding only the supplied ones silently reset the rest to
+        # identity: `transform_object(path, scale=[...])` used to wipe position
+        # and rotation. A ramp lost its 20-degree tilt the moment an agent tried
+        # to widen it, and the damage was invisible until the geometry was
+        # measured — the call reports success either way.
+        current = {}
+        try:
+            current = self.get_prim_transform(prim_path) or {}
+        except Exception:
+            pass
+
+        def _pick(supplied, key, default):
+            if supplied is not None:
+                return list(supplied)
+            value = current.get(key)
+            return list(value) if value is not None else list(default)
+
+        pos = _pick(position, "position", (0.0, 0.0, 0.0))
+        rot = _pick(rotation, "rotation", (0.0, 0.0, 0.0))
+        scl = _pick(scale, "scale", (1.0, 1.0, 1.0))
+
         xformable.ClearXformOpOrder()
-        if position is not None:
-            xformable.AddTranslateOp(precision=UsdGeom.XformOp.PrecisionDouble).Set(Gf.Vec3d(*position))
-        if rotation is not None:
-            xformable.AddRotateXYZOp(precision=UsdGeom.XformOp.PrecisionDouble).Set(Gf.Vec3d(*rotation))
-        if scale is not None:
-            xformable.AddScaleOp(precision=UsdGeom.XformOp.PrecisionDouble).Set(Gf.Vec3d(*scale))
+        xformable.AddTranslateOp(precision=UsdGeom.XformOp.PrecisionDouble).Set(Gf.Vec3d(*pos))
+        xformable.AddRotateXYZOp(precision=UsdGeom.XformOp.PrecisionDouble).Set(Gf.Vec3d(*rot))
+        xformable.AddScaleOp(precision=UsdGeom.XformOp.PrecisionDouble).Set(Gf.Vec3d(*scl))
 
     def get_prim_transform(self, prim_path: str) -> Dict[str, Any]:
         from pxr import UsdGeom
@@ -276,59 +296,6 @@ class IsaacAdapterV5(IsaacAdapterBase):
 
     # ── Robots ─────────────────────────────────────────────
 
-    def discover_robots(self) -> Dict[str, Dict[str, str]]:
-        """Scan the Isaac Sim asset server for all available robot USD files."""
-        import omni.client
-        from isaacsim.storage.native import get_assets_root_path
-
-        root = get_assets_root_path()
-        robots_base = root + "/Isaac/Robots/"
-        discovered: Dict[str, Dict[str, str]] = {}
-
-        result, manufacturers = omni.client.list(robots_base)
-        if result != omni.client.Result.OK:
-            return discovered
-
-        for mfr_entry in manufacturers:
-            mfr_name = mfr_entry.relative_path.rstrip("/")
-            mfr_path = robots_base + mfr_name + "/"
-
-            result2, models = omni.client.list(mfr_path)
-            if result2 != omni.client.Result.OK:
-                continue
-
-            for model_entry in models:
-                model_name = model_entry.relative_path.rstrip("/")
-                model_path = mfr_path + model_name + "/"
-
-                # Look for USD files directly in the model directory
-                result3, files = omni.client.list(model_path)
-                if result3 != omni.client.Result.OK:
-                    continue
-
-                for file_entry in files:
-                    fname = file_entry.relative_path
-                    if not (fname.endswith(".usd") or fname.endswith(".usda")):
-                        continue
-                    # Skip variants with suffixes like _physx_lidar, _with_arm
-                    _base_name = fname.rsplit(".", 1)[0]
-                    asset_rel = f"/Isaac/Robots/{mfr_name}/{model_name}/{fname}"
-
-                    # Use lowercase model name as key, prefer shorter/simpler names
-                    key = model_name.lower().replace(" ", "_")
-                    if key in discovered:
-                        # Keep the simpler filename (shorter name wins)
-                        if len(fname) < len(discovered[key]["asset_path"].split("/")[-1]):
-                            discovered[key]["asset_path"] = asset_rel
-                    else:
-                        discovered[key] = {
-                            "asset_path": asset_rel,
-                            "description": f"{mfr_name} {model_name}",
-                            "manufacturer": mfr_name,
-                        }
-
-        return discovered
-
     def create_xform_prim(self, prim_path: str) -> Any:
         from isaacsim.core.prims import SingleXFormPrim
 
@@ -346,8 +313,8 @@ class IsaacAdapterV5(IsaacAdapterBase):
         # Try to get joint info via articulation API (requires running sim)
         joint_names: List[str] = []
         num_dof = 0
-        art = SingleArticulation(prim_path=prim_path)
         try:
+            art = SingleArticulation(prim_path=prim_path)
             art.initialize()
             joint_names = list(art.dof_names) if art.dof_names else []
             num_dof = art.num_dof if art.num_dof else 0
@@ -404,8 +371,8 @@ class IsaacAdapterV5(IsaacAdapterBase):
         from isaacsim.core.prims import SingleArticulation
         from isaacsim.core.utils.types import ArticulationAction
 
-        art = SingleArticulation(prim_path=prim_path)
         try:
+            art = SingleArticulation(prim_path=prim_path)
             art.initialize()
             action = ArticulationAction(
                 joint_positions=np.array(positions),
@@ -462,8 +429,8 @@ class IsaacAdapterV5(IsaacAdapterBase):
         from isaacsim.core.prims import SingleArticulation
 
         self._ensure_physics_world()
-        art = SingleArticulation(prim_path=prim_path)
         try:
+            art = SingleArticulation(prim_path=prim_path)
             art.initialize()
             if art.dof_names:
                 return list(art.dof_names)
@@ -489,8 +456,8 @@ class IsaacAdapterV5(IsaacAdapterBase):
         # Ensure physics is initialized so SingleArticulation.initialize() works
         self._ensure_physics_world()
 
-        art = SingleArticulation(prim_path=prim_path)
         try:
+            art = SingleArticulation(prim_path=prim_path)
             art.initialize()
             positions = art.get_joint_positions()
             if positions is not None:
@@ -540,10 +507,9 @@ class IsaacAdapterV5(IsaacAdapterBase):
         joint_names = self._get_joint_names(prim_path)
         current_pos_list = self.get_joint_positions(prim_path)
 
-        # Get runtime target positions (from applied actions, not USD defaults)
-        art = SingleArticulation(prim_path=prim_path)
         runtime_targets: List[float] = []
         try:
+            art = SingleArticulation(prim_path=prim_path)
             art.initialize()
             applied_action = art.get_applied_action()
             if applied_action and applied_action.joint_positions is not None:
@@ -979,7 +945,40 @@ class IsaacAdapterV5(IsaacAdapterBase):
         if cwd and cwd not in sys.path:
             sys.path.insert(0, cwd)
 
-        local_ns = {"omni": omni, "carb": carb, "Usd": Usd, "UsdGeom": UsdGeom, "Sdf": Sdf, "Gf": Gf}
+        # Alias deprecated omni.isaac -> isaacsim for seamless backwards compatibility
+        if "omni.isaac" not in sys.modules:
+            try:
+                import isaacsim
+                import isaacsim.core as isaac_core
+                sys.modules["omni.isaac"] = isaacsim
+                sys.modules["omni.isaac.core"] = isaac_core
+                sys.modules["omni.isaac.core.api"] = isaac_core.api
+                sys.modules["omni.isaac.core.prims"] = isaac_core.prims
+                sys.modules["omni.isaac.core.utils"] = getattr(isaac_core, "utils", isaac_core)
+            except Exception:
+                pass
+
+        isaacsim_mod = sys.modules.get("isaacsim")
+        usd_utils_mod = None
+        prim_utils_mod = None
+        try:
+            import isaacsim.core.utils.stage as usd_utils_mod
+            import isaacsim.core.utils.prims as prim_utils_mod
+        except Exception:
+            pass
+
+        local_ns = {
+            "omni": omni,
+            "carb": carb,
+            "Usd": Usd,
+            "UsdGeom": UsdGeom,
+            "Sdf": Sdf,
+            "Gf": Gf,
+            "isaacsim": isaacsim_mod,
+            "usd_utils": usd_utils_mod,
+            "prim_utils": prim_utils_mod,
+            "prims": prim_utils_mod,
+        }
 
         # Capture stdout/stderr
         old_stdout, old_stderr = sys.stdout, sys.stderr

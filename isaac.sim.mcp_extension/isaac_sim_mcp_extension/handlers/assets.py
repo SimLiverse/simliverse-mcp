@@ -37,7 +37,6 @@ def register(registry: Dict[str, Any], adapter: IsaacAdapterBase) -> None:
     registry["assets.import_urdf"] = lambda **p: import_urdf(adapter, **p)
     registry["assets.load_usd"] = lambda **p: load_usd(adapter, **p)
     registry["assets.search_usd"] = lambda **p: search_usd(adapter, **p)
-    registry["assets.discover_assets"] = lambda **p: discover_assets(adapter, **p)
     registry["assets.generate_3d"] = lambda **p: generate_3d(adapter, **p)
 
 
@@ -68,18 +67,6 @@ def load_usd(
     try:
         if not usd_url:
             return {"status": "error", "message": "usd_url is required"}
-
-        # Safety net: If LLM passes a guessed short name or invalid omni: path, resolve it via discover_assets
-        if not (usd_url.startswith("http://") or usd_url.startswith("https://") or usd_url.startswith("file://") or (usd_url.startswith("/") and not usd_url.startswith("/World"))):
-            searcher = USDSearch3d()
-            # Clean up hallucinated omni: prefixes
-            clean_query = usd_url.replace("omni:/", "").replace("omni://", "").split("/")[0] or usd_url
-            matches = searcher.discover_assets(clean_query)
-            if matches:
-                usd_url = matches[0]["path"]
-            else:
-                return {"status": "error", "message": f"Asset not found for hallucinated path '{usd_url}'. You MUST use discover_assets first!"}
-
         loader = USDLoader()
         result_path = loader.load_usd_from_url(url_path=usd_url, target_path=prim_path, location=position, scale=scale)
         return {"status": "success", "message": f"Loaded USD from {usd_url}", "prim_path": result_path}
@@ -144,24 +131,3 @@ def generate_3d(
         return {"status": "success", "message": "3D generation started", "task_id": task_id}
     except Exception as e:
         return {"status": "error", "message": str(e)}
-
-
-def discover_assets(
-    adapter: IsaacAdapterBase,
-    query: Optional[str] = None,
-    search_paths: Optional[Sequence[str]] = None,
-) -> Dict[str, Any]:
-    try:
-        if not query:
-            return {"status": "error", "message": "query is required"}
-        searcher = USDSearch3d()
-        matches = searcher.discover_assets(query, list(search_paths) if search_paths else None)
-        return {
-            "status": "success",
-            "query": query,
-            "count": len(matches),
-            "matches": matches,
-        }
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-

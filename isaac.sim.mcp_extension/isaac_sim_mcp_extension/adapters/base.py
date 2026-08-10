@@ -131,14 +131,6 @@ class IsaacAdapterBase(ABC):
         ...
 
     @abstractmethod
-    def discover_robots(self) -> Dict[str, Dict[str, str]]:
-        """Scan the asset server for available robot USD files.
-
-        Returns a dict mapping robot key to {"asset_path": ..., "description": ..., "manufacturer": ...}.
-        """
-        ...
-
-    @abstractmethod
     def get_robot_joint_info(self, prim_path: str) -> Dict[str, Any]:
         """Return joint names, DOF count, and current positions for a robot."""
         ...
@@ -291,6 +283,9 @@ class IsaacAdapterBase(ABC):
                 world.initialize_physics()
         except ImportError:
             pass  # Non-v5 runtimes may not have isaacsim.core.api
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Could not initialize physics world: {e}")
 
     @abstractmethod
     def play(self) -> None:

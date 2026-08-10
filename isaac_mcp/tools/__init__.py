@@ -21,43 +21,48 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-"""SimLiverse MCP tool registry — 10 tools total."""
+"""MCP tool modules for Isaac Sim."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Callable
 
 if TYPE_CHECKING:
-    try:
-        from mcp.server.fastmcp import FastMCP
-    except ImportError:
-        from fastmcp import FastMCP
+    from mcp.server.fastmcp import FastMCP
 
     from isaac_mcp.connection import IsaacConnection
 
 
 def register_all_tools(mcp: FastMCP, get_connection: Callable[[], IsaacConnection]) -> None:
-    """Register the 10 SimLiverse Copilot tools.
+    """Register all MCP tools from submodules.
 
-    5 Execution tools (Isaac Sim extension via TCP):
-      - get_scene_info
-      - get_joint_states (from robots module)
-      - execute_script (from simulation module)
-      - set_simulation_state (play/pause/stop from simulation module)
-      - reset_scene (from scene module)
-
-    5 NVIDIA NIM RAG proxy tools:
-      - get_isaac_sim_instructions
-      - search_isaac_sim_extensions
-      - get_isaac_sim_extension_details
-      - search_isaac_sim_code_examples
-      - search_isaac_sim_settings
+    Args:
+        mcp: FastMCP server instance.
+        get_connection: Callable that returns an IsaacConnection.
     """
-    from . import nim_rag, scene, robots, simulation, assets
+    from . import (
+        assets,
+        control,
+        graphs,
+        lighting,
+        materials,
+        objects,
+        robots,
+        scene,
+        sensors,
+        simulation,
+    )
 
-    nim_rag.register_tools(mcp, get_connection)
-    scene.register_tools(mcp, get_connection)
-    robots.register_tools(mcp, get_connection)
-    simulation.register_tools(mcp, get_connection)
-    assets.register_tools(mcp, get_connection)
-
+    for module in [
+        scene,
+        objects,
+        lighting,
+        robots,
+        sensors,
+        materials,
+        assets,
+        simulation,
+        graphs,
+        control,
+    ]:
+        module.register_tools(mcp, get_connection)

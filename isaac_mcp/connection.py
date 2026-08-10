@@ -37,6 +37,19 @@ logger = logging.getLogger("IsaacMCPServer")
 DEFAULT_PORT = 8766
 
 
+class IsaacCommandError(Exception):
+    """A handler inside Isaac Sim returned an error.
+
+    Carries the full payload — `message`, and where the handler provided them,
+    `traceback`, `stdout` and `stderr`. The connection is still healthy; only the
+    command failed.
+    """
+
+    def __init__(self, message: str, payload: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(message)
+        self.payload: Dict[str, Any] = payload or {"message": message}
+
+
 @dataclass
 class IsaacConnection:
     """Manages a persistent TCP socket connection to the Isaac Sim extension."""
@@ -118,8 +131,16 @@ class IsaacConnection:
             response = json.loads(response_data.decode("utf-8"))
 
             if response.get("status") == "error":
-                raise Exception(response.get("message", "Unknown error from Isaac"))
+                # A handler-level failure (bad prim path, a NameError in control
+                # code) says nothing about the socket — keep the connection and
+                # carry the full payload so the caller still gets the traceback
+                # and captured output.
+                raise IsaacCommandError(
+                    response.get("message", "Unknown error from Isaac"), response
+                )
             return response.get("result", {})
+        except IsaacCommandError:
+            raise
         except socket.timeout:
             self.sock = None
             raise Exception("Timeout waiting for Isaac response")
