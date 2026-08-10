@@ -64,16 +64,37 @@ class RigidObject:
         if prim.HasAPI(UsdPhysics.RigidBodyAPI) or prim.HasAPI(UsdPhysics.CollisionAPI):
             return
 
-        for child in Usd.PrimRange(prim):
-            if child == prim or not child.HasAPI(UsdPhysics.RigidBodyAPI):
-                continue
-            raise ValueError(
-                f"{self.prim_path!r} is not a rigid body — it contains one, at "
-                f"{child.GetPath()}. Wrapping it here would apply RigidBodyAPI to "
-                f"a prim with no collider, which PhysX reads as a negative mass, "
-                f"and one such body stops dynamics for the entire scene. Use the "
-                f"inner path (spawn_prop returns it as `body_path`)."
+        bodies = [
+            str(child.GetPath())
+            for child in Usd.PrimRange(prim)
+            if child != prim and child.HasAPI(UsdPhysics.RigidBodyAPI)
+        ]
+        if not bodies:
+            return
+
+        # One body, no ambiguity: retarget to it silently. Refusing here was the
+        # first fix and it is the worse one — it makes every caller remember
+        # which spawn path they used and look up an inner path by hand, to avoid
+        # a trap they cannot see. There is nothing to decide when a wrapper
+        # contains exactly one body, so the library decides it.
+        if len(bodies) == 1:
+            logger.debug(
+                "%s contains its rigid body at %s; measuring that instead",
+                self.prim_path, bodies[0],
             )
+            self.prim_path = bodies[0]
+            return
+
+        # Several bodies is a real choice, and guessing would put the caller
+        # back where they started — holding a number from something they did not
+        # pick.
+        raise ValueError(
+            f"{self.prim_path!r} is not a rigid body — it contains {len(bodies)}: "
+            f"{', '.join(bodies[:4])}. Name the one you mean; wrapping the "
+            f"container would apply RigidBodyAPI to a prim with no collider, "
+            f"which PhysX reads as a negative mass, and one such body stops "
+            f"dynamics for the entire scene."
+        )
 
     def _reject_articulation(self) -> None:
         """Refuse to treat a robot as a rigid body.
