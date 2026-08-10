@@ -44,6 +44,12 @@ class SocketServer:
         Port number to listen on.
     command_handler:
         Callable invoked with the parsed command dict; must return a response dict.
+    command_timeout:
+        Seconds to wait for the main thread to finish one command before
+        answering the client with an error instead. Generous: an asset load or a
+        long physics rollout is legitimately slow, and a wrong answer here turns
+        a working command into a spurious failure. The value exists so that a
+        command which will *never* finish is reported rather than hung on.
     """
 
     def __init__(
@@ -51,13 +57,16 @@ class SocketServer:
         host: str,
         port: int,
         command_handler: Callable[[Dict[str, Any]], Dict[str, Any]],
+        command_timeout: float = 600.0,
     ) -> None:
         self.host = host
         self.port = port
         self._command_handler = command_handler
+        self.command_timeout = command_timeout
         self.running: bool = False
         self._socket: socket.socket | None = None
         self._server_thread: threading.Thread | None = None
+        self._dispatch_lock = threading.Lock()
 
     # ── Lifecycle ──────────────────────────────────────────────────────────────
 
@@ -129,21 +138,97 @@ class SocketServer:
             client.close()
 
     def _dispatch_command(self, client: socket.socket, command: Dict[str, Any]) -> None:
+        """Run one command on Kit's loop and answer the client, always.
+
+        The work still happens on the main thread — USD and PhysX require it —
+        but three things about how it was scheduled cost a live debugging
+        session each.
+
+        **A destroyed task answered nobody.** `run_coroutine` is fire-and-forget:
+        nothing held a reference to the task and nothing waited on it. When Kit
+        tore it down mid-flight the `except` below never ran, so no response was
+        ever written and the socket simply went quiet. The client saw
+
+            RemoteProtocolError: Server disconnected without sending a response
+
+        which names no command, no robot and no cause. That is what happened
+        twice in one session, and what left an agent probing an API it was
+        holding correctly. The waiting side now owns the reply: if the main
+        thread does not produce one, *this* thread says so.
+
+        **Nothing serialised.** A thread per client, each firing an independent
+        coroutine, so two long commands could interleave inside the simulator.
+
+        **Socket writes happened on Kit's loop.** A slow client stalled the
+        simulation. They happen here now, off the main thread.
+
+        What this does not fix: a handler that calls `app.update()` — which
+        `scene.play()` and `scene.stop()` do — is still pumping Kit's update
+        from inside a coroutine on Kit's own loop, and that re-entrancy is the
+        underlying collision:
+
+            RuntimeError: Cannot enter into task <Task ... core.throttling
+                Extension._disable_async_rendering_after_update_async>
+              while another task <Task ... execute_wrapper()> is being executed
+
+        Fixing that means moving execution off the async engine altogether, and
+        it needs a live simulator to verify. Until then the collision still
+        happens — it just reports itself instead of hanging up.
+        """
+        done = threading.Event()
+        outcome: Dict[str, Any] = {}
+
         async def execute_wrapper() -> None:
             try:
-                response = self._command_handler(command)
-                response_json = json.dumps(response)
-                try:
-                    client.sendall(response_json.encode("utf-8"))
-                except Exception:
-                    print("Failed to send response — client disconnected")
-            except Exception as e:
+                outcome["response"] = self._command_handler(command)
+            except Exception as exc:
                 traceback.print_exc()
-                try:
-                    client.sendall(json.dumps({"status": "error", "message": str(e)}).encode("utf-8"))
-                except Exception:
-                    pass
+                outcome["response"] = {"status": "error", "message": str(exc)}
+            finally:
+                done.set()
 
+        # One command in the simulator at a time. Held across the wait, not just
+        # the scheduling, because the point is that the handlers do not overlap.
+        with self._dispatch_lock:
+            try:
+                self._schedule(execute_wrapper())
+            except Exception as exc:
+                traceback.print_exc()
+                self._reply(client, {
+                    "status": "error",
+                    "message": f"Could not schedule the command on Isaac's main loop: {exc}",
+                })
+                return
+
+            if not done.wait(self.command_timeout):
+                self._reply(client, {
+                    "status": "error",
+                    "message": (
+                        f"Command {command.get('type', '?')!r} was scheduled on Isaac's "
+                        f"main loop and did not finish within {self.command_timeout:.0f}s. "
+                        f"Either it is genuinely long-running, or its task was destroyed "
+                        f"by a collision with Kit's own update coroutines — check the Kit "
+                        f"log for 'Cannot enter into task'. The simulator may still be "
+                        f"executing it; do not assume the scene is unchanged."
+                    ),
+                })
+                return
+
+        self._reply(client, outcome.get("response", {
+            "status": "error",
+            "message": "The command completed without producing a response.",
+        }))
+
+    def _schedule(self, coroutine: Any) -> None:
+        """Hand a coroutine to Kit's async engine. Replaced in tests."""
         from omni.kit.async_engine import run_coroutine
 
-        run_coroutine(execute_wrapper())
+        run_coroutine(coroutine)
+
+    @staticmethod
+    def _reply(client: socket.socket, response: Dict[str, Any]) -> None:
+        """Write one response. A client that has gone is not an error here."""
+        try:
+            client.sendall(json.dumps(response).encode("utf-8"))
+        except Exception:
+            print("Failed to send response — client disconnected")

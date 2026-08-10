@@ -30,6 +30,16 @@ if TYPE_CHECKING:
 logger = logging.getLogger("simliverse_sim.robots.base")
 
 
+class StaleArticulation(RuntimeError):
+    """This handle is no longer backed by a live physics view.
+
+    Its own type rather than a bare RuntimeError because it is the one failure
+    a caller can actually recover from without changing anything else: play the
+    timeline, `Robot.attach()` again, carry on. Everything else about the scene
+    is still true.
+    """
+
+
 class Morphology(str, Enum):
     MANIPULATOR = "manipulator"
     DEXTEROUS_HAND = "dexterous_hand"
@@ -249,6 +259,51 @@ class Robot:
     def joint_velocities(self) -> np.ndarray:
         return self._joint_state("get_joint_velocities", "velocities")
 
+    def _read_joint_state(self, method: str) -> np.ndarray | None:
+        """One attempt at a joint-state read. `None` means "do not trust this".
+
+        The failure worth catching is not the exception — it is the read that
+        *succeeds* and means nothing. When the physics simulation view has gone,
+        Isaac does not raise: it logs
+
+            [Warning] [articulation] Physics Simulation View is not created yet
+                      in order to use get_joint_positions
+
+        and hands back `None`. `np.asarray(None, dtype=float)` is `array(nan)`,
+        a zero-dimensional array, which then propagates as a plausible-looking
+        answer until something indexes it. Downstream that surfaced as
+        `ee_position` returning a bare `nan`, and as
+
+            IndexError: too many indices for array: array is 0-dimensional
+
+        raised from `Gripper.position` — three frames deep in this library,
+        naming nothing about the actual cause. An agent reading that spent ten
+        calls checking whether it was holding the API wrong.
+
+        A real reading is one value per degree of freedom, and all of them
+        finite. Anything else is the simulator telling us it cannot answer.
+        """
+        try:
+            value = np.asarray(getattr(self._articulation, method)(), dtype=float)
+        except Exception:
+            logger.debug("%s failed on %s", method, self.prim_path, exc_info=True)
+            return None
+
+        if value.ndim != 1 or value.size == 0:
+            return None
+        # `dof` reads the articulation too, so a dead handle can report 0 here.
+        # Compare only when it gives an answer, rather than turning one unusable
+        # reading into a second.
+        try:
+            expected = int(self._articulation.num_dof)
+        except Exception:
+            expected = 0
+        if expected and value.size != expected:
+            return None
+        if not bool(np.all(np.isfinite(value))):
+            return None
+        return value
+
     def _joint_state(self, method: str, kind: str) -> np.ndarray:
         """Joint state, rebuilding the articulation view if it has gone stale.
 
@@ -258,19 +313,42 @@ class Robot:
         failure that made a quadruped's `stand()` unusable while the identical
         articulation, bound freshly, answered immediately.
 
-        So the view is rebuilt once and the read retried. If that fails too the
-        problem is real rather than stale, and the original error is what the
-        caller should see.
+        So the view is rebuilt once and the read retried. If the rebuilt view
+        cannot answer either, the problem is real rather than stale, and saying
+        so is the whole point — see `_read_joint_state` for what "cannot answer"
+        looked like before it was checked.
         """
-        try:
-            return np.asarray(getattr(self._articulation, method)(), dtype=float)
-        except Exception:
-            logger.debug("Rebuilding the articulation view for %s", self.prim_path,
-                         exc_info=True)
+        value = self._read_joint_state(method)
+        if value is not None:
+            return value
 
-        self._articulation = single_articulation(self.prim_path)
-        self._articulation.initialize()
-        return np.asarray(getattr(self._articulation, method)(), dtype=float)
+        logger.debug("Rebuilding the articulation view for %s", self.prim_path)
+        try:
+            self._articulation = single_articulation(self.prim_path)
+            self._articulation.initialize()
+        except Exception as exc:
+            raise StaleArticulation(self._stale_message(kind, str(exc))) from exc
+
+        value = self._read_joint_state(method)
+        if value is None:
+            raise StaleArticulation(self._stale_message(kind, None))
+        return value
+
+    def _stale_message(self, kind: str, rebuild_error: str | None) -> str:
+        detail = (
+            f" Re-binding it failed too: {rebuild_error}."
+            if rebuild_error
+            else " Re-binding it produced a reading that was still unusable."
+        )
+        return (
+            f"{self.prim_path}: cannot read joint {kind}. The articulation is no "
+            f"longer backed by a live physics view — Isaac returns nothing rather "
+            f"than raising, which reads as `nan` if it is not checked.{detail} "
+            f"This normally means the timeline stopped, or the simulation view "
+            f"was torn down under a running session. Play the timeline and "
+            f"re-bind with Robot.attach(); every reading taken from this handle "
+            f"until then is meaningless."
+        )
 
     @property
     def joint_limits(self) -> list[tuple[float | None, float | None]]:
@@ -540,20 +618,43 @@ class Robot:
     # ── Description ───────────────────────────────────────────────────────────
 
     def describe(self) -> dict[str, Any]:
-        """Everything an agent needs to know about this robot, in one call."""
-        return {
-            "prim_path": self.prim_path,
-            "morphology": self.morphology.value,
-            "controller": type(self).__name__,
-            "dof": self.dof,
-            "joint_names": self.joint_names,
-            "joint_positions": self.joint_positions.round(4).tolist(),
-            "joint_groups": self.groups.to_dict(self.joint_names),
-            "base_position": self.base_position.round(4).tolist(),
-            "drive_problems": self.drive_health(),
-            "asset_problems": self.asset_problems(),
-            "capabilities": self.capabilities(),
-        }
+        """Everything an agent needs to know about this robot, in one call.
+
+        `describe()` is the call you make *because* something is wrong, so it
+        must not be the call that fails. It used to raise `IndexError` from
+        three frames down whenever the physics view had gone, which is the one
+        moment it was most needed and the one moment it said nothing.
+
+        A dead handle now returns a diagnosis in the same shape as the rest of
+        this dictionary. Static facts — the prim path, the morphology, the
+        controller class — still come back, because they remain true.
+        """
+        try:
+            return {
+                "prim_path": self.prim_path,
+                "morphology": self.morphology.value,
+                "controller": type(self).__name__,
+                "dof": self.dof,
+                "joint_names": self.joint_names,
+                "joint_positions": self.joint_positions.round(4).tolist(),
+                "joint_groups": self.groups.to_dict(self.joint_names),
+                "base_position": self.base_position.round(4).tolist(),
+                "drive_problems": self.drive_health(),
+                "asset_problems": self.asset_problems(),
+                "capabilities": self.capabilities(),
+            }
+        except StaleArticulation as exc:
+            return {
+                "prim_path": self.prim_path,
+                "morphology": self.morphology.value,
+                "controller": type(self).__name__,
+                "usable": False,
+                "problem": str(exc),
+                "recover": (
+                    "scene.play(), then Robot.attach(prim_path) for a fresh handle. "
+                    "Do not interpret any number read from this one."
+                ),
+            }
 
     def asset_problems(self) -> list[dict[str, str]]:
         """Defects in the robot asset itself, and what each one prevents.

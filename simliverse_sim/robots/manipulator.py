@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from .._compat import articulation_action, as_quat, as_vec3, get_stage, motion_generation
-from .base import Morphology, Robot
+from .base import Morphology, Robot, StaleArticulation
 
 if TYPE_CHECKING:
     from ..objects import RigidObject
@@ -1040,7 +1040,33 @@ class Manipulator(Robot):
         self._ensure_motion_policy()
         self._sync_base_pose()
         position, _ = self._ik.compute_end_effector_pose()
-        return np.asarray(position, dtype=float)
+        return self._require_pose(position, "position")
+
+    def _require_pose(self, value: Any, kind: str) -> np.ndarray:
+        """Lula's forward kinematics, or an error saying why there is none.
+
+        Asked for the tool pose on a de-initialised articulation, Lula logs
+
+            [Error] [articulation_kinematics_solver] Attempted to compute
+                    forward kinematics for an uninitialized robot Articulation.
+                    Cannot get joint positions
+
+        and returns a scalar `nan`. `np.asarray` turns that into a
+        zero-dimensional array, so `robot.ee_position` answers `nan` — printable,
+        indexable-looking, and false. It is the same shape of bug as the joint
+        read in `base._read_joint_state`, one layer up, and it has to be caught
+        here as well: this path never touches that one.
+        """
+        pose = np.asarray(value, dtype=float)
+        if pose.ndim >= 1 and pose.size >= 3 and bool(np.all(np.isfinite(pose))):
+            return pose
+        raise StaleArticulation(
+            f"{self.prim_path}: cannot compute the end-effector {kind}. Lula got "
+            f"nothing back from the articulation, which returns as `nan` rather "
+            f"than an error. The handle is no longer backed by a live physics "
+            f"view — play the timeline and re-bind with Robot.attach(). "
+            f"describe() reports the same thing without raising."
+        )
 
     @property
     def ee_orientation(self) -> np.ndarray:
@@ -1065,7 +1091,7 @@ class Manipulator(Robot):
         self._ensure_motion_policy()
         self._sync_base_pose()
         _, rotation = self._ik.compute_end_effector_pose()
-        return np.asarray(rotation, dtype=float)
+        return self._require_pose(rotation, "orientation")
 
     # -- Orientation-exact posing -------------------------------------------
     #
