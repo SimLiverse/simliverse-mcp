@@ -76,13 +76,18 @@ import numpy as np
 
 WARMUP_FRAMES = 30
 
-# Every state you need, plus WARMUP and DONE.
-WARMUP, INIT, DOING, DONE = 0, 1, 2, 3
+# Every state you need, plus WARMUP, DONE and FAILED. FAILED is not optional:
+# without it the only way out of the machine is DONE, so a run that skipped
+# half the task still ends up there. A controller reported DONE having stacked
+# two of three cubes and left the third untouched on the floor -- reaching the
+# last state is not the same as having done the task.
+WARMUP, INIT, DOING, CHECK, DONE, FAILED = 0, 1, 2, 3, 4, 5
 
 # Persistent state lives at module level, not in compute()'s locals.
 _state = WARMUP
 _frame = 0
 _arm = None
+_why = ""          # why it failed, readable from outside after the run
 
 
 def _go(state):
@@ -90,13 +95,21 @@ def _go(state):
     _state, _frame = state, 0
 
 
+def _fail(reason):
+    """End in FAILED, saying which part did not happen."""
+    global _why
+    _why = reason
+    carb.log_warn("controller FAILED: %s" % reason)
+    _go(FAILED)
+
+
 def _on_timeline(event):
     """Reset on STOP, or the second Play resumes mid-task instead of restarting."""
     import omni.timeline
 
-    global _state, _frame, _arm
+    global _state, _frame, _arm, _why
     if event.type == int(omni.timeline.TimelineEventType.STOP):
-        _state, _frame, _arm = WARMUP, 0, None
+        _state, _frame, _arm, _why = WARMUP, 0, None, ""
 
 
 _timeline_sub = None
@@ -116,9 +129,21 @@ def compute(db=None):
     global _state, _frame, _arm
     _frame += 1
 
+    if _state in (DONE, FAILED):
+        return True
+
     if _state == WARMUP:                      # let physics settle first
         if _frame >= WARMUP_FRAMES:
             _go(INIT)
+        return True
+
+    # Nothing below runs forever. Every state that waits on the world needs a
+    # way out that is not "keep waiting" -- a servo that cannot converge, a
+    # grasp that never closes, an object out of reach. Without this the run
+    # neither finishes nor fails; it just stops making progress, which is the
+    # hardest failure to read from outside.
+    if _frame > 1500:
+        _fail("state %d ran for %d frames without progressing" % (_state, _frame))
         return True
 
     if _state == INIT:
@@ -132,7 +157,22 @@ def compute(db=None):
     if _state == DOING:
         # servo_to advances ONE tick and returns True once converged.
         if _arm.servo_to([0.4, 0.0, 0.3]):
+            _go(CHECK)
+        return True
+
+    if _state == CHECK:
+        # Measure the OUTCOME, not the fact that you got here. Read the world:
+        # where the objects actually ended up, whether they are at rest,
+        # whether anything that had to stay put moved. Then DONE or FAILED.
+        #
+        # `deliver` measures the scene independently and will catch a controller
+        # that lies about this -- but by then it costs you a replay, and this
+        # check names which part failed while the run still knows.
+        reached = _arm.ee_position
+        if abs(reached[2] - 0.3) < 0.02:
             _go(DONE)
+        else:
+            _fail("tool ended at z=%.3f, wanted 0.300" % reached[2])
         return True
 
     return True
