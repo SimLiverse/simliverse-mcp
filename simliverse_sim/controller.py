@@ -189,17 +189,41 @@ def skeleton() -> str:
     return SKELETON
 
 
+# In preference order. The first is the only one that has been delivered and
+# measured end to end, and it is first for a reason: whatever this returns is
+# what an agent copies the shape of, so a worked example that omits something
+# load-bearing costs a run every time it is read.
+_WORKED_EXAMPLES = (
+    ("controllers", "stack_three_sizes.py"),
+    ("demo", "stack_cubes.py"),
+)
+
+
 def example() -> str:
     """A complete worked controller — the three-cube stack, as shipped.
 
     Cheaper and more reliable than searching the container's filesystem for it,
     which is what an agent does otherwise.
+
+    This used to return `demo/stack_cubes.py`, which never re-homes the arm.
+    The Franka's wrist winds up across a sequence of solves, and once joint 6
+    reaches its limit a demanded DOWN orientation can only be met by driving
+    into the stop — so every target after the first comes back 9 to 22 cm
+    short. Copying that shape is how a run reached for the last cube, missed,
+    and concluded it had found a kinematic limit. It had found a starting pose.
+
+    The controller returned instead homes before every pick and measures the
+    tower in a CHECK state before it will say DONE. Reproduced three times from
+    a cold Play: cubes at z=0.070 and z=0.105 against targets of 0.070 and
+    0.105, base undisturbed.
     """
     for directory in _CANDIDATE_DIRECTORIES:
-        candidate = os.path.join(os.path.dirname(directory), "demo", "stack_cubes.py")
-        if os.path.isfile(candidate):
-            with open(candidate, encoding="utf-8") as handle:
-                return handle.read()
+        root = os.path.dirname(directory)
+        for subdirectory, filename in _WORKED_EXAMPLES:
+            candidate = os.path.join(root, subdirectory, filename)
+            if os.path.isfile(candidate):
+                with open(candidate, encoding="utf-8") as handle:
+                    return handle.read()
     return SKELETON
 
 

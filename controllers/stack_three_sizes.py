@@ -135,8 +135,15 @@ def compute(db=None):
             _go(OVER_PICK)
         return True
 
-    cube = _cubes[_job]
-    target_z = JOBS[_job][1]
+    # Past the last job there is no current cube, and CHECK is the only state
+    # that still runs. Indexing unconditionally here threw IndexError on every
+    # frame of CHECK, so the tower was never measured; the state ran out its
+    # frame limit and the controller ended in FAILED with a correct tower
+    # standing in front of it. `deliver()` still reported reproduced=True,
+    # because it measures the cubes and not the controller -- which is exactly
+    # how a verification step manages to never run and never be missed.
+    cube = _cubes[_job] if _job < len(_cubes) else None
+    target_z = JOBS[_job][1] if _job < len(JOBS) else None
 
     if _state == OVER_PICK:
         # Read the cube where it actually is. On a replay it is back at its

@@ -67,6 +67,10 @@ class SocketServer:
         self._socket: socket.socket | None = None
         self._server_thread: threading.Thread | None = None
         self._dispatch_lock = threading.Lock()
+        # Captured on the main thread in `start()`. A client thread cannot find
+        # Kit's loop for itself — `asyncio.get_event_loop()` off the main thread
+        # raises "There is no current event loop in thread ...".
+        self._loop: Any = None
 
     # ── Lifecycle ──────────────────────────────────────────────────────────────
 
@@ -75,6 +79,7 @@ class SocketServer:
         if self.running:
             return
         self.running = True
+        self._loop = self._capture_loop()
         try:
             self._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self._socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -162,23 +167,34 @@ class SocketServer:
         **Socket writes happened on Kit's loop.** A slow client stalled the
         simulation. They happen here now, off the main thread.
 
-        What this does not fix: a handler that calls `app.update()` — which
-        `scene.play()` and `scene.stop()` do — is still pumping Kit's update
-        from inside a coroutine on Kit's own loop, and that re-entrancy is the
-        underlying collision:
+        **The work was a Task.** This is the one that mattered. A handler that
+        calls `app.update()` — which `scene.play()`, `stop()` and `step()` all
+        do — pumps Kit's update from inside the running command. Any Kit
+        extension that reacts by scheduling a coroutine of its own then meets
+        asyncio's re-entrancy guard:
 
             RuntimeError: Cannot enter into task <Task ... core.throttling
                 Extension._disable_async_rendering_after_update_async>
               while another task <Task ... execute_wrapper()> is being executed
 
-        Fixing that means moving execution off the async engine altogether, and
-        it needs a live simulator to verify. Until then the collision still
-        happens — it just reports itself instead of hanging up.
+        The guard fires on *the other extension's* task, not ours, so the
+        damage lands somewhere unrelated: `omni.anim.graph.ui` losing
+        `_process_usd_change` is why spawning prims dropped connections while
+        long computations were fine. It is a USD-mutation bug wearing a
+        long-command disguise.
+
+        Nothing about the handler needs a Task — it is synchronous work that
+        must happen on the main thread. So it is scheduled as a plain callback.
+        `call_soon_threadsafe` runs it in the loop's callback slot, where
+        asyncio marks no task as current, and the guard has nothing to trip on.
+        Measured on the live worker: with the handler inside a Task a
+        concurrently scheduled coroutine never ran; as a plain callback both
+        ran.
         """
         done = threading.Event()
         outcome: Dict[str, Any] = {}
 
-        async def execute_wrapper() -> None:
+        def execute() -> None:
             try:
                 outcome["response"] = self._command_handler(command)
             except Exception as exc:
@@ -191,7 +207,7 @@ class SocketServer:
         # the scheduling, because the point is that the handlers do not overlap.
         with self._dispatch_lock:
             try:
-                self._schedule(execute_wrapper())
+                self._schedule(execute)
             except Exception as exc:
                 traceback.print_exc()
                 self._reply(client, {
@@ -219,11 +235,46 @@ class SocketServer:
             "message": "The command completed without producing a response.",
         }))
 
-    def _schedule(self, coroutine: Any) -> None:
-        """Hand a coroutine to Kit's async engine. Replaced in tests."""
-        from omni.kit.async_engine import run_coroutine
+    @staticmethod
+    def _capture_loop() -> Any:
+        """Kit's event loop, taken while we are still on the main thread.
 
-        run_coroutine(coroutine)
+        Only the main thread can answer this question, which is why it is asked
+        at startup and not at dispatch: from a client thread both
+        `asyncio.get_event_loop()` and the policy raise "There is no current
+        event loop in thread ...".
+        """
+        try:
+            import asyncio
+
+            return asyncio.get_event_loop()
+        except Exception as exc:  # pragma: no cover - needs a live Kit
+            print(f"Could not capture Isaac's event loop at startup: {exc}")
+            return None
+
+    def _schedule(self, work: Callable[[], None]) -> None:
+        """Run `work` on Kit's main thread, outside any asyncio Task.
+
+        A plain callback, deliberately — see `_dispatch_command`. The fallback
+        exists so that a loop we failed to capture degrades to the old
+        behaviour instead of refusing every command; it carries the
+        re-entrancy bug with it, so it says so.
+        """
+        loop = self._loop
+        if loop is None:
+            print(
+                "No captured event loop — falling back to the async engine. "
+                "Commands that mutate USD may drop their connection."
+            )
+            from omni.kit.async_engine import run_coroutine
+
+            async def as_task() -> None:
+                work()
+
+            run_coroutine(as_task())
+            return
+
+        loop.call_soon_threadsafe(work)
 
     @staticmethod
     def _reply(client: socket.socket, response: Dict[str, Any]) -> None:

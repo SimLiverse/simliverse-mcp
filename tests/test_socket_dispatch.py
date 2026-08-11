@@ -98,14 +98,69 @@ def _server(handler, *, schedule=None, timeout=5.0) -> SocketServer:
     return server
 
 
-def _run_now(coroutine) -> None:
-    """Kit's async engine, in the honest case: the coroutine runs."""
-    asyncio.run(coroutine)
+def _run_now(work) -> None:
+    """Kit's main thread, in the honest case: the callback runs."""
+    work()
 
 
-def _never_runs(coroutine) -> None:
-    """The task is accepted and then destroyed — the production failure."""
-    coroutine.close()
+def _never_runs(work) -> None:
+    """Accepted and then dropped — the production failure."""
+
+
+# ── The work must be a callback, not a Task ───────────────────────────────────
+
+
+def test_the_handler_is_scheduled_as_a_plain_callable() -> None:
+    """Scheduling it as a coroutine is what broke USD-mutating commands.
+
+    A Task makes asyncio mark it current for as long as it runs. Handlers pump
+    `app.update()`, Kit extensions react to the USD change by scheduling
+    coroutines, and asyncio refuses: "Cannot enter into task X while another
+    task Y is being executed". The guard fires on *their* task, so spawning a
+    prim killed `omni.anim.graph.ui` and the connection went with it.
+
+    Measured on the live worker: from inside the old Task a concurrently
+    scheduled coroutine never ran at all; from a plain callback both ran.
+    """
+    scheduled = []
+    server = _server(lambda command: {"status": "success"}, schedule=scheduled.append)
+
+    server._dispatch_command(_Client(), {"type": "spawn_robot"})
+
+    assert len(scheduled) == 1
+    work = scheduled[0]
+    assert not asyncio.iscoroutine(work), (
+        "the handler was scheduled as a coroutine — asyncio will run it as a Task "
+        "and USD-change callbacks in other Kit extensions will start failing"
+    )
+    assert callable(work)
+
+
+def test_it_is_handed_to_the_loop_as_a_threadsafe_callback() -> None:
+    """`call_soon_threadsafe`, because dispatch runs on a client thread and the
+    callback slot is the one place asyncio marks no current task."""
+    calls = []
+
+    class _Loop:
+        def call_soon_threadsafe(self, work):
+            calls.append(work)
+            work()
+
+    server = _server(lambda command: {"status": "success"}, schedule=None)
+    del server._schedule  # back to the real implementation
+    server._loop = _Loop()
+
+    server._dispatch_command(_Client(), {"type": "spawn_robot"})
+
+    assert len(calls) == 1 and callable(calls[0])
+
+
+def test_a_loop_it_could_not_capture_still_answers() -> None:
+    """Better the old behaviour than no commands at all — but it must not
+    pretend, so `_loop` staying None is a fallback and not the design."""
+    server = SocketServer("127.0.0.1", 0, lambda command: {"status": "success"})
+
+    assert server._loop is None, "nothing should be captured before start()"
 
 
 # ── The happy path still works ────────────────────────────────────────────────
@@ -172,8 +227,7 @@ def test_it_does_not_claim_the_scene_is_untouched() -> None:
 
 
 def test_a_scheduler_that_refuses_is_reported() -> None:
-    def refuse(coroutine):
-        coroutine.close()
+    def refuse(work):
         raise RuntimeError("async engine is shutting down")
 
     server = _server(lambda command: {"status": "success"}, schedule=refuse)
