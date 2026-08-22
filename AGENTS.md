@@ -42,24 +42,36 @@ The server listens via `mcp.run(transport="streamable-http")` on
 meant to be **VPC-internal only** — port 9905 must never be exposed publicly. Do not add
 config, docs, or deployment scripts that expose this port to the public internet.
 
+## Version adapters
+
+`adapters/` splits three ways, and the split is what keeps the two supported Isaac Sim
+versions readable:
+
+- **`base.py`** — the abstract contract. Handler code never imports `isaacsim.*` directly; it
+  goes through this interface.
+- **`common.py`** — the implementations that do not vary by version, because they reach Isaac
+  through APIs that did not move between 5.1 and 6.0 (`pxr`, `omni.usd`, `omni.kit.commands`)
+  or through no Isaac API at all.
+- **`v5.py` / `v6.py`** — only what genuinely differs, which is mostly the
+  `isaacsim.core.*` → `isaacsim.core.experimental.*` move and the timeline and articulation
+  rewrites.
+
+A method belongs in `common.py` when v5 and v6 would implement it identically. Copying it into
+both instead is how this directory previously grew to hold eighteen duplicated methods.
+
 ## Loose experimental files at repo root
 
-Two files sit at the repo root, outside the installed package (`isaac_mcp/`) and outside
-`tests/`. They are active, in-progress experiments — **not stable structure, not part of the
+One file sits at the repo root, outside the installed package (`isaac_mcp/`) and outside
+`tests/`. It is an active, in-progress experiment — **not stable structure, not part of the
 public API, and may be moved, rewritten, or deleted without notice**:
 
-- **`rewrite_v6.py`** — a one-off code-generation script. It builds a large Python source
-  string in memory (an Isaac Sim 6.0.0 adapter implementation) and writes it out to
-  `isaac.sim.mcp_extension/isaac_sim_mcp_extension/adapters/v6.py`. It is a scaffolding tool
-  used to iterate on that generated adapter file, not something imported or run as part of the
-  server.
 - **`test_material_binding.py`** — despite the `test_` prefix, this is **not** a real pytest
   test (no assertions, lives outside `tests/`). It's a throwaway USD API exploration script
   that pokes at `UsdShade.MaterialBindingAPI` (constructor vs. `.Apply()`) to figure out the
   correct binding pattern, presumably to inform `isaac_mcp/tools/materials.py`.
 
-Do not treat either file as a reference for "how this codebase does things" — they're
-scratch/experiment artifacts that happened to get committed.
+Do not treat it as a reference for "how this codebase does things" — it's a scratch/experiment
+artifact that happened to get committed.
 
 ## Tooling actually in use
 

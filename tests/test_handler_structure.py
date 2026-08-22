@@ -26,6 +26,8 @@
 import ast
 import os
 
+import pytest
+
 EXTENSION_ROOT = os.path.join(os.path.dirname(__file__), "..", "isaac.sim.mcp_extension", "isaac_sim_mcp_extension")
 
 
@@ -96,27 +98,92 @@ def test_adapter_base_has_all_abstract_methods():
     assert methods == expected, f"Missing: {expected - methods}, Extra: {methods - expected}"
 
 
-def test_v5_adapter_implements_all_methods():
-    """Verify v5 adapter implements every abstract method from base."""
-    base_tree = _parse_file(os.path.join(EXTENSION_ROOT, "adapters", "base.py"))
-    v5_tree = _parse_file(os.path.join(EXTENSION_ROOT, "adapters", "v5.py"))
-
-    base_methods = set()
-    for node in ast.walk(base_tree):
+def _abstract_methods():
+    """Names every concrete adapter must supply, from base.py."""
+    tree = _parse_file(os.path.join(EXTENSION_ROOT, "adapters", "base.py"))
+    names = set()
+    for node in ast.walk(tree):
         if isinstance(node, ast.FunctionDef) and node.name != "__init__":
             for decorator in node.decorator_list:
                 if (isinstance(decorator, ast.Name) and decorator.id == "abstractmethod") or (
                     isinstance(decorator, ast.Attribute) and decorator.attr == "abstractmethod"
                 ):
-                    base_methods.add(node.name)
+                    names.add(node.name)
+    return names
 
-    v5_methods = set()
-    for node in ast.walk(v5_tree):
-        if isinstance(node, ast.FunctionDef):
-            v5_methods.add(node.name)
 
-    missing = base_methods - v5_methods
-    assert not missing, f"v5 adapter missing implementations: {missing}"
+def _methods_defined_in(*module_names):
+    names = set()
+    for module in module_names:
+        tree = _parse_file(os.path.join(EXTENSION_ROOT, "adapters", module))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef):
+                names.add(node.name)
+    return names
+
+
+@pytest.mark.parametrize("version_module", ["v5.py", "v6.py"])
+def test_adapter_implements_all_methods(version_module):
+    """Every abstract method must be supplied somewhere on the adapter's chain.
+
+    Resolved across `common.py` as well as the version module. An abstract
+    method left unimplemented anywhere on that chain is a TypeError the moment
+    `get_adapter()` instantiates the class, which happens at extension startup
+    and takes the whole extension down with it.
+
+    Checking only the version module — which this test used to do, and only for
+    v5 — would now report the eighteen shared implementations as missing while
+    still saying nothing at all about v6.
+    """
+    missing = _abstract_methods() - _methods_defined_in(version_module, "common.py")
+    assert not missing, f"{version_module} has no implementation for: {sorted(missing)}"
+
+
+def test_the_shared_layer_holds_nothing_version_specific():
+    """`common.py` must not depend on an Isaac API that moved between 5.1 and 6.0.
+
+    That move — `isaacsim.core.*` to `isaacsim.core.experimental.*` — is the
+    whole reason two adapters exist. A method that needs either namespace is
+    version-specific by definition and belongs in `v5.py` or `v6.py`, however
+    similar its two implementations happen to look today.
+
+    An import inside `try` is exempt, and deliberately: `execute_script` aliases
+    the deprecated `omni.isaac` namespace and probes for `isaacsim.core.utils`
+    so that user scripts written against either generation keep working. It
+    degrades to `None` rather than raising, which is what makes it shared code
+    instead of two implementations.
+    """
+    tree = _parse_file(os.path.join(EXTENSION_ROOT, "adapters", "common.py"))
+
+    guarded = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Try):
+            for inner in ast.walk(node):
+                guarded.add(id(inner))
+
+    versioned = (
+        "isaacsim.core.experimental",
+        "isaacsim.core.api",
+        "isaacsim.core.prims",
+        "isaacsim.core.utils",
+        "isaacsim.core.simulation_manager",
+    )
+
+    offenders = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Import, ast.ImportFrom)) or id(node) in guarded:
+            continue
+        targets = [node.module or ""] if isinstance(node, ast.ImportFrom) else [
+            a.name for a in node.names
+        ]
+        for target in targets:
+            if any(target.startswith(v) for v in versioned):
+                offenders.append(f"line {node.lineno}: {target}")
+
+    assert not offenders, (
+        f"common.py imports version-specific Isaac modules unguarded: {offenders}. "
+        f"Those methods belong back in v5.py / v6.py."
+    )
 
 
 def test_all_handler_modules_have_register():
