@@ -29,6 +29,7 @@ import json
 import logging
 import os
 import socket
+import threading
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
 
@@ -67,7 +68,30 @@ class IsaacCommandError(Exception):
 
 @dataclass
 class IsaacConnection:
-    """Manages a persistent TCP socket connection to the Isaac Sim extension."""
+    """Manages a persistent TCP socket connection to the Isaac Sim extension.
+
+    **One socket, one command at a time.** `send_command` writes a request and
+    then reads until the accumulated bytes parse as JSON — there is no request id
+    in the wire format, so a reply is matched to a request purely by who calls
+    `recv` first. Two threads sharing this socket therefore do not merely
+    interleave, they corrupt each other: `{"a":1}{"b":2}` never parses, so the
+    reader accumulates both replies and blocks until READ_TIMEOUT before
+    reporting an incomplete response for a command that actually succeeded.
+
+    That was latent while the agent harness delegated sequentially. It is not
+    any more: the Claude Agent SDK can issue several `Task` calls in one turn, so
+    `scene-builder` and `verifier` may hold this connection concurrently, and
+    FastMCP runs these sync tool functions on real threadpool threads.
+
+    `_lock` therefore covers the whole request/response exchange rather than the
+    write alone. This costs no throughput: `socket_server.py` already serialises
+    every command behind its own `_dispatch_lock`, and the work runs on Kit's
+    main thread because USD and PhysX require it. Isaac was never going to
+    execute two of these at once — the only thing concurrency bought here was the
+    corruption.
+
+    It is an `RLock` because `send_command` calls `connect` while holding it.
+    """
 
     host: str = "localhost"
     port: int = 0
@@ -77,28 +101,34 @@ class IsaacConnection:
             self.port = int(os.environ.get("ISAAC_MCP_PORT", DEFAULT_PORT))
 
     sock: Optional[socket.socket] = field(default=None, repr=False)
+    # `compare=False` keeps dataclass equality on host/port/sock, where it was.
+    _lock: threading.RLock = field(
+        default_factory=threading.RLock, repr=False, compare=False
+    )
 
     def connect(self) -> bool:
-        if self.sock:
-            return True
-        try:
-            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.sock.connect((self.host, self.port))
-            logger.info(f"Connected to Isaac at {self.host}:{self.port}")
-            return True
-        except Exception as e:
-            logger.error(f"Failed to connect to Isaac: {e}")
-            self.sock = None
-            return False
+        with self._lock:
+            if self.sock:
+                return True
+            try:
+                self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self.sock.connect((self.host, self.port))
+                logger.info(f"Connected to Isaac at {self.host}:{self.port}")
+                return True
+            except Exception as e:
+                logger.error(f"Failed to connect to Isaac: {e}")
+                self.sock = None
+                return False
 
     def disconnect(self) -> None:
-        if self.sock:
-            try:
-                self.sock.close()
-            except Exception as e:
-                logger.error(f"Error disconnecting: {e}")
-            finally:
-                self.sock = None
+        with self._lock:
+            if self.sock:
+                try:
+                    self.sock.close()
+                except Exception as e:
+                    logger.error(f"Error disconnecting: {e}")
+                finally:
+                    self.sock = None
 
     def receive_full_response(self, sock: socket.socket, buffer_size: int = 16384) -> bytes:
         chunks = []
@@ -145,6 +175,26 @@ class IsaacConnection:
         )
 
     def send_command(self, command_type: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        # Contention is reported rather than silent. A caller can wait up to
+        # READ_TIMEOUT here, and "the verifier is queued behind a 4-minute
+        # controller replay" needs to be visible in the log — otherwise it
+        # presents as the sidecar having hung.
+        if not self._lock.acquire(blocking=False):
+            logger.info(
+                "Isaac connection busy; %s is queued behind a command already in "
+                "flight.",
+                command_type,
+            )
+            self._lock.acquire()
+        try:
+            return self._send_command_locked(command_type, params)
+        finally:
+            self._lock.release()
+
+    def _send_command_locked(
+        self, command_type: str, params: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """The exchange itself. Callers must hold `self._lock`."""
         if not self.sock and not self.connect():
             raise ConnectionError("Not connected to Isaac")
 
@@ -182,22 +232,30 @@ class IsaacConnection:
 
 _isaac_connection: Optional[IsaacConnection] = None
 
+# Guards the singleton itself, not the socket. Without it the check-then-act in
+# `get_isaac_connection` lets two threads each build a connection: the loser's
+# socket is dropped from the global while still open, leaking an FD and a
+# half-used session on the extension side.
+_singleton_lock = threading.Lock()
+
 
 def get_isaac_connection() -> IsaacConnection:
     """Get or create a persistent Isaac connection singleton."""
     global _isaac_connection
-    if _isaac_connection is not None:
+    with _singleton_lock:
+        if _isaac_connection is not None:
+            return _isaac_connection
+        connection = IsaacConnection(host="localhost")
+        if not connection.connect():
+            raise Exception("Could not connect to Isaac. Make sure the Isaac addon is running.")
+        _isaac_connection = connection
         return _isaac_connection
-    _isaac_connection = IsaacConnection(host="localhost")
-    if not _isaac_connection.connect():
-        _isaac_connection = None
-        raise Exception("Could not connect to Isaac. Make sure the Isaac addon is running.")
-    return _isaac_connection
 
 
 def reset_isaac_connection() -> None:
     """Disconnect and clear the global connection (used during shutdown)."""
     global _isaac_connection
-    if _isaac_connection:
-        _isaac_connection.disconnect()
-        _isaac_connection = None
+    with _singleton_lock:
+        if _isaac_connection:
+            _isaac_connection.disconnect()
+            _isaac_connection = None
