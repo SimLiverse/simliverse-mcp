@@ -1939,47 +1939,86 @@ class Manipulator(Robot):
         self._rmpflow.set_end_effector_target(target_position=end)
         controller = self._controller()
 
+        # RMPflow converges on a position: it plans to arrive, which means it
+        # plans to stop. Asked for a fast swing it accelerates, then spends the
+        # back half of the arc shedding exactly the speed a throw needs, and the
+        # measured ceiling on a Franka is about 0.44 m/s however far away the
+        # target is put. No release rule recovers a velocity the controller
+        # never produced.
+        #
+        # What does work is telling the policy that more time has passed than
+        # really has, so each solve commands a proportionally larger step. The
+        # agent under test found this by itself, from `_policy` internals, after
+        # `throw` had failed it twice -- and it is the only lever here that
+        # produces genuine momentum transfer, because the links still move
+        # through PhysX and the ball still leaves on contact forces alone.
+        #
+        # Closed-loop rather than a fixed number: the ceiling is a property of
+        # the arm, and this has to work on arms nobody measured.
+        base_dt = getattr(self._policy, "get_default_physics_dt", lambda: self.scene.dt)()
+        set_dt = getattr(self._policy, "set_default_physics_dt", None)
+        scale, max_scale = 1.0, 90.0
+
         released, reason = False, ""
         release_speed = peak_speed = 0.0
-        decelerating = 0
+        stalled = 0
+        hand_speed = 0.0
         previous = self.ee_position
 
-        for step in range(400):
-            self._rmpflow.update_world()
-            controller.apply_action(self._policy.get_next_articulation_action())
-            self.scene.step(1)
+        try:
+            for step in range(400):
+                if set_dt is not None and hand_speed < float(speed) and scale < max_scale:
+                    scale = min(max_scale, scale * 1.25)
+                    set_dt(self.scene.dt * scale)
 
-            current = self.ee_position
-            hand_speed = float(np.linalg.norm(current - previous)) / self.scene.dt
-            previous = current
+                self._rmpflow.update_world()
+                controller.apply_action(self._policy.get_next_articulation_action())
+                self.scene.step(1)
 
-            decelerating = decelerating + 1 if hand_speed < peak_speed * 0.85 else 0
-            peak_speed = max(peak_speed, hand_speed)
+                current = self.ee_position
+                hand_speed = float(np.linalg.norm(current - previous)) / self.scene.dt
+                previous = current
 
-            if hand_speed >= float(speed):
-                reason = "reached the requested hand speed"
-            elif float(np.dot(current - release_at, unit)) >= 0.0:
-                reason = "passed the geometric release point"
-            elif step >= spinup_steps and decelerating >= stall_steps:
-                # The swing is already slowing down. Carrying on to the
-                # geometric release point means letting go at a crawl, which is
-                # what `sweep = speed * 0.35` produces whenever the requested
-                # speed puts `end` outside the arm's reach — a Franka reaches
-                # about 0.85 m and the default `speed` alone asks for 1.1 m of
-                # travel. RMPflow damps hard against the workspace boundary, so
-                # the arm arrived at the release point at 0.15 m/s and the
-                # "throw" was a drop. Releasing at the peak is the honest
-                # reading of a swing that has run out of room.
-                reason = (
-                    "the swing stopped accelerating before the release point — "
-                    "the arc runs out of workspace"
-                )
-            else:
-                continue
+                if hand_speed > peak_speed + 1e-4:
+                    peak_speed, stalled = hand_speed, 0
+                else:
+                    stalled += 1
 
-            release_speed = hand_speed
-            released = True
-            break
+                if hand_speed >= float(speed):
+                    reason = "reached the requested hand speed"
+                elif float(np.dot(current - release_at, unit)) >= 0.0:
+                    reason = "passed the geometric release point"
+                elif (
+                    step >= spinup_steps
+                    and stalled >= stall_steps
+                    and (set_dt is None or scale >= max_scale)
+                ):
+                    # The arm is being driven as hard as this will drive it and
+                    # it is not getting any faster. Carrying on to the geometric
+                    # release point means letting go at a crawl -- which is what
+                    # `sweep = speed * 0.35` produces whenever the requested
+                    # speed puts `end` outside the arm's reach. A Franka reaches
+                    # about 0.85 m; the default `speed` alone asks for 1.1 m of
+                    # travel. Measured: released at 0.145 m/s against a
+                    # requested 2.8, and the ball rolled. Letting go at the peak
+                    # is the honest reading of a swing with nothing left.
+                    reason = (
+                        "the arm stopped gaining speed before the release "
+                        "point — this is as fast as it swings"
+                    )
+                else:
+                    continue
+
+                release_speed = hand_speed
+                released = True
+                break
+        finally:
+            if set_dt is not None:
+                # Not optional. The scaled timestep belongs to this swing, and
+                # leaving it set turns the next ordinary move_ee_to into another
+                # one -- including the release fallback below.
+                set_dt(base_dt)
+
 
         if not released:
             self.release()

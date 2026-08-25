@@ -123,8 +123,12 @@ class FakeArm:
     `profile` maps swing step to hand speed in m/s.
     """
 
-    def __init__(self, profile, *, gripper_opens=True):
+    def __init__(self, profile, *, gripper_opens=True, ceiling=1e9):
         self.profile = profile
+        self.ceiling = ceiling      # the fastest this arm's hand can ever go
+        self.base_dt = DT
+        self.dt_scale = 1.0
+        self.dt_history = []
         self.holding = True
         self.swing_step = -1
         self.unit = np.array([1.0, 0.0, 0.0])
@@ -154,6 +158,13 @@ class FakeArm:
     def _ensure_motion_policy(self):
         pass
 
+    def get_default_physics_dt(self):
+        return self.base_dt
+
+    def set_default_physics_dt(self, value):
+        self.dt_history.append(value)
+        self.dt_scale = value / DT
+
     def set_end_effector_target(self, target_position=None):
         direction = np.asarray(target_position, dtype=float) - self._ee
         norm = float(np.linalg.norm(direction))
@@ -178,13 +189,14 @@ class FakeArm:
 
     def tick(self):
         if self.swing_step >= 0:
-            self.velocity = self.unit * float(self.profile(self.swing_step))
+            driven = float(self.profile(self.swing_step)) * self.dt_scale
+            self.velocity = self.unit * min(self.ceiling, driven)
             self._ee = self._ee + self.velocity * DT
         self.obj.tick()
 
 
-def run_throw(profile, *, gripper_opens=True, **kwargs):
-    arm = FakeArm(profile, gripper_opens=gripper_opens)
+def run_throw(profile, *, gripper_opens=True, ceiling=1e9, **kwargs):
+    arm = FakeArm(profile, gripper_opens=gripper_opens, ceiling=ceiling)
     return arm, Manipulator.throw(arm, arm.obj, **kwargs)
 
 
@@ -193,33 +205,46 @@ def reaches(target):
     return lambda step: min(target, 0.15 * (step + 1))
 
 
-def runs_out_of_room(peak=1.2):
-    """Accelerates to `peak`, then decays: an arm against its workspace edge.
-
-    This is the live failure. The geometric release point is still 0.42 m ahead
-    when the arm stops having the room to get there at speed.
-    """
-
-    def profile(step):
-        if step < 10:
-            return peak * (step + 1) / 10.0
-        return peak * (0.97 ** (step - 10))
-
-    return profile
+# An arm driven as hard as the policy will drive it plateaus at its ceiling; it
+# does not slow down. `ceiling` on FakeArm is what makes a swing run out of arm.
+TOPS_OUT = 0.6
 
 
-def test_releases_at_the_peak_when_the_swing_runs_out_of_workspace():
-    _, result = run_throw(runs_out_of_room(), speed=2.8, observe_steps=90)
+def test_releases_at_the_ceiling_when_the_arm_cannot_go_any_faster():
+    _, result = run_throw(
+        reaches(9.9), ceiling=TOPS_OUT, speed=2.8, observe_steps=90
+    )
 
-    assert "workspace" in result["release_reason"]
-    # The number that mattered: the old code carried on to the geometric
-    # release point and let go at whatever crawl was left, which was 0.145 m/s.
-    assert result["release_hand_speed"] > 0.5
-    assert result["release_hand_speed"] >= 0.5 * result["peak_hand_speed"]
+    assert "as fast as it swings" in result["release_reason"]
+    # The number that mattered: the old code carried on to the geometric release
+    # point and let go at whatever crawl was left, which measured 0.145 m/s.
+    assert result["release_hand_speed"] == pytest.approx(TOPS_OUT, abs=1e-3)
+    assert result["peak_hand_speed"] == pytest.approx(TOPS_OUT, abs=1e-3)
+
+
+def test_a_slow_swing_is_driven_harder_rather_than_reported_as_a_throw():
+    arm, result = run_throw(
+        reaches(9.9), ceiling=TOPS_OUT, speed=2.8, observe_steps=10
+    )
+
+    # RMPflow plans to arrive, so it plans to stop, and no release rule recovers
+    # a velocity it never produced. The only lever that does is telling it more
+    # time passed than really did.
+    assert arm.dt_history, "the swing never tried to drive the policy harder"
+    assert max(arm.dt_history) > DT
+    assert result["speed_shortfall"] > 0
+
+
+def test_the_policy_timestep_is_put_back_when_the_swing_ends():
+    arm, _ = run_throw(reaches(9.9), ceiling=TOPS_OUT, speed=2.8, observe_steps=5)
+
+    # Leaving it scaled turns the next ordinary move_ee_to into another swing.
+    assert arm.dt_history[-1] == pytest.approx(DT)
+    assert arm.dt_scale == pytest.approx(1.0)
 
 
 def test_reports_the_shortfall_rather_than_implying_the_speed_was_met():
-    _, result = run_throw(runs_out_of_room(), speed=2.8, observe_steps=30)
+    _, result = run_throw(reaches(9.9), ceiling=TOPS_OUT, speed=2.8, observe_steps=30)
 
     assert result["requested_speed"] == 2.8
     assert result["release_hand_speed"] < 2.8
