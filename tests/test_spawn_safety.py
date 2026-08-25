@@ -405,3 +405,53 @@ def test_a_duplicate_is_left_alone_while_physics_is_running() -> None:
 
     assert removed == []
     assert stage.removed == [], "a running simulation must not have prims removed under it"
+
+
+# ── The World that could not be discarded ─────────────────────────────────────
+
+
+class _StubbornWorld:
+    """A `World` whose own teardown raises, which is the real behaviour."""
+
+    _instance = object()
+    cleared = False
+
+    @classmethod
+    def clear_instance(cls) -> None:
+        raise RuntimeError(
+            "Accessed invalid expired 'PhysicsScene' prim </World/PhysicsScene>"
+        )
+
+
+class _CooperativeWorld:
+    _instance = object()
+
+    @classmethod
+    def clear_instance(cls) -> None:
+        _CooperativeWorld._instance = None
+
+
+def test_a_world_that_refuses_to_clear_is_cleared_anyway() -> None:
+    """`clear_instance()` touches the world it is discarding, and can raise.
+
+    When the world holds a deleted prim, the supported teardown fails with the
+    very error it was called to escape. The singleton then survives, every later
+    `Scene.get()` hits the same corpse, and the session is finished — no
+    recovery from outside, on a cloud worker that means destroying it.
+
+    This is reachable from the agent's own tool surface: `clear_scene` deletes
+    `/World` wholesale and is offered under AUTHORING. One call cost a worker.
+    """
+    from simliverse_sim._compat import _drop_world_singleton
+
+    _drop_world_singleton(_StubbornWorld)
+    assert _StubbornWorld._instance is None
+
+
+def test_the_supported_path_is_used_when_it_works() -> None:
+    """Reaching into a private is the fallback, not the habit."""
+    from simliverse_sim._compat import _drop_world_singleton
+
+    _CooperativeWorld._instance = object()
+    _drop_world_singleton(_CooperativeWorld)
+    assert _CooperativeWorld._instance is None
