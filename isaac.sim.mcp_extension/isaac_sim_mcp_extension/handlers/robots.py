@@ -32,6 +32,24 @@ import numpy as np
 from ..adapters.base import IsaacAdapterBase
 from .control import _ensure_library_on_path
 
+# How many robots `list_robots` will describe in full before switching to an
+# index of keys. Above this it returns names and manufacturer counts and asks
+# the caller to narrow, because a full description of ~200 robots is several
+# thousand tokens that then ride along in every later turn of the transcript.
+#
+# This constant was referenced and never defined, so `list_available_robots`
+# raised `NameError: name '_DETAIL_THRESHOLD' is not defined` on every call —
+# including the no-argument call the tool's own description tells an agent to
+# make first. Robot discovery was therefore impossible: an agent could not find
+# out what it was allowed to spawn, only guess a name and see whether it loaded.
+#
+# 25 is chosen to make a narrowed search useful rather than to be exactly right.
+# `search="ur"` returns 12 and `search="franka"` returns 5, so the queries an
+# agent actually makes come back described in full, while a bare call returns
+# the index.
+_DETAIL_THRESHOLD = 25
+
+
 # Hardcoded fallback — used only if live discovery fails.
 # Keys are lowercase robot names, asset_path is relative to the assets root.
 def _get_robot_library(adapter: IsaacAdapterBase) -> Dict[str, Dict[str, str]]:

@@ -286,20 +286,66 @@ def physics_running(scene: "Scene") -> Check:
     )
 
 
-def _drop_probe(scene: "Scene") -> float:
-    """Spawn a throwaway body high above the scene and see whether it falls."""
-    from .objects import RigidObject
+# Deliberately outside `/World`. Everything the agent lists, searches or clears
+# is scoped to `/World`, so a probe living here is invisible to the scene the
+# task is about and cannot be mistaken for part of it.
+_PROBE_PATH = "/PhysicsProbe"
+_PROBE_HEIGHT = 50.0
 
-    path = "/World/__physics_probe"
-    probe = scene.spawn_rigid(path, shape="Sphere", radius=0.01, position=(0.0, 0.0, 50.0))
+
+def _drop_probe(scene: "Scene") -> float:
+    """Drop a body from a known height and measure how far it falls.
+
+    The probe is created once and then reused forever. It is never removed, and
+    that is the entire point of this function's shape.
+
+    Removing it is what the first version did, and `RemovePrim` on a body PhysX
+    has registered tears down the physics tensor view. Every articulation in the
+    scene is de-registered with it: joint drives stop being serviced, a closed
+    gripper relaxes, and whatever the robot was holding falls on the floor.
+
+    So `verify_grasp` — which calls `physics_running` first — destroyed the grasp
+    it had been asked to verify, then truthfully reported the object was on the
+    ground. A verifier that breaks the thing it measures is worse than no
+    verifier, because its answer looks like evidence.
+
+    Reusing one body also costs less than spawning per call, and leaves the
+    scene's prim count stable across verifications — which matters when the
+    thing under test is "did the agent build the right scene".
+    """
+    probe = _existing_probe(scene)
+    if probe is None:
+        probe = scene.spawn_rigid(
+            _PROBE_PATH,
+            shape="Sphere",
+            radius=0.01,
+            position=(0.0, 0.0, _PROBE_HEIGHT),
+            mass=0.01,
+        )
+    else:
+        # Lift it back up rather than letting it accumulate falls. Writing a pose
+        # to a body nothing else touches is safe; removing one is not.
+        probe.set_pose(position=(0.0, 0.0, _PROBE_HEIGHT))
+        # And drop it from rest. A reused body keeps the speed it reached last
+        # time, which would make each successive probe report a longer fall than
+        # the one before and turn a fixed threshold into a moving one.
+        probe.set_velocity(linear=(0.0, 0.0, 0.0), angular=(0.0, 0.0, 0.0))
+
     start = probe.position[2]
     scene.step(10)
-    fell = float(start - probe.position[2])
+    return float(start - probe.position[2])
+
+
+def _existing_probe(scene: "Scene") -> Any:
+    """The probe from a previous call, if it is still on the stage."""
+    from .objects import RigidObject
+
     try:
-        scene.stage.RemovePrim(path)
+        if not scene.stage.GetPrimAtPath(_PROBE_PATH).IsValid():
+            return None
+        return RigidObject(_PROBE_PATH)
     except Exception:
-        pass
-    return fell
+        return None
 
 
 # ── Composite suites ──────────────────────────────────────────────────────────
