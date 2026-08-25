@@ -30,6 +30,7 @@ from typing import Any, Dict, List, Optional, Sequence
 import numpy as np
 
 from ..adapters.base import IsaacAdapterBase
+from .asset_notes import _what_this_actually_is
 from .control import _ensure_library_on_path
 
 # How many robots `list_robots` will describe in full before switching to an
@@ -248,6 +249,10 @@ def create(
             result["num_dof"] = info.get("num_dof", 0)
         except Exception:
             pass
+        note = _what_this_actually_is(result.get("joint_names") or [], match["key"])
+        if note:
+            result["note"] = note
+
         try:
             # Zero stiffness and zero damping means the drive is off and the
             # joint will silently ignore every command. Report, never repair.

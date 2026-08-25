@@ -1904,18 +1904,29 @@ class Manipulator(Robot):
         Nothing sets the object's velocity directly — it leaves with whatever
         momentum the hand actually transferred, so the result is a real ballistic
         trajectory that can be measured and verified.
+
+        `speed` is the hand speed to aim for, in m/s, and it is a request rather
+        than a promise: `release_hand_speed` reports what the arm achieved and
+        `speed_shortfall` how far short it fell. Check them. A swing that asks
+        for more than the arm can deliver is the normal case, not an error.
         """
         if not self.is_grasping(obj):
             raise MotionError(
                 "Cannot throw: the object is not currently grasped. Call grasp() "
                 "first and confirm it returned True."
             )
+        if observe_steps < 0:
+            raise ValueError("observe_steps must be >= 0")
 
         vector = as_vec3(direction, name="direction")
         magnitude = float(np.linalg.norm(vector))
         if magnitude < 1e-6:
             raise ValueError("direction must be a non-zero vector")
         unit = vector / magnitude
+
+        # How many consecutive decelerating steps mean the swing is done
+        # accelerating, and how many steps to let the fingers actually open.
+        stall_steps, spinup_steps, settle_steps = 6, 8, 4
 
         start = self.ee_position
         self.move_ee_to(start - unit * windup, raise_on_fail=False)
@@ -1928,10 +1939,12 @@ class Manipulator(Robot):
         self._rmpflow.set_end_effector_target(target_position=end)
         controller = self._controller()
 
-        released, release_speed = False, 0.0
+        released, reason = False, ""
+        release_speed = peak_speed = 0.0
+        decelerating = 0
         previous = self.ee_position
 
-        for _ in range(400):
+        for step in range(400):
             self._rmpflow.update_world()
             controller.apply_action(self._policy.get_next_articulation_action())
             self.scene.step(1)
@@ -1940,10 +1953,33 @@ class Manipulator(Robot):
             hand_speed = float(np.linalg.norm(current - previous)) / self.scene.dt
             previous = current
 
-            if float(np.dot(current - release_at, unit)) >= 0.0:
-                self.gripper.set_position(self.gripper.open_width, settle_steps=0)
-                released, release_speed = True, hand_speed
-                break
+            decelerating = decelerating + 1 if hand_speed < peak_speed * 0.85 else 0
+            peak_speed = max(peak_speed, hand_speed)
+
+            if hand_speed >= float(speed):
+                reason = "reached the requested hand speed"
+            elif float(np.dot(current - release_at, unit)) >= 0.0:
+                reason = "passed the geometric release point"
+            elif step >= spinup_steps and decelerating >= stall_steps:
+                # The swing is already slowing down. Carrying on to the
+                # geometric release point means letting go at a crawl, which is
+                # what `sweep = speed * 0.35` produces whenever the requested
+                # speed puts `end` outside the arm's reach — a Franka reaches
+                # about 0.85 m and the default `speed` alone asks for 1.1 m of
+                # travel. RMPflow damps hard against the workspace boundary, so
+                # the arm arrived at the release point at 0.15 m/s and the
+                # "throw" was a drop. Releasing at the peak is the honest
+                # reading of a swing that has run out of room.
+                reason = (
+                    "the swing stopped accelerating before the release point — "
+                    "the arc runs out of workspace"
+                )
+            else:
+                continue
+
+            release_speed = hand_speed
+            released = True
+            break
 
         if not released:
             self.release()
@@ -1953,23 +1989,61 @@ class Manipulator(Robot):
                 "to the robot's reach."
             )
 
-        apex, trajectory = -float("inf"), []
+        # Opening the gripper is a command to the finger joints, not an event.
+        # Until physics steps, the fingers are still closed and the object is
+        # still pinched -- which is how this used to return `released: True`
+        # next to `still_held: True`, and with `observe_steps=0` never stepped
+        # at all.
+        self.gripper.set_position(self.gripper.open_width, settle_steps=0)
+        for _ in range(settle_steps):
+            self.scene.step(1)
+        still_held = self.is_grasping(obj)
+
+        release_position = obj.position
+        apex = float(release_position[2])
+        trajectory = [release_position.round(4).tolist()]
+        landed_at = None
+        previous_height, falling = float(release_position[2]), False
+
         for step in range(observe_steps):
             self.scene.step(1)
             position = obj.position
-            apex = max(apex, float(position[2]))
+            height = float(position[2])
+            apex = max(apex, height)
+
+            # Touchdown is where the fall stops, and it is worth finding: the
+            # distance after it is the object rolling, which is not throwing.
+            if landed_at is None:
+                if height < previous_height - 1e-5:
+                    falling = True
+                elif falling:
+                    landed_at = position
+            previous_height = height
+
             if step % 10 == 0:
                 trajectory.append(position.round(4).tolist())
 
         final = obj.position
+        flight = (
+            round(float(np.linalg.norm((landed_at - release_position)[:2])), 4)
+            if landed_at is not None
+            else None
+        )
+        total = float(np.linalg.norm((final - release_position)[:2]))
         return {
-            "released": True,
+            "released": not still_held,
+            "release_reason": reason,
+            "requested_speed": float(speed),
             "release_hand_speed": round(release_speed, 3),
+            "peak_hand_speed": round(peak_speed, 3),
+            "speed_shortfall": round(max(0.0, float(speed) - release_speed), 3),
             "object_speed_after_release": round(obj.speed, 3),
             "apex_height": round(apex, 4),
             "landing_position": final.round(4).tolist(),
+            "flight_distance": flight,
+            "rolled_distance": round(total - flight, 4) if flight is not None else None,
             "horizontal_distance": round(float(np.linalg.norm((final - start)[:2])), 4),
-            "still_held": self.is_grasping(obj),
+            "still_held": still_held,
             "trajectory": trajectory,
         }
 

@@ -455,3 +455,63 @@ def test_the_supported_path_is_used_when_it_works() -> None:
     _CooperativeWorld._instance = object()
     _drop_world_singleton(_CooperativeWorld)
     assert _CooperativeWorld._instance is None
+
+
+# ── What the asset actually is ────────────────────────────────────────────────
+
+import importlib.util as _il  # noqa: E402
+import os as _os  # noqa: E402
+
+# Loaded straight from the file. The extension package cannot be imported
+# outside Isaac Sim -- its `__init__` reaches for `carb` -- and `asset_notes`
+# has no imports of its own precisely so this works.
+_spec = _il.spec_from_file_location(
+    "asset_notes",
+    _os.path.join(
+        _os.path.dirname(__file__), "..", "isaac.sim.mcp_extension",
+        "isaac_sim_mcp_extension", "handlers", "asset_notes.py",
+    ),
+)
+_notes = _il.module_from_spec(_spec)
+_spec.loader.exec_module(_notes)
+_what_this_actually_is = _notes._what_this_actually_is
+
+
+def test_a_gripper_only_asset_is_called_an_end_effector():
+    note = _what_this_actually_is(["finger_joint1", "finger_joint2"], "lite6_gripper")
+
+    assert "end effector" in note
+    assert "lite6_gripper" in note
+
+
+def test_an_arm_with_no_gripper_says_it_cannot_hold_anything():
+    note = _what_this_actually_is(
+        ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"], "lite6"
+    )
+
+    assert "no gripper" in note
+
+
+def test_an_arm_with_a_gripper_needs_no_note():
+    cobotta = [
+        "joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6",
+        "finger_joint", "left_inner_knuckle_joint", "right_inner_knuckle_joint",
+        "right_outer_knuckle_joint", "left_inner_finger_joint",
+        "right_inner_finger_joint",
+    ]
+
+    assert _what_this_actually_is(cobotta, "cobottapro900") == ""
+
+
+def test_a_franka_needs_no_note():
+    franka = [
+        "panda_joint1", "panda_joint2", "panda_joint3", "panda_joint4",
+        "panda_joint5", "panda_joint6", "panda_joint7",
+        "panda_finger_joint1", "panda_finger_joint2",
+    ]
+
+    assert _what_this_actually_is(franka, "franka") == ""
+
+
+def test_an_unknown_robot_with_no_joints_is_not_described_at_all():
+    assert _what_this_actually_is([], "mystery") == ""
