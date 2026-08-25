@@ -352,13 +352,48 @@ class Robot:
 
     @property
     def joint_limits(self) -> list[tuple[float | None, float | None]]:
+        """Travel limits per DOF, in radians or metres, or (None, None) if absent.
+
+        This read `self._articulation.get_dof_limits()`. `SingleArticulation` has
+        no such method and never did, so the `except Exception` below it returned
+        `(None, None)` for every joint of every robot, on every call, since the
+        method was written. Nothing raised and nothing logged.
+
+        What it broke is not obvious from here. `Gripper._limits()` falls back to
+        0.04 and 0.0 when limits are missing, warning as it goes -- and 0.04 m is
+        the Panda's real finger travel, so the Franka worked and hid it. On a
+        Cobotta Pro 900 the same 0.04 goes to six *revolute* joints whose travel
+        is +/-0.628 rad: 0.04 rad is 2.3 degrees, a shut gripper commanded as
+        "open". The agent under test gave up on `grasp()` entirely and drove the
+        joints by hand.
+
+        The properties are on `dof_properties`, a structured array carrying
+        `lower`, `upper` and `hasLimits` per DOF. `hasLimits` is honoured: a
+        continuous-rotation joint has entries in `lower`/`upper` that mean
+        nothing, and reporting them as travel is how a caller ends up commanding
+        a wheel to a position.
+        """
         try:
-            return [
-                (float(low), float(high))
-                for low, high in np.asarray(self._articulation.get_dof_limits())
-            ]
-        except Exception:
+            properties = self._articulation.dof_properties
+            lower = np.asarray(properties["lower"], dtype=float)
+            upper = np.asarray(properties["upper"], dtype=float)
+            limited = np.asarray(properties["hasLimits"], dtype=bool)
+        except Exception as exc:
+            # Named, not swallowed. The previous silence cost a Cobotta grasp and
+            # a warning on every robot that nobody could act on.
+            logger.warning(
+                "%s: could not read joint limits (%s: %s). open() and close() "
+                "will fall back to defaults that are only right for a Panda.",
+                self.prim_path,
+                type(exc).__name__,
+                exc,
+            )
             return [(None, None)] * self.dof
+
+        return [
+            (float(low), float(high)) if has else (None, None)
+            for low, high, has in zip(lower, upper, limited)
+        ]
 
     def joint_index(self, name: str) -> int:
         try:
@@ -371,19 +406,38 @@ class Robot:
     def set_joint_positions(
         self, targets: Any, *, indices: list[int] | None = None, settle_steps: int = 0
     ) -> None:
-        """Command joint position targets, optionally for a subset of joints."""
-        current = self.joint_positions.copy()
+        """Command joint position targets, optionally for a subset of joints.
+
+        A subset command addresses only those joints. The previous version built
+        a full-length target array by copying `joint_positions` and overwriting
+        the named slots, which quietly commanded every *other* joint to wherever
+        it was measured at that instant -- a target, not an observation, and a
+        stale one from the next step onward.
+
+        On an arm holding still that is nearly harmless. On a linkage gripper it
+        is not: the mechanism keeps moving the follower joints, their drives hold
+        the stale targets, and the two fight. Measured on a Cobotta Pro 900,
+        commanding `finger_joint` to its 0.628 rad limit through the old path
+        left it reading 2.835 rad -- four times past a limit PhysX enforces --
+        with the whole arm destabilised, and on a second run the articulation
+        diverged to 1e9.
+
+        `ArticulationAction` takes `joint_indices` for exactly this. The
+        unnamed joints keep whatever targets they already had.
+        """
         values = np.asarray(targets, dtype=float).reshape(-1)
         if indices is None:
             if values.size != self.dof:
                 raise ValueError(f"Expected {self.dof} values, got {values.size}")
-            current = values
+            action = articulation_action(joint_positions=values)
         else:
             if values.size != len(indices):
                 raise ValueError(f"Expected {len(indices)} values, got {values.size}")
-            for slot, value in zip(indices, values):
-                current[slot] = value
-        self._controller().apply_action(articulation_action(joint_positions=current))
+            action = articulation_action(
+                joint_positions=values,
+                joint_indices=np.asarray(indices, dtype=int),
+            )
+        self._controller().apply_action(action)
         if settle_steps:
             self.scene.step(settle_steps)
 
