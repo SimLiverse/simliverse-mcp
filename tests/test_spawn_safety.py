@@ -330,16 +330,18 @@ class _TraversableStage:
 class _SceneWithStage:
     """Just enough of `Scene` to exercise the duplicate sweep."""
 
-    def __init__(self, stage: _TraversableStage) -> None:
+    def __init__(self, stage: _TraversableStage, playing: bool = False) -> None:
         self.stage = stage
+        self._playing = playing
 
-    _remove_duplicate_physics_scenes = None  # bound below
+    def is_playing(self) -> bool:
+        return self._playing
 
 
-def _sweeper(stage: _TraversableStage, keep: str) -> list[str]:
+def _sweeper(stage: _TraversableStage, keep: str, *, playing: bool = False) -> list[str]:
     from simliverse_sim.scene import Scene
 
-    holder = _SceneWithStage(stage)
+    holder = _SceneWithStage(stage, playing)
     return Scene._remove_duplicate_physics_scenes(holder, keep=keep)
 
 
@@ -378,3 +380,28 @@ def test_non_physics_prims_are_untouched() -> None:
     )
     assert _sweeper(stage, "/World/PhysicsScene") == []
     assert stage.removed == []
+
+
+def test_a_duplicate_is_left_alone_while_physics_is_running() -> None:
+    """Removing a registered prim mid-run costs the session, not the prim.
+
+    `RemovePrim` on a body PhysX has registered tears down the simulation view.
+    That is the same failure `_drop_probe` used to cause, and the first version
+    of this sweep reintroduced it: it removed a physics scene without checking
+    the timeline, the view was invalidated, and the worker had to be destroyed
+    with the task unfinished.
+
+    A duplicate scene stalls stepping, which is bad. Tearing down physics to
+    remove it is worse: a stalled simulator can still be stopped and
+    reconfigured, a dead one cannot. So while the timeline is playing this
+    reports and leaves it, and the removal happens on the next
+    `configure_physics` — which is called at the start of essentially every
+    task, with the timeline stopped.
+    """
+    stage = _TraversableStage(
+        [_FakePrim("/World/PhysicsScene", True), _FakePrim("/PhysicsScene", True)]
+    )
+    removed = _sweeper(stage, "/World/PhysicsScene", playing=True)
+
+    assert removed == []
+    assert stage.removed == [], "a running simulation must not have prims removed under it"

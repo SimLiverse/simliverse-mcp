@@ -184,13 +184,37 @@ class Scene:
         from pxr import UsdPhysics
 
         stage = self.stage
+        extras = [
+            str(prim.GetPath())
+            for prim in list(stage.Traverse())
+            if prim.IsA(UsdPhysics.Scene) and str(prim.GetPath()) != keep
+        ]
+        if not extras:
+            return []
+
+        # Removing a prim PhysX has registered tears down the simulation view —
+        # the same failure `_drop_probe` used to cause, and one that costs the
+        # whole session rather than the prim. So this only removes while the
+        # timeline is stopped, when there is no view to invalidate.
+        #
+        # That makes the sweep effective exactly where it can be: at the start of
+        # a task, which is when `configure_physics` is normally called and when a
+        # scene left over from the last task would otherwise persist. A duplicate
+        # created mid-run by an agent's own `run_control` is reported and left
+        # alone, because tearing down physics to tidy the stage would trade a
+        # stalled simulator for a dead one.
+        if self.is_playing():
+            logger.warning(
+                "Duplicate physics scene(s) at %s while the timeline is playing. "
+                "PhysX cannot step two, so stepping may stall — but removing one "
+                "now would invalidate the simulation view and lose the session. "
+                "Stop the timeline and configure physics again to clear them.",
+                extras,
+            )
+            return []
+
         removed: list[str] = []
-        for prim in list(stage.Traverse()):
-            if not prim.IsA(UsdPhysics.Scene):
-                continue
-            path = str(prim.GetPath())
-            if path == keep:
-                continue
+        for path in extras:
             logger.warning(
                 "Removing duplicate physics scene at %s; PhysX cannot step two, "
                 "and a second one stalls the simulator without raising.", path,
