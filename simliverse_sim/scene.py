@@ -128,6 +128,8 @@ class Scene:
         stage = self.stage
 
         scene_path = "/World/PhysicsScene"
+        self._remove_duplicate_physics_scenes(keep=scene_path)
+
         prim = stage.GetPrimAtPath(scene_path)
         if not prim.IsValid():
             physics_scene = UsdPhysics.Scene.Define(stage, scene_path)
@@ -151,6 +153,51 @@ class Scene:
         self.ensure_ground_plane()
         self._solver_defaults = (cfg.solver_position_iterations, cfg.solver_velocity_iterations)
         return cfg
+
+    def _remove_duplicate_physics_scenes(self, *, keep: str) -> list[str]:
+        """Leave exactly one `UsdPhysics.Scene` on the stage.
+
+        A second physics scene does not raise. It stalls the simulator. PhysX
+        cannot step two scenes on one subscription — Kit says so itself, in the
+        status bar rather than in any API response:
+
+            Physics scenes stepping is not the same, step subscription will be
+            send with later step, per scene step is not yet supported
+
+        and then rendering drops to 0 FPS, the main thread stops advancing, and
+        every MCP call blocks forever. The process stays alive and keeps its
+        heartbeat, so from outside it looks busy rather than broken. On a cloud
+        worker with no shell that is the end of the session: an agent had built
+        a table, a Franka and a ball, and none of it could be measured or
+        recovered.
+
+        Nothing prevents a second one. `configure_physics` and the MCP
+        `create_physics_scene` verb agree on `/World/PhysicsScene`, but
+        `run_control` is arbitrary Python by design — an agent writing
+        `UsdPhysics.Scene.Define(stage, "/PhysicsScene")`, which is what the
+        Isaac Sim documentation shows, creates one at the root and wedges the
+        session with no error anywhere.
+
+        So this is not tidying. It is the difference between a recoverable scene
+        and a worker that has to be terminated.
+        """
+        from pxr import UsdPhysics
+
+        stage = self.stage
+        removed: list[str] = []
+        for prim in list(stage.Traverse()):
+            if not prim.IsA(UsdPhysics.Scene):
+                continue
+            path = str(prim.GetPath())
+            if path == keep:
+                continue
+            logger.warning(
+                "Removing duplicate physics scene at %s; PhysX cannot step two, "
+                "and a second one stalls the simulator without raising.", path,
+            )
+            stage.RemovePrim(path)
+            removed.append(path)
+        return removed
 
     def ensure_ground_plane(self, path: str = "/World/GroundPlane", z: float = 0.0) -> str:
         from pxr import UsdGeom, UsdPhysics

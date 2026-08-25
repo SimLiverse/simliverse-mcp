@@ -1,12 +1,18 @@
-"""Three ways spawning and verifying a robot used to damage the session.
+"""Ways that building or verifying a scene used to damage the session.
 
-None of these were caught by the existing suite because none of them are wrong
+None of these were caught by the existing suite, because none of them are wrong
 in isolation. Each is a correct-looking line whose effect lands somewhere else:
-a constant that was never defined, a cleanup that tears down the physics view,
-and a fetch with no timeout on the thread that owns the application.
+a constant that was never defined, a cleanup that tears down the physics view, a
+fetch with no timeout on the thread that owns the application, and a second
+physics scene that stops PhysX stepping at all.
 
-All three were found by running an agent against a live simulator for an
-evening, and all three cost more than a test would have.
+The last two share a shape worth naming. Neither raises. The simulator keeps its
+heartbeat and answers nothing, so from outside it looks busy rather than broken —
+and on a worker with no shell, "busy rather than broken" is indistinguishable
+from a task that is simply taking a while, until the instance is terminated.
+
+All of them were found by running an agent against a live simulator, and each
+cost more than a test would have.
 """
 
 import ast
@@ -292,3 +298,83 @@ def test_a_reused_probe_is_dropped_from_rest() -> None:
 
     assert probe.velocities_set == [((0.0, 0.0, 0.0), (0.0, 0.0, 0.0))]
     assert probe.poses_set == [(0.0, 0.0, assertions._PROBE_HEIGHT)]
+
+
+# ── The second physics scene that stalls the simulator ────────────────────────
+
+
+class _FakePrim:
+    def __init__(self, path: str, is_scene: bool) -> None:
+        self._path = path
+        self._is_scene = is_scene
+
+    def IsA(self, _cls: object) -> bool:  # noqa: N802 - USD's own spelling
+        return self._is_scene
+
+    def GetPath(self) -> str:  # noqa: N802
+        return self._path
+
+
+class _TraversableStage:
+    def __init__(self, prims: list[_FakePrim]) -> None:
+        self._prims = prims
+        self.removed: list[str] = []
+
+    def Traverse(self):  # noqa: N802
+        return list(self._prims)
+
+    def RemovePrim(self, path: str) -> None:  # noqa: N802
+        self.removed.append(path)
+
+
+class _SceneWithStage:
+    """Just enough of `Scene` to exercise the duplicate sweep."""
+
+    def __init__(self, stage: _TraversableStage) -> None:
+        self.stage = stage
+
+    _remove_duplicate_physics_scenes = None  # bound below
+
+
+def _sweeper(stage: _TraversableStage, keep: str) -> list[str]:
+    from simliverse_sim.scene import Scene
+
+    holder = _SceneWithStage(stage)
+    return Scene._remove_duplicate_physics_scenes(holder, keep=keep)
+
+
+def test_a_second_physics_scene_is_removed() -> None:
+    """Two scenes stall PhysX, and nothing raises to say so.
+
+    Kit reports it in the status bar — "per scene step is not yet supported" —
+    then rendering drops to 0 FPS and every MCP call blocks forever. The process
+    keeps its heartbeat, so it looks busy rather than broken. That cost a worker
+    mid-task, with a built scene that could no longer be measured.
+    """
+    stage = _TraversableStage(
+        [
+            _FakePrim("/World/PhysicsScene", True),
+            _FakePrim("/PhysicsScene", True),
+            _FakePrim("/World/Franka", False),
+        ]
+    )
+    removed = _sweeper(stage, "/World/PhysicsScene")
+
+    assert removed == ["/PhysicsScene"]
+    assert stage.removed == ["/PhysicsScene"]
+
+
+def test_the_kept_scene_survives() -> None:
+    """Removing all of them would be a different way to have no physics."""
+    stage = _TraversableStage([_FakePrim("/World/PhysicsScene", True)])
+    assert _sweeper(stage, "/World/PhysicsScene") == []
+    assert stage.removed == []
+
+
+def test_non_physics_prims_are_untouched() -> None:
+    """The sweep runs on every `configure_physics`, including mid-scene."""
+    stage = _TraversableStage(
+        [_FakePrim("/World/Table", False), _FakePrim("/World/Ball", False)]
+    )
+    assert _sweeper(stage, "/World/PhysicsScene") == []
+    assert stage.removed == []
