@@ -366,6 +366,7 @@ class PoseRecorder:
         self.every = max(1, int(every))
         self.label = label or "scene"
         self.prim_paths = [str(p) for p in prim_paths]
+        self._scale_ops = self._find_scale_ops()
         self.frames: list[dict[str, tuple[list[float], list[float]]]] = []
         self._seen = 0
         self._attached = False
@@ -394,6 +395,31 @@ class PoseRecorder:
         if self._seen % self.every:
             return
         self.frames.append(self._sample())
+
+    def _find_scale_ops(self) -> dict[str, list[str]]:
+        """The scale ops already on each prim, so baking can preserve them."""
+        try:
+            from pxr import UsdGeom
+
+            from ._compat import get_stage
+
+            stage = get_stage()
+            found: dict[str, list[str]] = {}
+            for path in self.prim_paths:
+                prim = stage.GetPrimAtPath(path)
+                if not prim or not prim.IsValid():
+                    continue
+                names = [
+                    op.GetOpName()
+                    for op in UsdGeom.Xformable(prim).GetOrderedXformOps()
+                    if "scale" in op.GetOpName()
+                ]
+                if names:
+                    found[path] = names
+            return found
+        except Exception:  # noqa: BLE001 - absent scale is normal, not a fault
+            logger.debug("Could not read scale ops", exc_info=True)
+            return {}
 
     def _sample(self) -> dict[str, tuple[list[float], list[float]]]:
         from pxr import Gf, Usd, UsdGeom
@@ -453,7 +479,16 @@ class PoseRecorder:
             # the prim already had -- and every prim that did not start at the
             # origin plays back somewhere it never was. Measured: a ball
             # recorded at [0.302, 0.277, 0.301] read back [0.461, 0.005, 0.383].
-            xform.SetXformOpOrder([translate_op, orient_op])
+            #
+            # Scale is the exception and has to be carried over. It is not part
+            # of a world transform sample -- position and orientation are what
+            # was recorded -- but dropping it from the order drops it from the
+            # composed result, and the prim renders at its authored size. A
+            # 3 cm ball came back as a 1 m one, which is what a viewer sees
+            # first and trusts least.
+            order = [translate_op.GetOpName(), orient_op.GetOpName()]
+            order += [name for name in self._scale_ops.get(path_key, [])]
+            xform.GetXformOpOrderAttr().Set(order)
             writers[path_key] = (translate_op, orient_op)
 
         for frame_number, frame in enumerate(self.frames):
@@ -518,10 +553,16 @@ def play_baked(path: str, *, stage: Any = None, autoplay: bool = True) -> dict[s
     # plainly on the stage -- and an empty list reads exactly like "there was
     # nothing to disable" when it means "physics is still running and will
     # fight the animation you are about to play".
+    # `TraverseAll`, not `Traverse`: the latter skips inactive prims, so a scene
+    # deactivated by an earlier call is invisible to the next one, which then
+    # reports finding nothing. That is why this alternated between disabling a
+    # scene and disabling none -- each pass saw only whatever Isaac had freshly
+    # created, never what was already switched off.
     disabled = []
-    for prim in stage.Traverse():
+    for prim in stage.TraverseAll():
         if prim.IsA(UsdPhysics.Scene) or str(prim.GetTypeName()) == "PhysicsScene":
-            prim.SetActive(False)
+            if prim.IsActive():
+                prim.SetActive(False)
             if not prim.IsActive():
                 disabled.append(str(prim.GetPath()))
 
@@ -576,18 +617,45 @@ def _animated_paths(animation: Any) -> list[str]:
     return [str(prim.GetPath()) for prim in animation.TraverseAll()]
 
 
-def stop_playback(*, stage: Any = None, physics_scenes: Any = ()) -> None:
-    """Undo `play_baked`: stop the timeline and switch physics back on."""
+def stop_playback(
+    *, stage: Any = None, physics_scenes: Any = (), layer: str | None = None
+) -> dict[str, Any]:
+    """Undo `play_baked`, all of it.
+
+    Re-enabling physics is not enough on its own. The animation layer stays
+    composed, and its overs replace every recorded prim's transform stack --
+    position, orientation, and *not* scale, which they do not carry. So the
+    scene keeps whatever pose the timeline last showed and every scaled prim
+    renders at its authored size. A 3 cm ball becomes a 1 m one sitting at the
+    origin, and the next thing to read `ball.position` gets [0, 0, 0] and
+    plans a grasp at the robot's own base.
+
+    That is not a hypothetical: it broke the next recording that ran after a
+    playback, and the visible symptom was a giant sphere in the viewport.
+    """
     import omni.timeline
 
     from ._compat import get_stage
 
     stage = stage if stage is not None else get_stage()
     omni.timeline.get_timeline_interface().stop()
+
+    removed = []
+    for owner in (stage.GetSessionLayer(), stage.GetRootLayer()):
+        for path in list(owner.subLayerPaths):
+            if layer is None or path == layer:
+                if path.endswith(".usda") or path == layer:
+                    owner.subLayerPaths.remove(path)
+                    removed.append(path)
+
+    restored = []
     for path in physics_scenes:
         prim = stage.GetPrimAtPath(path)
         if prim and prim.IsValid():
             prim.SetActive(True)
+            restored.append(path)
+
+    return {"layers_removed": removed, "physics_restored": restored}
 
 
 def export_replay_scene(animation_layer: str, path: str, *, stage: Any = None, fps: float = 60.0) -> dict[str, Any]:
