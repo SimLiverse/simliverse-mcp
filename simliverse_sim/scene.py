@@ -87,6 +87,7 @@ class Scene:
         self._world = get_world(physics_dt=dt)
         # PhysX wants a monotonically increasing simulation clock; it is ours
         # to keep now that we step physics directly rather than via World.
+        self._step_listeners: list[Any] = []
         self._sim_time = 0.0
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -278,6 +279,31 @@ class Scene:
     def is_playing(self) -> bool:
         return bool(get_timeline().is_playing())
 
+    def add_step_listener(self, listener: Any) -> None:
+        """Call `listener(sim_time)` after every physics step.
+
+        This is the only place every advance passes through, whatever drove the
+        robot -- RMPflow servoing, a planned trajectory, raw joint commands.
+        Anything that wants to observe a run rather than reconstruct it
+        afterwards has to hang here.
+        """
+        if listener not in self._step_listeners:
+            self._step_listeners.append(listener)
+
+    def remove_step_listener(self, listener: Any) -> None:
+        if listener in self._step_listeners:
+            self._step_listeners.remove(listener)
+
+    def _notify_step(self) -> None:
+        # A listener that raises must not take the simulation down with it: a
+        # recorder is an observer, and a failed observation is not a failed run.
+        for listener in list(self._step_listeners):
+            try:
+                listener(self._sim_time)
+            except Exception:  # noqa: BLE001
+                logger.warning("A step listener raised; dropping it.", exc_info=True)
+                self.remove_step_listener(listener)
+
     def step(self, count: int = 1, *, render: bool = False) -> None:
         """Advance physics by `count` steps.
 
@@ -303,6 +329,7 @@ class Scene:
         for _ in range(max(0, int(count))):
             physx.update_simulation(self._dt, self._sim_time)
             self._sim_time += self._dt
+            self._notify_step()
         # Push the results into USD/Fabric so reads afterwards see the new poses
         # rather than the ones from before the step.
         physx.update_transformations(False, True, True, False)
