@@ -368,6 +368,8 @@ class PoseRecorder:
         self.prim_paths = [str(p) for p in prim_paths]
         self._scale_ops = self._find_scale_ops()
         self.frames: list[dict[str, tuple[list[float], list[float]]]] = []
+        self.times: list[float] = []
+        self._t0: float | None = None
         self._seen = 0
         self._attached = False
 
@@ -390,10 +392,13 @@ class PoseRecorder:
         self.stop()
         return False
 
-    def _on_step(self, _sim_time: float) -> None:
+    def _on_step(self, sim_time: float) -> None:
         self._seen += 1
         if self._seen % self.every:
             return
+        if self._t0 is None:
+            self._t0 = float(sim_time)
+        self.times.append(float(sim_time) - self._t0)
         self.frames.append(self._sample())
 
     def _find_scale_ops(self) -> dict[str, list[str]]:
@@ -463,9 +468,18 @@ class PoseRecorder:
 
         layer = Sdf.Layer.CreateAnonymous(".usda")
         stage = Usd.Stage.Open(layer)
+        # Frame numbers come from the sample's own timestamp, not its position
+        # in the list. Indexing assumes every sample is exactly 1/fps apart,
+        # which ties the recording rate to the playback rate and is wrong the
+        # moment they differ -- decimated recording, or baking for a consumer
+        # with its own timebase. Omniverse's glTF converter assumes 24 fps and
+        # offers no way to say otherwise, so a 60 fps recording came out as
+        # 27.1 seconds of what really took 10.9: every motion at 40% speed, and
+        # a cycle time anyone reads off the demo is wrong by the same factor.
+        duration = self.times[-1] if self.times else 0.0
         stage.SetTimeCodesPerSecond(fps)
         stage.SetStartTimeCode(0)
-        stage.SetEndTimeCode(len(self.frames) - 1)
+        stage.SetEndTimeCode(round(duration * fps))
 
         writers: dict[str, Any] = {}
         for path_key in self.prim_paths:
@@ -491,7 +505,9 @@ class PoseRecorder:
             xform.GetXformOpOrderAttr().Set(order)
             writers[path_key] = (translate_op, orient_op)
 
-        for frame_number, frame in enumerate(self.frames):
+        for index, frame in enumerate(self.frames):
+            seconds = self.times[index] if index < len(self.times) else index / fps
+            frame_number = round(seconds * fps)
             for path_key, (translation, quaternion) in frame.items():
                 translate_op, orient_op = writers[path_key]
                 translate_op.Set(Gf.Vec3d(*translation), frame_number)
@@ -501,12 +517,12 @@ class PoseRecorder:
 
         stage.GetRootLayer().Export(path)
         logger.info(
-            "Baked %d frames of %d prims to %s (%.1f fps, %.2fs)",
+            "Baked %d samples of %d prims to %s (%.1f fps, %.2fs of motion)",
             len(self.frames),
             len(self.prim_paths),
             path,
             fps,
-            len(self.frames) / fps,
+            duration,
         )
         return path
 

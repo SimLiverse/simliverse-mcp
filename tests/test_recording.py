@@ -363,3 +363,49 @@ def test_stop_all_detaches_everything():
     stop_all()
 
     assert robot.scene.listeners == []
+
+
+# ── frame numbers come from time, not from list position ─────────────────────
+
+
+class FakePrimStage:
+    """Enough USD for `bake` to be exercised without Isaac."""
+
+
+def test_pose_samples_record_their_own_timestamps():
+    """`bake` needs times, because a sample's position in the list says nothing
+    about when it happened once `every > 1`."""
+    from simliverse_sim.recording import PoseRecorder
+
+    robot = FakeRobot()
+    rec = PoseRecorder([], scene=robot.scene, every=3)
+    rec._sample = lambda: {}
+    with rec:
+        drive(robot, steps=12)
+
+    assert len(rec.frames) == 4
+    assert len(rec.times) == 4
+    assert rec.times[0] == 0.0
+    # Every third step of a 1/60 s tick: 3/60 apart.
+    assert rec.times[1] == pytest.approx(3 * DT, abs=1e-9)
+    assert rec.times[-1] == pytest.approx(9 * DT, abs=1e-9)
+
+
+def test_decimated_recording_keeps_real_time_spacing():
+    """A recording sampled every 5th step still covers the same wall clock.
+
+    This is what the frame-number fix protects: indexing would have compressed
+    12 steps of motion into 3 frames' worth of time.
+    """
+    from simliverse_sim.recording import PoseRecorder
+
+    robot = FakeRobot()
+    rec = PoseRecorder([], scene=robot.scene, every=5)
+    rec._sample = lambda: {}
+    with rec:
+        drive(robot, steps=15)
+
+    assert len(rec.frames) == 3
+    assert rec.times[-1] == pytest.approx(10 * DT, abs=1e-9)
+    # At 24 fps that last sample belongs at frame 4, not frame 2.
+    assert round(rec.times[-1] * 24) == 4
