@@ -284,3 +284,82 @@ def test_replaying_nothing_does_nothing():
     replay(target, {"joint_names": NAMES, "points": []})
 
     assert target.commands == []
+
+
+# ── which joints belong to which controller ──────────────────────────────────
+
+
+class FakeGripper:
+    joint_names = ["joint_3"]
+
+
+def test_gripper_joints_are_labelled_not_silently_dropped():
+    """On real hardware the arm and the gripper are different controllers.
+
+    A bridge that fed a finger joint to the arm controller would be asking it to
+    move an axis it does not have — so the split is declared. Declared, not
+    applied: dropping data is worse than labelling it.
+    """
+    robot = FakeRobot()
+    robot.gripper = FakeGripper()
+    with JointRecorder(robot) as rec:
+        drive(robot, steps=3)
+    payload = rec.trajectory()
+
+    assert payload["groups"] == {"arm": ["joint_1", "joint_2"], "gripper": ["joint_3"]}
+    # every joint is still in the points
+    assert len(payload["points"][0]["positions"]) == 3
+
+
+def test_a_robot_with_no_gripper_reports_every_joint_as_arm():
+    robot = FakeRobot()
+    with JointRecorder(robot) as rec:
+        drive(robot, steps=2)
+
+    assert rec.trajectory()["groups"] == {"arm": NAMES, "gripper": []}
+
+
+# ── surviving the agent's namespace resets ───────────────────────────────────
+
+
+def test_a_started_recording_can_be_found_again_by_label():
+    """The harness starts a recording, hands the scene to an agent, and collects
+    it afterwards — across tool calls that may reset the namespace in between."""
+    from simliverse_sim.recording import active, start_recording, stop_recording
+
+    robot = FakeRobot()
+    start_recording(robot, label="t2")
+    drive(robot, steps=4)
+
+    assert active("t2") is not None
+    assert len(active("t2").times) == 4
+    stop_recording("t2")
+    assert active("t2") is None
+
+
+def test_starting_the_same_label_twice_replaces_rather_than_doubles():
+    from simliverse_sim.recording import start_recording, stop_all
+
+    robot = FakeRobot()
+    start_recording(robot, label="t2")
+    drive(robot, steps=3)
+    start_recording(robot, label="t2")
+    drive(robot, steps=2)
+
+    assert len(active_len(robot)) == 1, "the first recorder was left attached"
+    stop_all()
+
+
+def active_len(robot):
+    return robot.scene.listeners
+
+
+def test_stop_all_detaches_everything():
+    from simliverse_sim.recording import start_recording, stop_all
+
+    robot = FakeRobot()
+    start_recording(robot, label="a")
+    start_recording(robot, label="b")
+    stop_all()
+
+    assert robot.scene.listeners == []

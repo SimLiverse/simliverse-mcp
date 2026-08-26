@@ -146,6 +146,26 @@ class JointRecorder:
     def duration(self) -> float:
         return self.times[-1] if self.times else 0.0
 
+    def groups(self) -> dict[str, list[str]]:
+        """Which recorded joints are the arm's and which are the gripper's.
+
+        Declared rather than split out, because dropping data is worse than
+        labelling it: an integrator who wants the fingers can have them.
+
+        It matters because on real hardware they are almost never the same
+        controller. A KUKA or Yaskawa arm takes a joint trajectory; the gripper
+        on the end of it takes open/close commands over its own protocol, and a
+        bridge that fed `panda_finger_joint1` to the arm controller would be
+        asking it to move an axis it does not have.
+        """
+        gripper = getattr(self.robot, "gripper", None)
+        fingers = list(getattr(gripper, "joint_names", []) or []) if gripper else []
+        fingers = [name for name in fingers if name in self.joint_names]
+        return {
+            "arm": [name for name in self.joint_names if name not in fingers],
+            "gripper": fingers,
+        }
+
     # -- what comes out --------------------------------------------------
     def trajectory(self) -> dict[str, Any]:
         """The recording as a `trajectory_msgs/JointTrajectory`-shaped payload.
@@ -159,6 +179,7 @@ class JointRecorder:
             "schema": SCHEMA,
             "label": self.label,
             "joint_names": list(self.joint_names),
+            "groups": self.groups(),
             "points": [
                 {
                     "positions": positions,
@@ -242,13 +263,27 @@ class JointRecorder:
         return path
 
 
-def replay(robot: Any, trajectory: dict[str, Any], *, scene: Any = None, speed: float = 1.0) -> None:
+def replay(
+    robot: Any,
+    trajectory: dict[str, Any],
+    *,
+    scene: Any = None,
+    speed: float = 1.0,
+    render: bool = True,
+) -> None:
     """Drive `robot` back through a recorded trajectory, in joint space.
 
     Position replay, deliberately: it reproduces the commanded path, and where
     the run depended on contact the result will differ from the original. That
     difference is information -- it is the same gap the trajectory will meet on
     hardware -- so it is not smoothed over here.
+
+    `render` defaults to True, which is the opposite of `Scene.step`. Stepping
+    physics without rendering is right for a scored run, where frames cost time
+    and nobody is watching. It is wrong for a replay, where being watched is the
+    entire purpose: `scene.step(120)` advances two seconds between rendered
+    frames, and a viewer sees the pose before and the pose after with nothing in
+    between, which looks exactly like the robot teleporting.
     """
     scene = scene if scene is not None else robot.scene
     names = list(trajectory["joint_names"])
@@ -262,5 +297,44 @@ def replay(robot: Any, trajectory: dict[str, Any], *, scene: Any = None, speed: 
     for point in points:
         target = float(point["time_from_start"])
         steps = max(1, int(round((target - previous) / (scene.dt * max(speed, 1e-6)))))
-        robot.set_joint_positions(point["positions"], indices=indices, settle_steps=steps)
+        robot.set_joint_positions(point["positions"], indices=indices, settle_steps=0)
+        # Stepped here rather than through `settle_steps` so each step can carry
+        # a rendered frame.
+        for _ in range(steps):
+            scene.step(1, render=render)
         previous = target
+
+
+# ── keeping a recording alive across an agent's run ──────────────────────────
+#
+# The harness starts a recording, hands the scene to an agent, and collects it
+# afterwards. In between, the agent's own tool calls may reset the namespace
+# their code runs in, which would drop any handle held there. Module state
+# outlives that; the Scene's listener list keeps the recorder alive regardless,
+# but finding it again by rummaging through listeners is not an interface.
+
+_ACTIVE: dict[str, "JointRecorder"] = {}
+
+
+def start_recording(robot: Any, *, label: str, scene: Any = None, every: int = 1) -> "JointRecorder":
+    """Begin recording `robot` under `label`, replacing any recording by that name."""
+    stop_recording(label)
+    recorder = JointRecorder(robot, scene=scene, every=every, label=label).start()
+    _ACTIVE[label] = recorder
+    return recorder
+
+
+def active(label: str) -> "JointRecorder | None":
+    return _ACTIVE.get(label)
+
+
+def stop_recording(label: str) -> "JointRecorder | None":
+    recorder = _ACTIVE.pop(label, None)
+    if recorder is not None:
+        recorder.stop()
+    return recorder
+
+
+def stop_all() -> None:
+    for label in list(_ACTIVE):
+        stop_recording(label)
