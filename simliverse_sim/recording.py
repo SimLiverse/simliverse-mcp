@@ -708,11 +708,29 @@ def export_replay_scene(animation_layer: str, path: str, *, stage: Any = None, f
     composed.SetTimeCodesPerSecond(fps)
     composed.SetStartTimeCode(animation.GetStartTimeCode())
     composed.SetEndTimeCode(animation.GetEndTimeCode())
+
+    # Anything analytic gets a mesh before this leaves, because the consumers
+    # this file exists for cannot draw a Sphere.
+    tessellated = tessellate_analytic_prims(composed)
+
     composed.Export(path)
+
+    # Drop the written file out of USD's process-wide layer cache. Inside a
+    # long-lived Kit session, anything that opened this path before -- another
+    # export, a viewer, the asset converter -- holds the old bytes and keeps
+    # using them. Measured: an export that correctly gained three tessellated
+    # meshes converted to a glTF byte-identical to the previous one, because
+    # the converter read the cached layer. Nothing errored, and the artifact
+    # was quietly wrong.
+    from pxr import Sdf
+
+    cached = Sdf.Layer.FindOrOpen(path)
+    if cached is not None:
+        cached.Reload(force=True)
 
     # Confirm the motion survived, rather than reporting that a file was
     # written. A composition that lost still exports perfectly happily.
-    check = Usd.Stage.Open(path)
+    check = Usd.Stage.Open(cached if cached is not None else path)
     animated = 0
     for prim in animation.TraverseAll():
         target = check.GetPrimAtPath(prim.GetPath())
@@ -730,6 +748,7 @@ def export_replay_scene(animation_layer: str, path: str, *, stage: Any = None, f
         "frames": int(animation.GetEndTimeCode() - animation.GetStartTimeCode() + 1),
         "fps": fps,
         "animated_prims": animated,
+        "tessellated_prims": len(tessellated),
     }
     if not animated:
         logger.warning(
@@ -738,3 +757,145 @@ def export_replay_scene(animation_layer: str, path: str, *, stage: Any = None, f
             path,
         )
     return result
+
+
+# ── analytic primitives do not survive a glTF conversion ─────────────────────
+#
+# USD has Sphere, Cube, Cylinder, Cone, Capsule and Plane as first-class shapes.
+# glTF has meshes and nothing else, and Omniverse's converter drops what it
+# cannot express rather than tessellating it. `create_object` produces exactly
+# those types, so a demo scene exported for the web came out as a robot moving
+# against an empty floor: the ball it was holding and the ground it stood on
+# were both gone, silently, from a file that converted with status OK.
+
+
+def _sphere_mesh(radius: float, segments: int = 24, rings: int = 16):
+    """A UV sphere. Enough resolution to read as round at demo distance."""
+    import math
+
+    points, counts, indices = [], [], []
+    for ring in range(rings + 1):
+        phi = math.pi * ring / rings
+        for segment in range(segments):
+            theta = 2.0 * math.pi * segment / segments
+            points.append(
+                (
+                    radius * math.sin(phi) * math.cos(theta),
+                    radius * math.sin(phi) * math.sin(theta),
+                    radius * math.cos(phi),
+                )
+            )
+    for ring in range(rings):
+        for segment in range(segments):
+            a = ring * segments + segment
+            b = ring * segments + (segment + 1) % segments
+            c = (ring + 1) * segments + (segment + 1) % segments
+            d = (ring + 1) * segments + segment
+            counts.append(4)
+            indices.extend([a, b, c, d])
+    return points, counts, indices
+
+
+def _box_mesh(half: tuple[float, float, float]):
+    x, y, z = half
+    points = [
+        (-x, -y, -z), (x, -y, -z), (x, y, -z), (-x, y, -z),
+        (-x, -y, z), (x, -y, z), (x, y, z), (-x, y, z),
+    ]
+    faces = [
+        (0, 3, 2, 1), (4, 5, 6, 7), (0, 1, 5, 4),
+        (1, 2, 6, 5), (2, 3, 7, 6), (3, 0, 4, 7),
+    ]
+    counts = [4] * len(faces)
+    indices = [i for face in faces for i in face]
+    return points, counts, indices
+
+
+def _cylinder_mesh(radius: float, height: float, segments: int = 24):
+    import math
+
+    half = height / 2.0
+    points, counts, indices = [], [], []
+    for sign in (-1.0, 1.0):
+        for segment in range(segments):
+            theta = 2.0 * math.pi * segment / segments
+            points.append((radius * math.cos(theta), radius * math.sin(theta), sign * half))
+    for segment in range(segments):
+        a = segment
+        b = (segment + 1) % segments
+        counts.append(4)
+        indices.extend([a, b, b + segments, a + segments])
+    points.append((0.0, 0.0, -half))
+    points.append((0.0, 0.0, half))
+    bottom, top = len(points) - 2, len(points) - 1
+    for segment in range(segments):
+        a, b = segment, (segment + 1) % segments
+        counts.append(3)
+        indices.extend([bottom, b, a])
+        counts.append(3)
+        indices.extend([top, a + segments, b + segments])
+    return points, counts, indices
+
+
+def _plane_mesh(width: float, length: float):
+    x, y = width / 2.0, length / 2.0
+    return [(-x, -y, 0.0), (x, -y, 0.0), (x, y, 0.0), (-x, y, 0.0)], [4], [0, 1, 2, 3]
+
+
+def tessellate_analytic_prims(stage: Any, *, plane_extent: float = 10.0) -> list[str]:
+    """Give every analytic shape a mesh child, so a converter can see it.
+
+    A child rather than a replacement: the shape keeps its type, its physics
+    APIs and -- critically -- its transform, including any recorded animation.
+    The mesh inherits all of it by being underneath, so a tessellated ball
+    follows the same timeSamples the sphere does.
+
+    Returns the paths given meshes, so a caller can check rather than hope.
+    """
+    from pxr import Sdf, UsdGeom, Vt
+
+    made: list[str] = []
+    for prim in list(stage.Traverse()):
+        kind = str(prim.GetTypeName())
+        try:
+            if kind == "Sphere":
+                radius = UsdGeom.Sphere(prim).GetRadiusAttr().Get() or 1.0
+                geometry = _sphere_mesh(float(radius))
+            elif kind == "Cube":
+                size = UsdGeom.Cube(prim).GetSizeAttr().Get() or 2.0
+                geometry = _box_mesh((float(size) / 2.0,) * 3)
+            elif kind == "Cylinder":
+                shape = UsdGeom.Cylinder(prim)
+                geometry = _cylinder_mesh(
+                    float(shape.GetRadiusAttr().Get() or 1.0),
+                    float(shape.GetHeightAttr().Get() or 2.0),
+                )
+            elif kind == "Plane":
+                shape = UsdGeom.Plane(prim)
+                width = float(shape.GetWidthAttr().Get() or plane_extent)
+                length = float(shape.GetLengthAttr().Get() or plane_extent)
+                # An infinite ground plane has no extent to read. Give it one:
+                # a viewer needs a floor to be a surface, not a concept.
+                geometry = _plane_mesh(width or plane_extent, length or plane_extent)
+            else:
+                continue
+        except Exception:  # noqa: BLE001 - one odd prim must not stop the export
+            logger.debug("Could not tessellate %s (%s)", prim.GetPath(), kind, exc_info=True)
+            continue
+
+        points, counts, indices = geometry
+        mesh_path = prim.GetPath().AppendChild("replayMesh")
+        mesh = UsdGeom.Mesh.Define(stage, mesh_path)
+        mesh.CreatePointsAttr(Vt.Vec3fArray([tuple(map(float, p)) for p in points]))
+        mesh.CreateFaceVertexCountsAttr(Vt.IntArray(counts))
+        mesh.CreateFaceVertexIndicesAttr(Vt.IntArray(indices))
+        mesh.CreateSubdivisionSchemeAttr("none")
+
+        display = UsdGeom.Gprim(prim).GetDisplayColorAttr().Get()
+        if display:
+            mesh.CreateDisplayColorAttr(display)
+        made.append(str(mesh_path))
+
+    if made:
+        logger.info("Tessellated %d analytic prims for export: %s", len(made), made)
+    return made
