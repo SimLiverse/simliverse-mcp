@@ -338,3 +338,219 @@ def stop_recording(label: str) -> "JointRecorder | None":
 def stop_all() -> None:
     for label in list(_ACTIVE):
         stop_recording(label)
+
+
+# ── the other half: something the Play button can play ───────────────────────
+#
+# A joint trajectory is what a controller executes. It is not what a customer
+# watches: nothing plays it but the code that wrote it, and the viewport's Play
+# button knows nothing about it.
+#
+# For watching, the artifact is USD `timeSamples` on the prims themselves. Then
+# Play plays, the timeline scrubs, the file opens in any USD tool, and no
+# simulator has to be running. It is still the measured motion -- the samples
+# come from the same physics steps the trajectory does -- so it cannot drift
+# into choreography.
+
+
+class PoseRecorder:
+    """Samples world transforms of prims each physics step, for USD playback.
+
+    Transforms rather than joint angles because playback has no physics to
+    resolve them: a viewer scrubbing a timeline needs to be told where each
+    link *is*, not what angle its joint was asked for.
+    """
+
+    def __init__(self, prim_paths: Any, *, scene: Any, every: int = 1, label: str = "") -> None:
+        self.scene = scene
+        self.every = max(1, int(every))
+        self.label = label or "scene"
+        self.prim_paths = [str(p) for p in prim_paths]
+        self.frames: list[dict[str, tuple[list[float], list[float]]]] = []
+        self._seen = 0
+        self._attached = False
+
+    def start(self) -> "PoseRecorder":
+        if not self._attached:
+            self.scene.add_step_listener(self._on_step)
+            self._attached = True
+        return self
+
+    def stop(self) -> "PoseRecorder":
+        if self._attached:
+            self.scene.remove_step_listener(self._on_step)
+            self._attached = False
+        return self
+
+    def __enter__(self) -> "PoseRecorder":
+        return self.start()
+
+    def __exit__(self, *_exc: Any) -> bool:
+        self.stop()
+        return False
+
+    def _on_step(self, _sim_time: float) -> None:
+        self._seen += 1
+        if self._seen % self.every:
+            return
+        self.frames.append(self._sample())
+
+    def _sample(self) -> dict[str, tuple[list[float], list[float]]]:
+        from pxr import Gf, Usd, UsdGeom
+
+        from ._compat import get_stage
+
+        stage = get_stage()
+        frame: dict[str, tuple[list[float], list[float]]] = {}
+        for path in self.prim_paths:
+            prim = stage.GetPrimAtPath(path)
+            if not prim or not prim.IsValid():
+                continue
+            matrix = UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+            translation = matrix.ExtractTranslation()
+            rotation = matrix.ExtractRotationQuat()
+            imaginary = rotation.GetImaginary()
+            frame[path] = (
+                [float(translation[0]), float(translation[1]), float(translation[2])],
+                [
+                    float(rotation.GetReal()),
+                    float(imaginary[0]),
+                    float(imaginary[1]),
+                    float(imaginary[2]),
+                ],
+            )
+        return frame
+
+    def bake(self, path: str, *, fps: float = 60.0) -> str:
+        """Write the frames as an animation layer of USD `timeSamples`.
+
+        An overlay of `over` prims, not a standalone scene: it carries where
+        everything was, and composes over the stage that already has the
+        geometry. Flattening the meshes in as well would make a file that opens
+        anywhere, at the cost of shipping a copy of every asset -- worth doing
+        for a file that leaves the building, and not what this is yet.
+        """
+        from pxr import Gf, Sdf, Usd, UsdGeom
+
+        if not self.frames:
+            raise ValueError("nothing recorded, so there is nothing to bake")
+
+        layer = Sdf.Layer.CreateAnonymous(".usda")
+        stage = Usd.Stage.Open(layer)
+        stage.SetTimeCodesPerSecond(fps)
+        stage.SetStartTimeCode(0)
+        stage.SetEndTimeCode(len(self.frames) - 1)
+
+        writers: dict[str, Any] = {}
+        for path_key in self.prim_paths:
+            over = stage.OverridePrim(path_key)
+            xform = UsdGeom.Xformable(over)
+            writers[path_key] = (
+                xform.AddTranslateOp(opSuffix="replay"),
+                xform.AddOrientOp(opSuffix="replay"),
+            )
+
+        for frame_number, frame in enumerate(self.frames):
+            for path_key, (translation, quaternion) in frame.items():
+                translate_op, orient_op = writers[path_key]
+                translate_op.Set(Gf.Vec3d(*translation), frame_number)
+                orient_op.Set(
+                    Gf.Quatf(quaternion[0], Gf.Vec3f(*quaternion[1:])), frame_number
+                )
+
+        stage.GetRootLayer().Export(path)
+        logger.info(
+            "Baked %d frames of %d prims to %s (%.1f fps, %.2fs)",
+            len(self.frames),
+            len(self.prim_paths),
+            path,
+            fps,
+            len(self.frames) / fps,
+        )
+        return path
+
+
+def robot_prims(robot: Any, extra: Any = ()) -> list[str]:
+    """Every link of `robot`, plus anything else worth animating."""
+    paths = list(robot.links()) if hasattr(robot, "links") else []
+    return paths + [str(p) for p in extra]
+
+
+def play_baked(path: str, *, stage: Any = None, autoplay: bool = True) -> dict[str, Any]:
+    """Load an animation layer and put the stage in a state where Play plays it.
+
+    Physics has to be out of the way. A rigid body under a live PhysicsScene is
+    driven by the solver, and the solver does not care what the timeline says --
+    the two fight and the animation loses. Deactivating the scene prim leaves
+    the timeline as the only thing moving anything, which is what playback is.
+
+    Reversible: `physics_scene` comes back in the result so a caller can put it
+    on again and return to simulating.
+    """
+    import omni.timeline
+    from pxr import Sdf, Usd, UsdPhysics
+
+    from ._compat import get_stage
+
+    stage = stage if stage is not None else get_stage()
+    timeline = omni.timeline.get_timeline_interface()
+    timeline.stop()
+
+    root = stage.GetRootLayer()
+    if path not in root.subLayerPaths:
+        root.subLayerPaths.insert(0, path)
+
+    # Match on the schema and on the type name. Both, because this returned an
+    # empty list once -- right after `timeline.stop()`, with a physics scene
+    # plainly on the stage -- and an empty list reads exactly like "there was
+    # nothing to disable" when it means "physics is still running and will
+    # fight the animation you are about to play".
+    disabled = []
+    for prim in stage.Traverse():
+        if prim.IsA(UsdPhysics.Scene) or str(prim.GetTypeName()) == "PhysicsScene":
+            prim.SetActive(False)
+            if not prim.IsActive():
+                disabled.append(str(prim.GetPath()))
+
+    if not disabled:
+        logger.warning(
+            "No physics scene was disabled before playback. The solver moves "
+            "rigid bodies and does not consult the timeline, so it will "
+            "override the animation. Playback will not show the recording."
+        )
+
+    animation = Usd.Stage.Open(path)
+    start, end = animation.GetStartTimeCode(), animation.GetEndTimeCode()
+    fps = animation.GetTimeCodesPerSecond() or 60.0
+    stage.SetTimeCodesPerSecond(fps)
+    stage.SetStartTimeCode(start)
+    stage.SetEndTimeCode(end)
+    timeline.set_start_time(float(start) / fps)
+    timeline.set_end_time(float(end) / fps)
+    timeline.set_looping(True)
+    if autoplay:
+        timeline.play()
+
+    return {
+        "layer": path,
+        "frames": int(end - start + 1),
+        "fps": fps,
+        "seconds": round(float(end - start + 1) / fps, 3),
+        "physics_scenes_disabled": disabled,
+        "physics_off": bool(disabled),
+        "playing": autoplay,
+    }
+
+
+def stop_playback(*, stage: Any = None, physics_scenes: Any = ()) -> None:
+    """Undo `play_baked`: stop the timeline and switch physics back on."""
+    import omni.timeline
+
+    from ._compat import get_stage
+
+    stage = stage if stage is not None else get_stage()
+    omni.timeline.get_timeline_interface().stop()
+    for path in physics_scenes:
+        prim = stage.GetPrimAtPath(path)
+        if prim and prim.IsValid():
+            prim.SetActive(True)
