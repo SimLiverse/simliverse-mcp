@@ -409,3 +409,52 @@ def test_decimated_recording_keeps_real_time_spacing():
     assert rec.times[-1] == pytest.approx(10 * DT, abs=1e-9)
     # At 24 fps that last sample belongs at frame 4, not frame 2.
     assert round(rec.times[-1] * 24) == 4
+
+
+# ── one physics world, one listener list ─────────────────────────────────────
+
+
+def test_a_recorder_hears_steps_run_through_a_different_scene_handle():
+    """`Scene.get()` returns a fresh wrapper each call, not a singleton.
+
+    The harness starts a recording on its own handle and the agent steps
+    through one it made itself. With per-instance listeners the recorder heard
+    nothing: every golden task reported success and wrote a trajectory of zero
+    points, which is indistinguishable from a task where nothing moved.
+    """
+    from simliverse_sim.recording import JointRecorder
+
+    class SharedScene(FakeScene):
+        listeners = []  # shared, as the real Scene now is
+
+        def __init__(self):
+            self.time = 0.0
+            self.played = False
+
+        def add_step_listener(self, fn):
+            if fn not in SharedScene.listeners:
+                SharedScene.listeners.append(fn)
+
+        def remove_step_listener(self, fn):
+            if fn in SharedScene.listeners:
+                SharedScene.listeners.remove(fn)
+
+        def step(self, count=1, **_kw):
+            for _ in range(count):
+                self.time += DT
+                for fn in list(SharedScene.listeners):
+                    fn(self.time)
+
+    SharedScene.listeners = []
+    robot = FakeRobot()
+    robot.scene = SharedScene()
+
+    rec = JointRecorder(robot, scene=SharedScene()).start()   # the harness's handle
+    another = SharedScene()                                    # the agent's handle
+    for _ in range(6):
+        robot.joint_positions = robot.joint_positions + 0.01
+        another.step(1)
+
+    assert len(rec.times) == 6, "the recorder missed steps run through another handle"
+    rec.stop()
+    assert SharedScene.listeners == []

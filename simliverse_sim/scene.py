@@ -87,7 +87,6 @@ class Scene:
         self._world = get_world(physics_dt=dt)
         # PhysX wants a monotonically increasing simulation clock; it is ours
         # to keep now that we step physics directly rather than via World.
-        self._step_listeners: list[Any] = []
         self._sim_time = 0.0
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -278,6 +277,14 @@ class Scene:
 
     def is_playing(self) -> bool:
         return bool(get_timeline().is_playing())
+
+    #: Shared by every `Scene`, because `Scene.get()` is not a singleton -- it
+    #: returns `cls(dt=dt)`, a fresh wrapper each call, around the one World
+    #: that actually exists. Per-instance listeners therefore never fire: a
+    #: recorder registered on the harness's Scene saw nothing of the steps an
+    #: agent ran through its own, and every recording came back empty while
+    #: reporting success. There is one physics world, so there is one list.
+    _step_listeners: list[Any] = []
 
     def add_step_listener(self, listener: Any) -> None:
         """Call `listener(sim_time)` after every physics step.
