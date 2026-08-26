@@ -445,10 +445,16 @@ class PoseRecorder:
         for path_key in self.prim_paths:
             over = stage.OverridePrim(path_key)
             xform = UsdGeom.Xformable(over)
-            writers[path_key] = (
-                xform.AddTranslateOp(opSuffix="replay"),
-                xform.AddOrientOp(opSuffix="replay"),
-            )
+            translate_op = xform.AddTranslateOp(opSuffix="replay")
+            orient_op = xform.AddOrientOp(opSuffix="replay")
+            # Replace the prim's transform stack rather than adding to it.
+            # `AddTranslateOp` appends to `xformOpOrder`, so without this the
+            # recorded *world* transform composes with whatever local transform
+            # the prim already had -- and every prim that did not start at the
+            # origin plays back somewhere it never was. Measured: a ball
+            # recorded at [0.302, 0.277, 0.301] read back [0.461, 0.005, 0.383].
+            xform.SetXformOpOrder([translate_op, orient_op])
+            writers[path_key] = (translate_op, orient_op)
 
         for frame_number, frame in enumerate(self.frames):
             for path_key, (translation, quaternion) in frame.items():
@@ -488,7 +494,7 @@ def play_baked(path: str, *, stage: Any = None, autoplay: bool = True) -> dict[s
     on again and return to simulating.
     """
     import omni.timeline
-    from pxr import Sdf, Usd, UsdPhysics
+    from pxr import Sdf, Usd, UsdGeom, UsdPhysics
 
     from ._compat import get_stage
 
@@ -496,9 +502,16 @@ def play_baked(path: str, *, stage: Any = None, autoplay: bool = True) -> dict[s
     timeline = omni.timeline.get_timeline_interface()
     timeline.stop()
 
-    root = stage.GetRootLayer()
-    if path not in root.subLayerPaths:
-        root.subLayerPaths.insert(0, path)
+    # The session layer, not the root layer. Sublayers are *weaker* than the
+    # layer that owns them, and these prims are authored into the root layer at
+    # runtime -- so an animation sublayered under root loses to the original
+    # transforms and composes to nothing. The symptom is a scene that simply
+    # freezes on playback: physics is off, the animation is being ignored, and
+    # nothing moves. The session layer is stronger than root, so overs in a
+    # sublayer of it win.
+    session = stage.GetSessionLayer()
+    if path not in session.subLayerPaths:
+        session.subLayerPaths.insert(0, path)
 
     # Match on the schema and on the type name. Both, because this returned an
     # empty list once -- right after `timeline.stop()`, with a physics scene
@@ -531,8 +544,25 @@ def play_baked(path: str, *, stage: Any = None, autoplay: bool = True) -> dict[s
     if autoplay:
         timeline.play()
 
+    # Verify the animation actually took, rather than reporting that a file was
+    # loaded. A layer that composes to nothing loads perfectly happily.
+    composed = []
+    for prim_path in _animated_paths(animation):
+        prim = stage.GetPrimAtPath(prim_path)
+        if prim and prim.IsValid():
+            names = [op.GetOpName() for op in UsdGeom.Xformable(prim).GetOrderedXformOps()]
+            composed.append(any(name.endswith(":replay") for name in names))
+    winning = bool(composed) and all(composed)
+    if not winning:
+        logger.warning(
+            "The animation layer is loaded but is not winning composition: the "
+            "prims still carry their original transform ops. Playback will show "
+            "a frozen scene."
+        )
+
     return {
         "layer": path,
+        "animation_composed": winning,
         "frames": int(end - start + 1),
         "fps": fps,
         "seconds": round(float(end - start + 1) / fps, 3),
@@ -540,6 +570,10 @@ def play_baked(path: str, *, stage: Any = None, autoplay: bool = True) -> dict[s
         "physics_off": bool(disabled),
         "playing": autoplay,
     }
+
+
+def _animated_paths(animation: Any) -> list[str]:
+    return [str(prim.GetPath()) for prim in animation.TraverseAll()]
 
 
 def stop_playback(*, stage: Any = None, physics_scenes: Any = ()) -> None:
@@ -554,3 +588,69 @@ def stop_playback(*, stage: Any = None, physics_scenes: Any = ()) -> None:
         prim = stage.GetPrimAtPath(path)
         if prim and prim.IsValid():
             prim.SetActive(True)
+
+
+def export_replay_scene(animation_layer: str, path: str, *, stage: Any = None, fps: float = 60.0) -> dict[str, Any]:
+    """Write one USD carrying the scene *and* the recorded motion.
+
+    This is the artifact to hand someone. Not the live session, and not the
+    animation layer on its own -- a file that opens in a viewer and plays.
+
+    The composition order is the whole trick, and getting it wrong is silent.
+    The recorded motion has to be the *strongest* opinion, so it goes first in
+    the sublayer stack of a fresh stage with the scene beneath it. Sublayering
+    the animation under the live stage's root layer instead composes to nothing:
+    sublayers are weaker than the layer that owns them, the prims are authored
+    into the root at runtime, and their original transforms win. The result
+    loads without complaint and plays a frozen scene.
+
+    Playing it back inside the running simulator was the wrong target. The
+    solver moves rigid bodies and ignores the timeline, so physics has to be
+    disabled; deactivating the physics scene does not stay done, because Isaac
+    creates a replacement under a new name. A viewer has no solver to fight.
+    """
+    from pxr import Usd, UsdGeom
+
+    from ._compat import get_stage
+
+    stage = stage if stage is not None else get_stage()
+    animation = Usd.Stage.Open(animation_layer)
+
+    composed = Usd.Stage.CreateInMemory()
+    composed.GetRootLayer().subLayerPaths = [
+        animation_layer,
+        stage.GetRootLayer().identifier,
+    ]
+    composed.SetTimeCodesPerSecond(fps)
+    composed.SetStartTimeCode(animation.GetStartTimeCode())
+    composed.SetEndTimeCode(animation.GetEndTimeCode())
+    composed.Export(path)
+
+    # Confirm the motion survived, rather than reporting that a file was
+    # written. A composition that lost still exports perfectly happily.
+    check = Usd.Stage.Open(path)
+    animated = 0
+    for prim in animation.TraverseAll():
+        target = check.GetPrimAtPath(prim.GetPath())
+        if not target or not target.IsValid():
+            continue
+        names = [op.GetOpName() for op in UsdGeom.Xformable(target).GetOrderedXformOps()]
+        if any(name.endswith(":replay") for name in names):
+            animated += 1
+
+    import os
+
+    result = {
+        "path": path,
+        "bytes": os.path.getsize(path),
+        "frames": int(animation.GetEndTimeCode() - animation.GetStartTimeCode() + 1),
+        "fps": fps,
+        "animated_prims": animated,
+    }
+    if not animated:
+        logger.warning(
+            "Exported %s, but no prim in it carries the recorded motion. The "
+            "animation lost composition and the file plays a still scene.",
+            path,
+        )
+    return result
