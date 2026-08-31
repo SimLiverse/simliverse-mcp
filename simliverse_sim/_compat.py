@@ -63,6 +63,62 @@ def _physics_ready(_world: Any = None) -> bool:
     return SimulationManager.get_physics_sim_view() is not None
 
 
+def _drop_world_singleton(world_cls: Any) -> None:
+    """Get rid of a `World` that can no longer be used, however hard it resists.
+
+    `World.clear_instance()` is the supported way, and it is not enough. It
+    touches the world it is discarding, so when the world holds a deleted prim
+    the teardown raises the very error it was called to escape:
+
+        RuntimeError: Accessed invalid expired 'PhysicsScene' prim
+        </World/PhysicsScene>
+
+    The singleton then survives, every later `Scene.get()` hits the same corpse,
+    and the session is over. That is not hypothetical: the MCP `clear_scene`
+    verb deletes `/World` wholesale, an agent is offered it under AUTHORING, and
+    one call left the library unable to initialise for the remaining life of the
+    worker. There is no recovery from outside — the process has to be restarted,
+    which on a cloud worker means destroying it.
+
+    So the supported path is tried first, and when it throws the class attribute
+    is cleared directly. Reaching into a private is worth it here: the
+    alternative is a permanently dead session, and the failure mode of guessing
+    wrong is a fresh `World`, which is what is wanted anyway.
+    """
+    try:
+        world_cls.clear_instance()
+        return
+    except Exception:  # noqa: BLE001 — expected when the world holds a dead prim
+        logger.debug("World.clear_instance() failed; clearing the slot directly", exc_info=True)
+
+    for attribute in ("_instance", "_World__instance", "instance_"):
+        if hasattr(world_cls, attribute):
+            try:
+                setattr(world_cls, attribute, None)
+                return
+            except Exception:  # noqa: BLE001
+                logger.debug("Could not clear %s on World", attribute, exc_info=True)
+
+
+def _ensure_physics_scene_prim(path: str = "/World/PhysicsScene") -> None:
+    """Put a physics scene back on the stage if something removed it.
+
+    A new `World` will initialise against whatever it finds, so rebuilding on a
+    stage with no physics scene simply fails again in the same place.
+    """
+    try:
+        from pxr import UsdGeom, UsdPhysics
+
+        stage = get_stage()
+        if not stage.GetPrimAtPath("/World").IsValid():
+            UsdGeom.Xform.Define(stage, "/World")
+        if not stage.GetPrimAtPath(path).IsValid():
+            logger.warning("Recreating the physics scene at %s; something removed it.", path)
+            UsdPhysics.Scene.Define(stage, path)
+    except Exception:  # noqa: BLE001 — the rebuild below is the thing that matters
+        logger.debug("Could not ensure a physics scene at %s", path, exc_info=True)
+
+
 def get_world(physics_dt: float = 1.0 / 60.0) -> Any:
     """Return the singleton `World`, with physics genuinely initialized.
 
@@ -91,10 +147,8 @@ def get_world(physics_dt: float = 1.0 / 60.0) -> Any:
         # longer exists, and it cannot be repaired in place. Drop it and build a
         # fresh one — the alternative is every later call failing on a corpse.
         logger.warning("World.initialize_physics() failed (%s); rebuilding", exc)
-        try:
-            World.clear_instance()
-        except Exception:  # noqa: BLE001 — best effort; the retry is what matters
-            logger.debug("World.clear_instance() failed", exc_info=True)
+        _drop_world_singleton(World)
+        _ensure_physics_scene_prim()
         world = World(physics_dt=physics_dt, stage_units_in_meters=1.0)
         world.initialize_physics()
 

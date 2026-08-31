@@ -163,12 +163,56 @@ class MotionResult:
         return self.reached
 
 
-class Gripper:
-    """Any set of finger joints that can open and close together.
+# `left_inner_finger_joint` is one side of a pair; `finger_joint` is not. That
+# distinction is what separates a linkage from a set of independent fingers.
+_SIDE_TOKENS = ("left", "right", "_l_", "_r_", "_lh_", "_rh_")
 
-    Covers a two-finger parallel jaw and a multi-finger hand alike: closing is
-    "drive every finger joint toward closed until contact stops it", which is the
-    same operation either way.
+
+def _is_sided(joint_name: str) -> bool:
+    lowered = joint_name.lower()
+    return any(token in lowered for token in _SIDE_TOKENS)
+
+
+def _match_motion_config(
+    supported: Any, joints: str, asset: str, leaf: str
+) -> str | None:
+    """Pick the RMPflow config for a robot from three normalised identifiers.
+
+    Ordered by how much each is worth trusting. Joint names come from the
+    asset's own URDF and identify a Franka outright. The asset path identifies
+    anything that was referenced onto the stage, including robots whose joints
+    are named `joint_1`..`joint_6` and say nothing -- a Cobotta Pro 900, which
+    used to raise `No RMPflow configuration matches /World/Arm` while printing
+    `Cobotta_Pro_900` in its own list of supported robots. The prim path is last
+    because the user chose it.
+
+    Longest candidate first, so `UR5` cannot claim a `UR5e` and
+    `Cobotta_Pro_900` cannot claim a `Cobotta_Pro_1300`.
+    """
+    for candidate in sorted(supported, key=len, reverse=True):
+        key = candidate.lower().replace("_", "")
+        if key and (key in joints or key in asset or key in leaf):
+            return str(candidate)
+    return None
+
+
+class Gripper:
+    """Finger joints that open and close together.
+
+    Two shapes, and they are not the same operation:
+
+    A **parallel jaw or multi-finger hand** has independent finger joints, and
+    closing is "drive every one toward closed until contact stops it".
+
+    A **linkage** -- Robotiq 2F, OnRobot RG6, and most industrial jaws -- exposes
+    one driven joint plus sided followers that are mechanically coupled to it.
+    Commanding all of them independently sets them fighting each other. Measured
+    on a Cobotta Pro 900, whose jaw is six revolute joints: the agent under test
+    abandoned `grasp()`, `open()` and `close()` altogether and drove
+    `finger_joint` by hand, one index at a time, to get a grasp at all.
+
+    Which end of the travel closes is measured, not assumed. See
+    `_ends_by_measurement`.
     """
 
     def __init__(self, robot: "Robot", joint_indices: list[int]) -> None:
@@ -188,6 +232,103 @@ class Gripper:
     def joint_names(self) -> list[str]:
         names = self._robot.joint_names
         return [names[i] for i in self.joint_indices]
+
+    @property
+    def primary_index(self) -> int | None:
+        """The single driven joint of a linkage jaw, or None for independent fingers.
+
+        A Robotiq/OnRobot jaw names its driven joint without a side --
+        `finger_joint` -- and every follower with one: `left_inner_knuckle_joint`,
+        `right_outer_knuckle_joint`, and so on. Exactly one unsided joint among
+        three or more is the signature.
+
+        A Panda fails this test with two unsided joints, which is right: its
+        fingers really are independent. So does a Shadow hand, with none.
+        """
+        if len(self.joint_indices) < 3:
+            return None
+        unsided = [
+            index
+            for index, name in zip(self.joint_indices, self.joint_names)
+            if not _is_sided(name)
+        ]
+        return unsided[0] if len(unsided) == 1 else None
+
+    @property
+    def is_linkage(self) -> bool:
+        return self.primary_index is not None
+
+    def _pad_links(self) -> list[str]:
+        """The two opposing pads, which is what "how open is it" means."""
+        pads = [
+            path
+            for path in self._robot.links()
+            if "knuckle" not in path.lower()
+            and any(
+                token in path.rsplit("/", 1)[-1].lower()
+                for token in ("finger", "pad", "jaw", "tip")
+            )
+        ]
+        return pads[:2]
+
+    def _pad_gap(self, pads: list[str]) -> float:
+        from pxr import UsdGeom
+
+        stage = get_stage()
+        points = []
+        for path in pads:
+            matrix = UsdGeom.Xformable(stage.GetPrimAtPath(path)).ComputeLocalToWorldTransform(0)
+            points.append(np.array([float(v) for v in matrix.ExtractTranslation()]))
+        return float(np.linalg.norm(points[0] - points[1]))
+
+    def _ends_by_measurement(self, low: float, high: float) -> tuple[float, float]:
+        """Drive the jaw to each end of its travel and see which one closes it.
+
+        Guessing is what broke this. The rule here used to be "open at the upper
+        limit, closed at the lower", which is right for a prismatic Panda finger
+        and backwards for a Robotiq-style jaw, where the driven joint sits near
+        zero when open and rotates positive to close. Getting it backwards does
+        not raise: `close()` opens the jaw, the object is never gripped, and it
+        reads as a control problem.
+
+        There is no per-robot table to consult and no reliable convention across
+        vendors, so this moves the joint and measures the pads. Two commands and
+        forty steps, once per gripper, cached for the life of the handle.
+        """
+        pads = self._pad_links()
+        if len(pads) < 2:
+            # Nothing to measure against. Assume the industrial convention and
+            # say so, rather than silently picking the Panda one.
+            logger.warning(
+                "%s: could not find two finger pads among %s, so which end of "
+                "%s closes the jaw is a guess. Assuming it closes toward its "
+                "upper limit, which is the Robotiq/OnRobot convention.",
+                self._robot.prim_path,
+                self._robot.links()[:6],
+                self.joint_names[self.joint_indices.index(self.primary_index)],
+            )
+            return low, high
+
+        primary = self.primary_index
+        start = float(self._robot.joint_positions[primary])
+        gaps: dict[float, float] = {}
+        for end in (low, high):
+            self._robot.set_joint_positions([end], indices=[primary], settle_steps=20)
+            gaps[end] = self._pad_gap(pads)
+        self._robot.set_joint_positions([start], indices=[primary], settle_steps=5)
+
+        closed = min(gaps, key=lambda end: gaps[end])
+        opened = high if closed == low else low
+        logger.info(
+            "%s: jaw closes toward %.4f (pads %.4f m apart) and opens toward "
+            "%.4f (%.4f m apart).",
+            self._robot.prim_path,
+            closed,
+            gaps[closed],
+            opened,
+            gaps[opened],
+        )
+        return opened, closed
 
     def _limits(self) -> tuple[float, float]:
         if self._open_value is None or self._closed_value is None:
@@ -210,8 +351,27 @@ class Gripper:
                     self._robot.prim_path,
                     self.joint_names,
                 )
-            self._closed_value = float(max(lows)) if lows else 0.0
-            self._open_value = float(min(highs)) if highs else 0.04
+            if not lows or not highs:
+                self._closed_value, self._open_value = 0.0, 0.04
+            elif self.is_linkage:
+                primary = self.primary_index
+                low, high = limits[primary]
+                try:
+                    self._open_value, self._closed_value = self._ends_by_measurement(
+                        float(low), float(high)
+                    )
+                except Exception as exc:  # noqa: BLE001 - measuring needs live physics
+                    logger.warning(
+                        "%s: could not measure which end of the jaw closes (%s: "
+                        "%s); assuming it closes toward its upper limit.",
+                        self._robot.prim_path,
+                        type(exc).__name__,
+                        exc,
+                    )
+                    self._open_value, self._closed_value = float(low), float(high)
+            else:
+                self._closed_value = float(max(lows))
+                self._open_value = float(min(highs))
         return self._open_value, self._closed_value
 
     @property
@@ -257,9 +417,13 @@ class Gripper:
         if not self.exists:
             raise MotionError(f"{self._robot.prim_path} has no gripper joints.")
         self._assert_can_grip()
+        # One command on a linkage. The followers are driven by the mechanism,
+        # and commanding them independently makes them fight it -- which is what
+        # `[value] * 6` did to a Cobotta's jaw.
+        indices = [self.primary_index] if self.is_linkage else self.joint_indices
         self._robot.set_joint_positions(
-            [float(value)] * len(self.joint_indices),
-            indices=self.joint_indices,
+            [float(value)] * len(indices),
+            indices=indices,
             settle_steps=settle_steps,
         )
 
@@ -288,7 +452,15 @@ class Gripper:
 
     @property
     def position(self) -> float:
+        """How far closed the jaw is, in the same units `set_position` takes.
+
+        The mean across a linkage's six joints is not a position anything can be
+        commanded to -- the followers sit at their own angles -- so on a linkage
+        this reports the driven joint alone.
+        """
         positions = self._robot.joint_positions
+        if self.is_linkage:
+            return float(positions[self.primary_index])
         return float(np.mean([positions[i] for i in self.joint_indices]))
 
 
@@ -843,6 +1015,49 @@ class Manipulator(Robot):
         except Exception:  # noqa: BLE001 — absence is the normal case
             return None
 
+    def _asset_identity(self) -> str:
+        """The USD this robot was referenced from, normalised for matching.
+
+        Joint names identify a Franka, whose asset calls them `panda_joint1`.
+        They identify nothing at all on a Cobotta Pro 900, whose asset calls them
+        `joint_1` through `joint_6` -- as generic as a joint name gets. Add a
+        prim path of the user's choosing (`/World/Arm`) and the matcher had
+        nothing to work with: it raised
+
+            No RMPflow configuration matches /World/Arm ...
+            Supported robots: [... 'Cobotta_Pro_900' ...]
+
+        naming the robot it had just failed to recognise, in the same sentence.
+
+        The reference says it outright --
+        `.../Robots/Denso/CobottaPro900/cobotta_pro_900.usd` -- and it is
+        authoritative in a way neither of the others is: it comes from the asset
+        rather than from what anyone called the prim, so it survives renaming,
+        and it is the same string `create_robot` resolved the robot from in the
+        first place.
+
+        Ancestors are walked too: a robot referenced onto `/World/Arm` may put
+        its articulation root on a child, and it is the reference holder that
+        carries the asset path.
+        """
+        try:
+            stage = get_stage()
+            paths: list[str] = []
+            path = self.prim_path
+            while path and path.count("/") >= 2:
+                prim = stage.GetPrimAtPath(path)
+                if prim and prim.IsValid():
+                    for spec in prim.GetPrimStack():
+                        paths.extend(
+                            str(item.assetPath)
+                            for item in spec.referenceList.prependedItems
+                        )
+                path = path.rsplit("/", 1)[0]
+            return " ".join(paths).lower().replace("_", "")
+        except Exception:  # noqa: BLE001 - identity is a hint, the caller still raises
+            logger.debug("Could not read the asset reference for %s", self.prim_path, exc_info=True)
+            return ""
+
     def _ensure_motion_policy(self) -> None:
         if self._policy is not None:
             return
@@ -865,6 +1080,7 @@ class Manipulator(Robot):
             # URDF/USD and survive whatever the user called the prim.
             joints = " ".join(self.joint_names).lower().replace("_", "")
             leaf = self.prim_path.rsplit("/", 1)[-1].lower().replace("_", "")
+            asset = self._asset_identity()
 
             # Asset joint prefixes whose names differ from the RMPflow config.
             aliases = {"panda": "Franka", "fr3": "FR3"}
@@ -874,11 +1090,7 @@ class Manipulator(Robot):
                     break
 
             if name is None:
-                for candidate in supported:
-                    key = candidate.lower().replace("_", "")
-                    if key in joints or key in leaf:
-                        name = candidate
-                        break
+                name = _match_motion_config(supported, joints, asset, leaf)
             if name is None:
                 raise MotionError(
                     f"No RMPflow configuration matches {self.prim_path} "
@@ -1904,18 +2116,29 @@ class Manipulator(Robot):
         Nothing sets the object's velocity directly — it leaves with whatever
         momentum the hand actually transferred, so the result is a real ballistic
         trajectory that can be measured and verified.
+
+        `speed` is the hand speed to aim for, in m/s, and it is a request rather
+        than a promise: `release_hand_speed` reports what the arm achieved and
+        `speed_shortfall` how far short it fell. Check them. A swing that asks
+        for more than the arm can deliver is the normal case, not an error.
         """
         if not self.is_grasping(obj):
             raise MotionError(
                 "Cannot throw: the object is not currently grasped. Call grasp() "
                 "first and confirm it returned True."
             )
+        if observe_steps < 0:
+            raise ValueError("observe_steps must be >= 0")
 
         vector = as_vec3(direction, name="direction")
         magnitude = float(np.linalg.norm(vector))
         if magnitude < 1e-6:
             raise ValueError("direction must be a non-zero vector")
         unit = vector / magnitude
+
+        # How many consecutive decelerating steps mean the swing is done
+        # accelerating, and how many steps to let the fingers actually open.
+        stall_steps, spinup_steps, settle_steps = 6, 8, 4
 
         start = self.ee_position
         self.move_ee_to(start - unit * windup, raise_on_fail=False)
@@ -1928,22 +2151,86 @@ class Manipulator(Robot):
         self._rmpflow.set_end_effector_target(target_position=end)
         controller = self._controller()
 
-        released, release_speed = False, 0.0
+        # RMPflow converges on a position: it plans to arrive, which means it
+        # plans to stop. Asked for a fast swing it accelerates, then spends the
+        # back half of the arc shedding exactly the speed a throw needs, and the
+        # measured ceiling on a Franka is about 0.44 m/s however far away the
+        # target is put. No release rule recovers a velocity the controller
+        # never produced.
+        #
+        # What does work is telling the policy that more time has passed than
+        # really has, so each solve commands a proportionally larger step. The
+        # agent under test found this by itself, from `_policy` internals, after
+        # `throw` had failed it twice -- and it is the only lever here that
+        # produces genuine momentum transfer, because the links still move
+        # through PhysX and the ball still leaves on contact forces alone.
+        #
+        # Closed-loop rather than a fixed number: the ceiling is a property of
+        # the arm, and this has to work on arms nobody measured.
+        base_dt = getattr(self._policy, "get_default_physics_dt", lambda: self.scene.dt)()
+        set_dt = getattr(self._policy, "set_default_physics_dt", None)
+        scale, max_scale = 1.0, 90.0
+
+        released, reason = False, ""
+        release_speed = peak_speed = 0.0
+        stalled = 0
+        hand_speed = 0.0
         previous = self.ee_position
 
-        for _ in range(400):
-            self._rmpflow.update_world()
-            controller.apply_action(self._policy.get_next_articulation_action())
-            self.scene.step(1)
+        try:
+            for step in range(400):
+                if set_dt is not None and hand_speed < float(speed) and scale < max_scale:
+                    scale = min(max_scale, scale * 1.25)
+                    set_dt(self.scene.dt * scale)
 
-            current = self.ee_position
-            hand_speed = float(np.linalg.norm(current - previous)) / self.scene.dt
-            previous = current
+                self._rmpflow.update_world()
+                controller.apply_action(self._policy.get_next_articulation_action())
+                self.scene.step(1)
 
-            if float(np.dot(current - release_at, unit)) >= 0.0:
-                self.gripper.set_position(self.gripper.open_width, settle_steps=0)
-                released, release_speed = True, hand_speed
+                current = self.ee_position
+                hand_speed = float(np.linalg.norm(current - previous)) / self.scene.dt
+                previous = current
+
+                if hand_speed > peak_speed + 1e-4:
+                    peak_speed, stalled = hand_speed, 0
+                else:
+                    stalled += 1
+
+                if hand_speed >= float(speed):
+                    reason = "reached the requested hand speed"
+                elif float(np.dot(current - release_at, unit)) >= 0.0:
+                    reason = "passed the geometric release point"
+                elif (
+                    step >= spinup_steps
+                    and stalled >= stall_steps
+                    and (set_dt is None or scale >= max_scale)
+                ):
+                    # The arm is being driven as hard as this will drive it and
+                    # it is not getting any faster. Carrying on to the geometric
+                    # release point means letting go at a crawl -- which is what
+                    # `sweep = speed * 0.35` produces whenever the requested
+                    # speed puts `end` outside the arm's reach. A Franka reaches
+                    # about 0.85 m; the default `speed` alone asks for 1.1 m of
+                    # travel. Measured: released at 0.145 m/s against a
+                    # requested 2.8, and the ball rolled. Letting go at the peak
+                    # is the honest reading of a swing with nothing left.
+                    reason = (
+                        "the arm stopped gaining speed before the release "
+                        "point — this is as fast as it swings"
+                    )
+                else:
+                    continue
+
+                release_speed = hand_speed
+                released = True
                 break
+        finally:
+            if set_dt is not None:
+                # Not optional. The scaled timestep belongs to this swing, and
+                # leaving it set turns the next ordinary move_ee_to into another
+                # one -- including the release fallback below.
+                set_dt(base_dt)
+
 
         if not released:
             self.release()
@@ -1953,23 +2240,61 @@ class Manipulator(Robot):
                 "to the robot's reach."
             )
 
-        apex, trajectory = -float("inf"), []
+        # Opening the gripper is a command to the finger joints, not an event.
+        # Until physics steps, the fingers are still closed and the object is
+        # still pinched -- which is how this used to return `released: True`
+        # next to `still_held: True`, and with `observe_steps=0` never stepped
+        # at all.
+        self.gripper.set_position(self.gripper.open_width, settle_steps=0)
+        for _ in range(settle_steps):
+            self.scene.step(1)
+        still_held = self.is_grasping(obj)
+
+        release_position = obj.position
+        apex = float(release_position[2])
+        trajectory = [release_position.round(4).tolist()]
+        landed_at = None
+        previous_height, falling = float(release_position[2]), False
+
         for step in range(observe_steps):
             self.scene.step(1)
             position = obj.position
-            apex = max(apex, float(position[2]))
+            height = float(position[2])
+            apex = max(apex, height)
+
+            # Touchdown is where the fall stops, and it is worth finding: the
+            # distance after it is the object rolling, which is not throwing.
+            if landed_at is None:
+                if height < previous_height - 1e-5:
+                    falling = True
+                elif falling:
+                    landed_at = position
+            previous_height = height
+
             if step % 10 == 0:
                 trajectory.append(position.round(4).tolist())
 
         final = obj.position
+        flight = (
+            round(float(np.linalg.norm((landed_at - release_position)[:2])), 4)
+            if landed_at is not None
+            else None
+        )
+        total = float(np.linalg.norm((final - release_position)[:2]))
         return {
-            "released": True,
+            "released": not still_held,
+            "release_reason": reason,
+            "requested_speed": float(speed),
             "release_hand_speed": round(release_speed, 3),
+            "peak_hand_speed": round(peak_speed, 3),
+            "speed_shortfall": round(max(0.0, float(speed) - release_speed), 3),
             "object_speed_after_release": round(obj.speed, 3),
             "apex_height": round(apex, 4),
             "landing_position": final.round(4).tolist(),
+            "flight_distance": flight,
+            "rolled_distance": round(total - flight, 4) if flight is not None else None,
             "horizontal_distance": round(float(np.linalg.norm((final - start)[:2])), 4),
-            "still_held": self.is_grasping(obj),
+            "still_held": still_held,
             "trajectory": trajectory,
         }
 

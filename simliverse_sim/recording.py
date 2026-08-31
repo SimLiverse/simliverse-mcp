@@ -1,0 +1,901 @@
+# MIT License
+#
+# Copyright (c) 2026 SimLiverse
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+"""Record what a robot actually did, in the space a real controller speaks.
+
+A recording of world poses is a picture of a run. A recording of *joint*
+positions and velocities over time is a thing a controller can execute, which is
+the difference between showing a customer a video and handing them something
+their arm can run.
+
+So this samples joint state, not prim transforms, and exports the shape every
+vendor bridge already converts from -- ROS 2 `trajectory_msgs/JointTrajectory`:
+joint names, and points of (positions, velocities, time_from_start).
+
+It hangs off `Scene.step`, which is the only place every physics advance passes
+through. That matters because an agent does not drive a robot one way: it
+servos through RMPflow, follows a planned trajectory, and writes joint targets
+directly, sometimes within a single task. A recorder that wrapped any one of
+those would miss the others and produce a trajectory with holes in it.
+
+What this is not
+----------------
+`violations()` checks the recorded trajectory against the limits the asset
+declares, and a clean report means only that: no joint left its range and no
+joint exceeded its declared maximum velocity *in simulation*. It is not a
+safety certificate. Two things do not survive the trip to hardware on their own:
+
+- **Contact.** Positions replayed open-loop reproduce free motion well and
+  contact-rich motion badly. The instant a gripper closes on something, the
+  result depends on friction, compliance and where the object really is, none
+  of which the recording carries.
+- **Timing.** This samples at the simulation's fixed dt. A real controller
+  interpolates on its own clock, and a trajectory dense at 60 Hz may need
+  resampling and re-timing before it is accepted.
+
+Anyone putting one of these on real hardware validates it themselves, at
+reduced speed, with an estop in reach. Saying so is part of the artifact:
+`trajectory()` carries the caveats in its payload rather than in a README
+nobody reads.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from typing import Any
+
+import numpy as np
+
+logger = logging.getLogger("simliverse_sim.recording")
+
+SCHEMA = "simliverse.joint_trajectory/1"
+
+CAVEATS = (
+    "Recorded from simulation. Free motion replays open-loop; contact-rich "
+    "phases (grasping, insertion, anything touching a surface) depend on "
+    "friction, compliance and true object pose and do not transfer on their "
+    "own. Sampled at the simulator's fixed timestep and may need re-timing for "
+    "the target controller. Validate on hardware at reduced speed before "
+    "trusting it."
+)
+
+
+class JointRecorder:
+    """Samples a robot's joint state once per physics step.
+
+    Used as a context manager it registers on entry and detaches on exit, so a
+    recording cannot outlive the block that made it and quietly keep growing.
+    """
+
+    def __init__(self, robot: Any, *, scene: Any = None, every: int = 1, label: str = "") -> None:
+        self.robot = robot
+        self.scene = scene if scene is not None else robot.scene
+        self.every = max(1, int(every))
+        self.label = label or getattr(robot, "prim_path", "robot")
+
+        self.joint_names: list[str] = list(robot.joint_names)
+        self.times: list[float] = []
+        self.positions: list[list[float]] = []
+        self.velocities: list[list[float]] = []
+        self._seen = 0
+        self._t0: float | None = None
+        self._attached = False
+
+    # -- lifecycle -------------------------------------------------------
+    def start(self) -> "JointRecorder":
+        if not self._attached:
+            self.scene.add_step_listener(self._on_step)
+            self._attached = True
+        return self
+
+    def stop(self) -> "JointRecorder":
+        if self._attached:
+            self.scene.remove_step_listener(self._on_step)
+            self._attached = False
+        return self
+
+    def __enter__(self) -> "JointRecorder":
+        return self.start()
+
+    def __exit__(self, *_exc: Any) -> bool:
+        self.stop()
+        return False
+
+    def __repr__(self) -> str:
+        return (
+            f"<JointRecorder {self.label}: {len(self.times)} points, "
+            f"{self.duration:.2f}s, {len(self.joint_names)} joints>"
+        )
+
+    # -- sampling --------------------------------------------------------
+    def _on_step(self, sim_time: float) -> None:
+        self._seen += 1
+        if self._seen % self.every:
+            return
+        if self._t0 is None:
+            self._t0 = float(sim_time)
+
+        self.times.append(float(sim_time) - self._t0)
+        self.positions.append([float(v) for v in self.robot.joint_positions])
+        try:
+            self.velocities.append([float(v) for v in self.robot.joint_velocities])
+        except Exception:  # noqa: BLE001 - velocity is optional, position is not
+            self.velocities.append([0.0] * len(self.joint_names))
+
+    @property
+    def duration(self) -> float:
+        return self.times[-1] if self.times else 0.0
+
+    def groups(self) -> dict[str, list[str]]:
+        """Which recorded joints are the arm's and which are the gripper's.
+
+        Declared rather than split out, because dropping data is worse than
+        labelling it: an integrator who wants the fingers can have them.
+
+        It matters because on real hardware they are almost never the same
+        controller. A KUKA or Yaskawa arm takes a joint trajectory; the gripper
+        on the end of it takes open/close commands over its own protocol, and a
+        bridge that fed `panda_finger_joint1` to the arm controller would be
+        asking it to move an axis it does not have.
+        """
+        gripper = getattr(self.robot, "gripper", None)
+        fingers = list(getattr(gripper, "joint_names", []) or []) if gripper else []
+        fingers = [name for name in fingers if name in self.joint_names]
+        return {
+            "arm": [name for name in self.joint_names if name not in fingers],
+            "gripper": fingers,
+        }
+
+    # -- what comes out --------------------------------------------------
+    def trajectory(self) -> dict[str, Any]:
+        """The recording as a `trajectory_msgs/JointTrajectory`-shaped payload.
+
+        Field names follow the ROS 2 message so a bridge is a rename, not a
+        reinterpretation. The extras -- `schema`, `caveats`, `violations` --
+        travel with it on purpose: a trajectory that arrives without the
+        conditions it was recorded under is the thing that gets someone hurt.
+        """
+        return {
+            "schema": SCHEMA,
+            "label": self.label,
+            "joint_names": list(self.joint_names),
+            "groups": self.groups(),
+            "points": [
+                {
+                    "positions": positions,
+                    "velocities": velocities,
+                    "time_from_start": round(t, 6),
+                }
+                for t, positions, velocities in zip(
+                    self.times, self.positions, self.velocities
+                )
+            ],
+            "duration": round(self.duration, 6),
+            "sample_hz": round(len(self.times) / self.duration, 3) if self.duration else 0.0,
+            "violations": self.violations(),
+            "caveats": CAVEATS,
+        }
+
+    def violations(self, *, position_tolerance: float = 1e-3) -> list[str]:
+        """Where the recording leaves what the asset says the robot can do.
+
+        Worth having only because `joint_limits` reports real numbers now. It
+        returned `(None, None)` for every joint of every robot until recently,
+        which would have made this a function that always said "looks fine".
+        """
+        if not self.positions:
+            return []
+
+        found: list[str] = []
+        limits = list(getattr(self.robot, "joint_limits", []) or [])
+        maxima = self._declared_max_velocities()
+        positions = np.asarray(self.positions, dtype=float)
+        velocities = np.asarray(self.velocities, dtype=float)
+
+        for index, name in enumerate(self.joint_names):
+            if index < len(limits) and limits[index] and limits[index][0] is not None:
+                low, high = limits[index]
+                column = positions[:, index]
+                if column.min() < low - position_tolerance:
+                    found.append(
+                        f"{name}: reaches {column.min():.4f}, below its lower limit {low:.4f}"
+                    )
+                if column.max() > high + position_tolerance:
+                    found.append(
+                        f"{name}: reaches {column.max():.4f}, above its upper limit {high:.4f}"
+                    )
+            ceiling = maxima.get(name)
+            if ceiling:
+                fastest = float(np.abs(velocities[:, index]).max())
+                if fastest > ceiling:
+                    found.append(
+                        f"{name}: peaks at {fastest:.4f} rad/s, above its declared "
+                        f"maximum {ceiling:.4f}"
+                    )
+        return found
+
+    def _declared_max_velocities(self) -> dict[str, float]:
+        try:
+            properties = self.robot._articulation.dof_properties
+            return {
+                name: float(value)
+                for name, value in zip(self.joint_names, properties["maxVelocity"])
+                if float(value) > 0.0
+            }
+        except Exception:  # noqa: BLE001 - absent on some assets, not an error
+            logger.debug("No declared joint velocity maxima for %s", self.label, exc_info=True)
+            return {}
+
+    def save(self, path: str) -> str:
+        """Write the trajectory as JSON and return the path."""
+        payload = self.trajectory()
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=1)
+        logger.info(
+            "Wrote %d points (%.2fs) to %s%s",
+            len(payload["points"]),
+            payload["duration"],
+            path,
+            f" with {len(payload['violations'])} limit violations"
+            if payload["violations"]
+            else "",
+        )
+        return path
+
+
+def replay(
+    robot: Any,
+    trajectory: dict[str, Any],
+    *,
+    scene: Any = None,
+    speed: float = 1.0,
+    render: bool = True,
+) -> None:
+    """Drive `robot` back through a recorded trajectory, in joint space.
+
+    Position replay, deliberately: it reproduces the commanded path, and where
+    the run depended on contact the result will differ from the original. That
+    difference is information -- it is the same gap the trajectory will meet on
+    hardware -- so it is not smoothed over here.
+
+    `render` defaults to True, which is the opposite of `Scene.step`. Stepping
+    physics without rendering is right for a scored run, where frames cost time
+    and nobody is watching. It is wrong for a replay, where being watched is the
+    entire purpose: `scene.step(120)` advances two seconds between rendered
+    frames, and a viewer sees the pose before and the pose after with nothing in
+    between, which looks exactly like the robot teleporting.
+    """
+    scene = scene if scene is not None else robot.scene
+    names = list(trajectory["joint_names"])
+    indices = [robot.joint_names.index(name) for name in names]
+    points = trajectory["points"]
+    if not points:
+        return
+
+    scene.play()
+    previous = 0.0
+    for point in points:
+        target = float(point["time_from_start"])
+        steps = max(1, int(round((target - previous) / (scene.dt * max(speed, 1e-6)))))
+        robot.set_joint_positions(point["positions"], indices=indices, settle_steps=0)
+        # Stepped here rather than through `settle_steps` so each step can carry
+        # a rendered frame.
+        for _ in range(steps):
+            scene.step(1, render=render)
+        previous = target
+
+
+# ── keeping a recording alive across an agent's run ──────────────────────────
+#
+# The harness starts a recording, hands the scene to an agent, and collects it
+# afterwards. In between, the agent's own tool calls may reset the namespace
+# their code runs in, which would drop any handle held there. Module state
+# outlives that; the Scene's listener list keeps the recorder alive regardless,
+# but finding it again by rummaging through listeners is not an interface.
+
+_ACTIVE: dict[str, "JointRecorder"] = {}
+
+
+def start_recording(robot: Any, *, label: str, scene: Any = None, every: int = 1) -> "JointRecorder":
+    """Begin recording `robot` under `label`, replacing any recording by that name."""
+    stop_recording(label)
+    recorder = JointRecorder(robot, scene=scene, every=every, label=label).start()
+    _ACTIVE[label] = recorder
+    return recorder
+
+
+def active(label: str) -> "JointRecorder | None":
+    return _ACTIVE.get(label)
+
+
+def stop_recording(label: str) -> "JointRecorder | None":
+    recorder = _ACTIVE.pop(label, None)
+    if recorder is not None:
+        recorder.stop()
+    return recorder
+
+
+def stop_all() -> None:
+    for label in list(_ACTIVE):
+        stop_recording(label)
+
+
+# ── the other half: something the Play button can play ───────────────────────
+#
+# A joint trajectory is what a controller executes. It is not what a customer
+# watches: nothing plays it but the code that wrote it, and the viewport's Play
+# button knows nothing about it.
+#
+# For watching, the artifact is USD `timeSamples` on the prims themselves. Then
+# Play plays, the timeline scrubs, the file opens in any USD tool, and no
+# simulator has to be running. It is still the measured motion -- the samples
+# come from the same physics steps the trajectory does -- so it cannot drift
+# into choreography.
+
+
+class PoseRecorder:
+    """Samples world transforms of prims each physics step, for USD playback.
+
+    Transforms rather than joint angles because playback has no physics to
+    resolve them: a viewer scrubbing a timeline needs to be told where each
+    link *is*, not what angle its joint was asked for.
+    """
+
+    def __init__(self, prim_paths: Any, *, scene: Any, every: int = 1, label: str = "") -> None:
+        self.scene = scene
+        self.every = max(1, int(every))
+        self.label = label or "scene"
+        self.prim_paths = [str(p) for p in prim_paths]
+        self._scale_ops = self._find_scale_ops()
+        self.frames: list[dict[str, tuple[list[float], list[float]]]] = []
+        self.times: list[float] = []
+        self._t0: float | None = None
+        self._seen = 0
+        self._attached = False
+
+    def start(self) -> "PoseRecorder":
+        if not self._attached:
+            self.scene.add_step_listener(self._on_step)
+            self._attached = True
+        return self
+
+    def stop(self) -> "PoseRecorder":
+        if self._attached:
+            self.scene.remove_step_listener(self._on_step)
+            self._attached = False
+        return self
+
+    def __enter__(self) -> "PoseRecorder":
+        return self.start()
+
+    def __exit__(self, *_exc: Any) -> bool:
+        self.stop()
+        return False
+
+    def _on_step(self, sim_time: float) -> None:
+        self._seen += 1
+        if self._seen % self.every:
+            return
+        if self._t0 is None:
+            self._t0 = float(sim_time)
+        self.times.append(float(sim_time) - self._t0)
+        self.frames.append(self._sample())
+
+    def _find_scale_ops(self) -> dict[str, list[str]]:
+        """The scale ops already on each prim, so baking can preserve them."""
+        try:
+            from pxr import UsdGeom
+
+            from ._compat import get_stage
+
+            stage = get_stage()
+            found: dict[str, list[str]] = {}
+            for path in self.prim_paths:
+                prim = stage.GetPrimAtPath(path)
+                if not prim or not prim.IsValid():
+                    continue
+                names = [
+                    op.GetOpName()
+                    for op in UsdGeom.Xformable(prim).GetOrderedXformOps()
+                    if "scale" in op.GetOpName()
+                ]
+                if names:
+                    found[path] = names
+            return found
+        except Exception:  # noqa: BLE001 - absent scale is normal, not a fault
+            logger.debug("Could not read scale ops", exc_info=True)
+            return {}
+
+    def _sample(self) -> dict[str, tuple[list[float], list[float]]]:
+        from pxr import Gf, Usd, UsdGeom
+
+        from ._compat import get_stage
+
+        stage = get_stage()
+        frame: dict[str, tuple[list[float], list[float]]] = {}
+        for path in self.prim_paths:
+            prim = stage.GetPrimAtPath(path)
+            if not prim or not prim.IsValid():
+                continue
+            matrix = UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+            translation = matrix.ExtractTranslation()
+            rotation = matrix.ExtractRotationQuat()
+            imaginary = rotation.GetImaginary()
+            frame[path] = (
+                [float(translation[0]), float(translation[1]), float(translation[2])],
+                [
+                    float(rotation.GetReal()),
+                    float(imaginary[0]),
+                    float(imaginary[1]),
+                    float(imaginary[2]),
+                ],
+            )
+        return frame
+
+    def bake(self, path: str, *, fps: float = 60.0) -> str:
+        """Write the frames as an animation layer of USD `timeSamples`.
+
+        An overlay of `over` prims, not a standalone scene: it carries where
+        everything was, and composes over the stage that already has the
+        geometry. Flattening the meshes in as well would make a file that opens
+        anywhere, at the cost of shipping a copy of every asset -- worth doing
+        for a file that leaves the building, and not what this is yet.
+        """
+        from pxr import Gf, Sdf, Usd, UsdGeom
+
+        if not self.frames:
+            raise ValueError("nothing recorded, so there is nothing to bake")
+
+        layer = Sdf.Layer.CreateAnonymous(".usda")
+        stage = Usd.Stage.Open(layer)
+        # Frame numbers come from the sample's own timestamp, not its position
+        # in the list. Indexing assumes every sample is exactly 1/fps apart,
+        # which ties the recording rate to the playback rate and is wrong the
+        # moment they differ -- decimated recording, or baking for a consumer
+        # with its own timebase. Omniverse's glTF converter assumes 24 fps and
+        # offers no way to say otherwise, so a 60 fps recording came out as
+        # 27.1 seconds of what really took 10.9: every motion at 40% speed, and
+        # a cycle time anyone reads off the demo is wrong by the same factor.
+        duration = self.times[-1] if self.times else 0.0
+        stage.SetTimeCodesPerSecond(fps)
+        stage.SetStartTimeCode(0)
+        stage.SetEndTimeCode(round(duration * fps))
+
+        writers: dict[str, Any] = {}
+        for path_key in self.prim_paths:
+            over = stage.OverridePrim(path_key)
+            xform = UsdGeom.Xformable(over)
+            translate_op = xform.AddTranslateOp(opSuffix="replay")
+            orient_op = xform.AddOrientOp(opSuffix="replay")
+            # Replace the prim's transform stack rather than adding to it.
+            # `AddTranslateOp` appends to `xformOpOrder`, so without this the
+            # recorded *world* transform composes with whatever local transform
+            # the prim already had -- and every prim that did not start at the
+            # origin plays back somewhere it never was. Measured: a ball
+            # recorded at [0.302, 0.277, 0.301] read back [0.461, 0.005, 0.383].
+            #
+            # Scale is the exception and has to be carried over. It is not part
+            # of a world transform sample -- position and orientation are what
+            # was recorded -- but dropping it from the order drops it from the
+            # composed result, and the prim renders at its authored size. A
+            # 3 cm ball came back as a 1 m one, which is what a viewer sees
+            # first and trusts least.
+            order = [translate_op.GetOpName(), orient_op.GetOpName()]
+            order += [name for name in self._scale_ops.get(path_key, [])]
+            xform.GetXformOpOrderAttr().Set(order)
+            writers[path_key] = (translate_op, orient_op)
+
+        for index, frame in enumerate(self.frames):
+            seconds = self.times[index] if index < len(self.times) else index / fps
+            frame_number = round(seconds * fps)
+            for path_key, (translation, quaternion) in frame.items():
+                translate_op, orient_op = writers[path_key]
+                translate_op.Set(Gf.Vec3d(*translation), frame_number)
+                orient_op.Set(
+                    Gf.Quatf(quaternion[0], Gf.Vec3f(*quaternion[1:])), frame_number
+                )
+
+        stage.GetRootLayer().Export(path)
+        logger.info(
+            "Baked %d samples of %d prims to %s (%.1f fps, %.2fs of motion)",
+            len(self.frames),
+            len(self.prim_paths),
+            path,
+            fps,
+            duration,
+        )
+        return path
+
+
+def robot_prims(robot: Any, extra: Any = ()) -> list[str]:
+    """Every link of `robot`, plus anything else worth animating."""
+    paths = list(robot.links()) if hasattr(robot, "links") else []
+    return paths + [str(p) for p in extra]
+
+
+def play_baked(path: str, *, stage: Any = None, autoplay: bool = True) -> dict[str, Any]:
+    """Load an animation layer and put the stage in a state where Play plays it.
+
+    Physics has to be out of the way. A rigid body under a live PhysicsScene is
+    driven by the solver, and the solver does not care what the timeline says --
+    the two fight and the animation loses. Deactivating the scene prim leaves
+    the timeline as the only thing moving anything, which is what playback is.
+
+    Reversible: `physics_scene` comes back in the result so a caller can put it
+    on again and return to simulating.
+    """
+    import omni.timeline
+    from pxr import Sdf, Usd, UsdGeom, UsdPhysics
+
+    from ._compat import get_stage
+
+    stage = stage if stage is not None else get_stage()
+    timeline = omni.timeline.get_timeline_interface()
+    timeline.stop()
+
+    # The session layer, not the root layer. Sublayers are *weaker* than the
+    # layer that owns them, and these prims are authored into the root layer at
+    # runtime -- so an animation sublayered under root loses to the original
+    # transforms and composes to nothing. The symptom is a scene that simply
+    # freezes on playback: physics is off, the animation is being ignored, and
+    # nothing moves. The session layer is stronger than root, so overs in a
+    # sublayer of it win.
+    session = stage.GetSessionLayer()
+    if path not in session.subLayerPaths:
+        session.subLayerPaths.insert(0, path)
+
+    # Match on the schema and on the type name. Both, because this returned an
+    # empty list once -- right after `timeline.stop()`, with a physics scene
+    # plainly on the stage -- and an empty list reads exactly like "there was
+    # nothing to disable" when it means "physics is still running and will
+    # fight the animation you are about to play".
+    # `TraverseAll`, not `Traverse`: the latter skips inactive prims, so a scene
+    # deactivated by an earlier call is invisible to the next one, which then
+    # reports finding nothing. That is why this alternated between disabling a
+    # scene and disabling none -- each pass saw only whatever Isaac had freshly
+    # created, never what was already switched off.
+    disabled = []
+    for prim in stage.TraverseAll():
+        if prim.IsA(UsdPhysics.Scene) or str(prim.GetTypeName()) == "PhysicsScene":
+            if prim.IsActive():
+                prim.SetActive(False)
+            if not prim.IsActive():
+                disabled.append(str(prim.GetPath()))
+
+    if not disabled:
+        logger.warning(
+            "No physics scene was disabled before playback. The solver moves "
+            "rigid bodies and does not consult the timeline, so it will "
+            "override the animation. Playback will not show the recording."
+        )
+
+    animation = Usd.Stage.Open(path)
+    start, end = animation.GetStartTimeCode(), animation.GetEndTimeCode()
+    fps = animation.GetTimeCodesPerSecond() or 60.0
+    stage.SetTimeCodesPerSecond(fps)
+    stage.SetStartTimeCode(start)
+    stage.SetEndTimeCode(end)
+    timeline.set_start_time(float(start) / fps)
+    timeline.set_end_time(float(end) / fps)
+    timeline.set_looping(True)
+    if autoplay:
+        timeline.play()
+
+    # Verify the animation actually took, rather than reporting that a file was
+    # loaded. A layer that composes to nothing loads perfectly happily.
+    composed = []
+    for prim_path in _animated_paths(animation):
+        prim = stage.GetPrimAtPath(prim_path)
+        if prim and prim.IsValid():
+            names = [op.GetOpName() for op in UsdGeom.Xformable(prim).GetOrderedXformOps()]
+            composed.append(any(name.endswith(":replay") for name in names))
+    winning = bool(composed) and all(composed)
+    if not winning:
+        logger.warning(
+            "The animation layer is loaded but is not winning composition: the "
+            "prims still carry their original transform ops. Playback will show "
+            "a frozen scene."
+        )
+
+    return {
+        "layer": path,
+        "animation_composed": winning,
+        "frames": int(end - start + 1),
+        "fps": fps,
+        "seconds": round(float(end - start + 1) / fps, 3),
+        "physics_scenes_disabled": disabled,
+        "physics_off": bool(disabled),
+        "playing": autoplay,
+    }
+
+
+def _animated_paths(animation: Any) -> list[str]:
+    return [str(prim.GetPath()) for prim in animation.TraverseAll()]
+
+
+def stop_playback(
+    *, stage: Any = None, physics_scenes: Any = (), layer: str | None = None
+) -> dict[str, Any]:
+    """Undo `play_baked`, all of it.
+
+    Re-enabling physics is not enough on its own. The animation layer stays
+    composed, and its overs replace every recorded prim's transform stack --
+    position, orientation, and *not* scale, which they do not carry. So the
+    scene keeps whatever pose the timeline last showed and every scaled prim
+    renders at its authored size. A 3 cm ball becomes a 1 m one sitting at the
+    origin, and the next thing to read `ball.position` gets [0, 0, 0] and
+    plans a grasp at the robot's own base.
+
+    That is not a hypothetical: it broke the next recording that ran after a
+    playback, and the visible symptom was a giant sphere in the viewport.
+    """
+    import omni.timeline
+
+    from ._compat import get_stage
+
+    stage = stage if stage is not None else get_stage()
+    omni.timeline.get_timeline_interface().stop()
+
+    removed = []
+    for owner in (stage.GetSessionLayer(), stage.GetRootLayer()):
+        for path in list(owner.subLayerPaths):
+            if layer is None or path == layer:
+                if path.endswith(".usda") or path == layer:
+                    owner.subLayerPaths.remove(path)
+                    removed.append(path)
+
+    restored = []
+    for path in physics_scenes:
+        prim = stage.GetPrimAtPath(path)
+        if prim and prim.IsValid():
+            prim.SetActive(True)
+            restored.append(path)
+
+    return {"layers_removed": removed, "physics_restored": restored}
+
+
+def export_replay_scene(animation_layer: str, path: str, *, stage: Any = None, fps: float = 60.0) -> dict[str, Any]:
+    """Write one USD carrying the scene *and* the recorded motion.
+
+    This is the artifact to hand someone. Not the live session, and not the
+    animation layer on its own -- a file that opens in a viewer and plays.
+
+    The composition order is the whole trick, and getting it wrong is silent.
+    The recorded motion has to be the *strongest* opinion, so it goes first in
+    the sublayer stack of a fresh stage with the scene beneath it. Sublayering
+    the animation under the live stage's root layer instead composes to nothing:
+    sublayers are weaker than the layer that owns them, the prims are authored
+    into the root at runtime, and their original transforms win. The result
+    loads without complaint and plays a frozen scene.
+
+    Playing it back inside the running simulator was the wrong target. The
+    solver moves rigid bodies and ignores the timeline, so physics has to be
+    disabled; deactivating the physics scene does not stay done, because Isaac
+    creates a replacement under a new name. A viewer has no solver to fight.
+    """
+    from pxr import Usd, UsdGeom
+
+    from ._compat import get_stage
+
+    stage = stage if stage is not None else get_stage()
+    animation = Usd.Stage.Open(animation_layer)
+
+    composed = Usd.Stage.CreateInMemory()
+    composed.GetRootLayer().subLayerPaths = [
+        animation_layer,
+        stage.GetRootLayer().identifier,
+    ]
+    composed.SetTimeCodesPerSecond(fps)
+    composed.SetStartTimeCode(animation.GetStartTimeCode())
+    composed.SetEndTimeCode(animation.GetEndTimeCode())
+
+    # Anything analytic gets a mesh before this leaves, because the consumers
+    # this file exists for cannot draw a Sphere.
+    tessellated = tessellate_analytic_prims(composed)
+
+    composed.Export(path)
+
+    # Drop the written file out of USD's process-wide layer cache. Inside a
+    # long-lived Kit session, anything that opened this path before -- another
+    # export, a viewer, the asset converter -- holds the old bytes and keeps
+    # using them. Measured: an export that correctly gained three tessellated
+    # meshes converted to a glTF byte-identical to the previous one, because
+    # the converter read the cached layer. Nothing errored, and the artifact
+    # was quietly wrong.
+    from pxr import Sdf
+
+    cached = Sdf.Layer.FindOrOpen(path)
+    if cached is not None:
+        cached.Reload(force=True)
+
+    # Confirm the motion survived, rather than reporting that a file was
+    # written. A composition that lost still exports perfectly happily.
+    check = Usd.Stage.Open(cached if cached is not None else path)
+    animated = 0
+    for prim in animation.TraverseAll():
+        target = check.GetPrimAtPath(prim.GetPath())
+        if not target or not target.IsValid():
+            continue
+        names = [op.GetOpName() for op in UsdGeom.Xformable(target).GetOrderedXformOps()]
+        if any(name.endswith(":replay") for name in names):
+            animated += 1
+
+    import os
+
+    result = {
+        "path": path,
+        "bytes": os.path.getsize(path),
+        "frames": int(animation.GetEndTimeCode() - animation.GetStartTimeCode() + 1),
+        "fps": fps,
+        "animated_prims": animated,
+        "tessellated_prims": len(tessellated),
+    }
+    if not animated:
+        logger.warning(
+            "Exported %s, but no prim in it carries the recorded motion. The "
+            "animation lost composition and the file plays a still scene.",
+            path,
+        )
+    return result
+
+
+# ── analytic primitives do not survive a glTF conversion ─────────────────────
+#
+# USD has Sphere, Cube, Cylinder, Cone, Capsule and Plane as first-class shapes.
+# glTF has meshes and nothing else, and Omniverse's converter drops what it
+# cannot express rather than tessellating it. `create_object` produces exactly
+# those types, so a demo scene exported for the web came out as a robot moving
+# against an empty floor: the ball it was holding and the ground it stood on
+# were both gone, silently, from a file that converted with status OK.
+
+
+def _sphere_mesh(radius: float, segments: int = 24, rings: int = 16):
+    """A UV sphere. Enough resolution to read as round at demo distance."""
+    import math
+
+    points, counts, indices = [], [], []
+    for ring in range(rings + 1):
+        phi = math.pi * ring / rings
+        for segment in range(segments):
+            theta = 2.0 * math.pi * segment / segments
+            points.append(
+                (
+                    radius * math.sin(phi) * math.cos(theta),
+                    radius * math.sin(phi) * math.sin(theta),
+                    radius * math.cos(phi),
+                )
+            )
+    for ring in range(rings):
+        for segment in range(segments):
+            a = ring * segments + segment
+            b = ring * segments + (segment + 1) % segments
+            c = (ring + 1) * segments + (segment + 1) % segments
+            d = (ring + 1) * segments + segment
+            counts.append(4)
+            indices.extend([a, b, c, d])
+    return points, counts, indices
+
+
+def _box_mesh(half: tuple[float, float, float]):
+    x, y, z = half
+    points = [
+        (-x, -y, -z), (x, -y, -z), (x, y, -z), (-x, y, -z),
+        (-x, -y, z), (x, -y, z), (x, y, z), (-x, y, z),
+    ]
+    faces = [
+        (0, 3, 2, 1), (4, 5, 6, 7), (0, 1, 5, 4),
+        (1, 2, 6, 5), (2, 3, 7, 6), (3, 0, 4, 7),
+    ]
+    counts = [4] * len(faces)
+    indices = [i for face in faces for i in face]
+    return points, counts, indices
+
+
+def _cylinder_mesh(radius: float, height: float, segments: int = 24):
+    import math
+
+    half = height / 2.0
+    points, counts, indices = [], [], []
+    for sign in (-1.0, 1.0):
+        for segment in range(segments):
+            theta = 2.0 * math.pi * segment / segments
+            points.append((radius * math.cos(theta), radius * math.sin(theta), sign * half))
+    for segment in range(segments):
+        a = segment
+        b = (segment + 1) % segments
+        counts.append(4)
+        indices.extend([a, b, b + segments, a + segments])
+    points.append((0.0, 0.0, -half))
+    points.append((0.0, 0.0, half))
+    bottom, top = len(points) - 2, len(points) - 1
+    for segment in range(segments):
+        a, b = segment, (segment + 1) % segments
+        counts.append(3)
+        indices.extend([bottom, b, a])
+        counts.append(3)
+        indices.extend([top, a + segments, b + segments])
+    return points, counts, indices
+
+
+def _plane_mesh(width: float, length: float):
+    x, y = width / 2.0, length / 2.0
+    return [(-x, -y, 0.0), (x, -y, 0.0), (x, y, 0.0), (-x, y, 0.0)], [4], [0, 1, 2, 3]
+
+
+def tessellate_analytic_prims(stage: Any, *, plane_extent: float = 10.0) -> list[str]:
+    """Give every analytic shape a mesh child, so a converter can see it.
+
+    A child rather than a replacement: the shape keeps its type, its physics
+    APIs and -- critically -- its transform, including any recorded animation.
+    The mesh inherits all of it by being underneath, so a tessellated ball
+    follows the same timeSamples the sphere does.
+
+    Returns the paths given meshes, so a caller can check rather than hope.
+    """
+    from pxr import Sdf, UsdGeom, Vt
+
+    made: list[str] = []
+    for prim in list(stage.Traverse()):
+        kind = str(prim.GetTypeName())
+        try:
+            if kind == "Sphere":
+                radius = UsdGeom.Sphere(prim).GetRadiusAttr().Get() or 1.0
+                geometry = _sphere_mesh(float(radius))
+            elif kind == "Cube":
+                size = UsdGeom.Cube(prim).GetSizeAttr().Get() or 2.0
+                geometry = _box_mesh((float(size) / 2.0,) * 3)
+            elif kind == "Cylinder":
+                shape = UsdGeom.Cylinder(prim)
+                geometry = _cylinder_mesh(
+                    float(shape.GetRadiusAttr().Get() or 1.0),
+                    float(shape.GetHeightAttr().Get() or 2.0),
+                )
+            elif kind == "Plane":
+                shape = UsdGeom.Plane(prim)
+                width = float(shape.GetWidthAttr().Get() or plane_extent)
+                length = float(shape.GetLengthAttr().Get() or plane_extent)
+                # An infinite ground plane has no extent to read. Give it one:
+                # a viewer needs a floor to be a surface, not a concept.
+                geometry = _plane_mesh(width or plane_extent, length or plane_extent)
+            else:
+                continue
+        except Exception:  # noqa: BLE001 - one odd prim must not stop the export
+            logger.debug("Could not tessellate %s (%s)", prim.GetPath(), kind, exc_info=True)
+            continue
+
+        points, counts, indices = geometry
+        mesh_path = prim.GetPath().AppendChild("replayMesh")
+        mesh = UsdGeom.Mesh.Define(stage, mesh_path)
+        mesh.CreatePointsAttr(Vt.Vec3fArray([tuple(map(float, p)) for p in points]))
+        mesh.CreateFaceVertexCountsAttr(Vt.IntArray(counts))
+        mesh.CreateFaceVertexIndicesAttr(Vt.IntArray(indices))
+        mesh.CreateSubdivisionSchemeAttr("none")
+
+        display = UsdGeom.Gprim(prim).GetDisplayColorAttr().Get()
+        if display:
+            mesh.CreateDisplayColorAttr(display)
+        made.append(str(mesh_path))
+
+    if made:
+        logger.info("Tessellated %d analytic prims for export: %s", len(made), made)
+    return made

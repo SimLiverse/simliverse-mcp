@@ -21,6 +21,16 @@ from .base import Morphology, Robot
 logger = logging.getLogger("simliverse_sim.robots.library")
 
 
+class RobotAssetUnreachable(RuntimeError):
+    """The catalogue lists a robot the asset server will not serve.
+
+    Raised *before* the USD reference is created, because the alternative is not
+    an exception — it is the simulator hanging. `add_reference` resolves
+    synchronously on the main thread with no timeout, so an asset that never
+    answers takes rendering, the MCP socket and any hope of recovery with it.
+    """
+
+
 @dataclass(frozen=True)
 class RobotAsset:
     key: str
@@ -403,6 +413,58 @@ def specialize(probe: Robot, **kwargs: Any) -> Robot:
     return controller(probe.prim_path, scene=probe.scene, **kwargs)
 
 
+# How long to wait for the asset server before giving up on a robot. Generous
+# enough for a cold CDN edge, short enough that a person watching notices.
+_REACHABILITY_TIMEOUT_S = 20.0
+
+
+def _check_reachable(url: str) -> None:
+    """Fail fast if the asset cannot be fetched, instead of blocking Kit forever.
+
+    `add_reference` resolves the USD synchronously on the main thread, with no
+    timeout of its own. A URL that never answers therefore does not raise — it
+    hangs the whole application. Kit keeps its heartbeat (that runs on another
+    thread) while rendering stops, the MCP socket stops being serviced, and the
+    session is unrecoverable from outside. On a cloud worker with no SSH and no
+    SSM that costs the entire instance: the only repair is terminating it and
+    booting another, which is roughly ten minutes and a GPU-hour.
+
+    That is what a spawn of an unfamiliar robot did once. This does not prove
+    the fetch was the blocker — the evidence was circumstantial, a wedged
+    process with idle network — but a cheap probe in front of an uninterruptible
+    call is worth having regardless of which uninterruptible call it was.
+
+    Only HTTP roots are checked. An `omniverse://` or local path is left alone
+    rather than guessed at, because a check that cannot run must not become a
+    check that refuses.
+    """
+    if not url.lower().startswith(("http://", "https://")):
+        return
+
+    import urllib.error
+    import urllib.request
+
+    request = urllib.request.Request(url, method="HEAD")
+    try:
+        with urllib.request.urlopen(request, timeout=_REACHABILITY_TIMEOUT_S) as response:
+            if response.status >= 400:
+                raise RobotAssetUnreachable(
+                    f"{url} answered HTTP {response.status}. The catalogue lists this "
+                    f"robot but the asset server will not serve it."
+                )
+    except urllib.error.HTTPError as exc:
+        raise RobotAssetUnreachable(
+            f"{url} answered HTTP {exc.code}. The catalogue lists this robot but "
+            f"the asset server will not serve it."
+        ) from exc
+    except (urllib.error.URLError, OSError, TimeoutError) as exc:
+        raise RobotAssetUnreachable(
+            f"{url} did not answer within {_REACHABILITY_TIMEOUT_S:.0f}s ({exc}). "
+            f"Refusing to hand it to USD, which would resolve it synchronously on "
+            f"the main thread and hang the simulator with no way back."
+        ) from exc
+
+
 def _register_articulation(scene: Any, prim_path: str) -> None:
     """Make PhysX parse a robot that has just been added to the stage.
 
@@ -498,7 +560,9 @@ def spawn_robot(
     prim_path = prim_path or f"/World/{asset.key}"
     scene = scene or _Scene.get()
 
-    add_reference(assets_root() + asset.asset_path, prim_path)
+    url = assets_root() + asset.asset_path
+    _check_reachable(url)
+    add_reference(url, prim_path)
 
     from pxr import Gf, UsdGeom
 

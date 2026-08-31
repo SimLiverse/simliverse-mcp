@@ -128,6 +128,8 @@ class Scene:
         stage = self.stage
 
         scene_path = "/World/PhysicsScene"
+        self._remove_duplicate_physics_scenes(keep=scene_path)
+
         prim = stage.GetPrimAtPath(scene_path)
         if not prim.IsValid():
             physics_scene = UsdPhysics.Scene.Define(stage, scene_path)
@@ -151,6 +153,75 @@ class Scene:
         self.ensure_ground_plane()
         self._solver_defaults = (cfg.solver_position_iterations, cfg.solver_velocity_iterations)
         return cfg
+
+    def _remove_duplicate_physics_scenes(self, *, keep: str) -> list[str]:
+        """Leave exactly one `UsdPhysics.Scene` on the stage.
+
+        A second physics scene does not raise. It stalls the simulator. PhysX
+        cannot step two scenes on one subscription — Kit says so itself, in the
+        status bar rather than in any API response:
+
+            Physics scenes stepping is not the same, step subscription will be
+            send with later step, per scene step is not yet supported
+
+        and then rendering drops to 0 FPS, the main thread stops advancing, and
+        every MCP call blocks forever. The process stays alive and keeps its
+        heartbeat, so from outside it looks busy rather than broken. On a cloud
+        worker with no shell that is the end of the session: an agent had built
+        a table, a Franka and a ball, and none of it could be measured or
+        recovered.
+
+        Nothing prevents a second one. `configure_physics` and the MCP
+        `create_physics_scene` verb agree on `/World/PhysicsScene`, but
+        `run_control` is arbitrary Python by design — an agent writing
+        `UsdPhysics.Scene.Define(stage, "/PhysicsScene")`, which is what the
+        Isaac Sim documentation shows, creates one at the root and wedges the
+        session with no error anywhere.
+
+        So this is not tidying. It is the difference between a recoverable scene
+        and a worker that has to be terminated.
+        """
+        from pxr import UsdPhysics
+
+        stage = self.stage
+        extras = [
+            str(prim.GetPath())
+            for prim in list(stage.Traverse())
+            if prim.IsA(UsdPhysics.Scene) and str(prim.GetPath()) != keep
+        ]
+        if not extras:
+            return []
+
+        # Removing a prim PhysX has registered tears down the simulation view —
+        # the same failure `_drop_probe` used to cause, and one that costs the
+        # whole session rather than the prim. So this only removes while the
+        # timeline is stopped, when there is no view to invalidate.
+        #
+        # That makes the sweep effective exactly where it can be: at the start of
+        # a task, which is when `configure_physics` is normally called and when a
+        # scene left over from the last task would otherwise persist. A duplicate
+        # created mid-run by an agent's own `run_control` is reported and left
+        # alone, because tearing down physics to tidy the stage would trade a
+        # stalled simulator for a dead one.
+        if self.is_playing():
+            logger.warning(
+                "Duplicate physics scene(s) at %s while the timeline is playing. "
+                "PhysX cannot step two, so stepping may stall — but removing one "
+                "now would invalidate the simulation view and lose the session. "
+                "Stop the timeline and configure physics again to clear them.",
+                extras,
+            )
+            return []
+
+        removed: list[str] = []
+        for path in extras:
+            logger.warning(
+                "Removing duplicate physics scene at %s; PhysX cannot step two, "
+                "and a second one stalls the simulator without raising.", path,
+            )
+            stage.RemovePrim(path)
+            removed.append(path)
+        return removed
 
     def ensure_ground_plane(self, path: str = "/World/GroundPlane", z: float = 0.0) -> str:
         from pxr import UsdGeom, UsdPhysics
@@ -207,6 +278,39 @@ class Scene:
     def is_playing(self) -> bool:
         return bool(get_timeline().is_playing())
 
+    #: Shared by every `Scene`, because `Scene.get()` is not a singleton -- it
+    #: returns `cls(dt=dt)`, a fresh wrapper each call, around the one World
+    #: that actually exists. Per-instance listeners therefore never fire: a
+    #: recorder registered on the harness's Scene saw nothing of the steps an
+    #: agent ran through its own, and every recording came back empty while
+    #: reporting success. There is one physics world, so there is one list.
+    _step_listeners: list[Any] = []
+
+    def add_step_listener(self, listener: Any) -> None:
+        """Call `listener(sim_time)` after every physics step.
+
+        This is the only place every advance passes through, whatever drove the
+        robot -- RMPflow servoing, a planned trajectory, raw joint commands.
+        Anything that wants to observe a run rather than reconstruct it
+        afterwards has to hang here.
+        """
+        if listener not in self._step_listeners:
+            self._step_listeners.append(listener)
+
+    def remove_step_listener(self, listener: Any) -> None:
+        if listener in self._step_listeners:
+            self._step_listeners.remove(listener)
+
+    def _notify_step(self) -> None:
+        # A listener that raises must not take the simulation down with it: a
+        # recorder is an observer, and a failed observation is not a failed run.
+        for listener in list(self._step_listeners):
+            try:
+                listener(self._sim_time)
+            except Exception:  # noqa: BLE001
+                logger.warning("A step listener raised; dropping it.", exc_info=True)
+                self.remove_step_listener(listener)
+
     def step(self, count: int = 1, *, render: bool = False) -> None:
         """Advance physics by `count` steps.
 
@@ -232,6 +336,7 @@ class Scene:
         for _ in range(max(0, int(count))):
             physx.update_simulation(self._dt, self._sim_time)
             self._sim_time += self._dt
+            self._notify_step()
         # Push the results into USD/Fabric so reads afterwards see the new poses
         # rather than the ones from before the step.
         physx.update_transformations(False, True, True, False)
