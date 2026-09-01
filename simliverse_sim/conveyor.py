@@ -62,6 +62,23 @@ from a ScriptNode edits the stage while PhysX is stepping it, and a controller
 that does it replays differently every run. `load()` places them along the belt
 at authoring time and lets the belt carry them in — deterministic, and the queue
 looks the same on every Play.
+
+**GPU dynamics does not have to be turned off, whatever the forums say.**
+IsaacLab discussion #3216 is the first thing anyone finds on this, and its
+working recipe disables GPU dynamics and runs PhysX on the CPU
+(`device="cpu"`, `use_fabric=False`, `enableGPUDynamics=False`). That was true
+of the version it was written against and is **not** true of Isaac Sim 6.0.
+Measured here, same belt and boxes, clean scene each time:
+
+    enableGPUDynamics=True    boxes moved +1.05 / +1.25 m, arrived at the stop
+    enableGPUDynamics=False   boxes moved +1.05 / +1.25 m, arrived at the stop
+
+Identical to the centimetre. The advice is worth knowing about because
+following it costs the whole point of a GPU — a cell that trains at CPU
+throughput because of a limitation that has since been fixed. What the belt
+does need is a **kinematic rigid body**, not a static one: a collider with no
+RigidBodyAPI has no surface to move. `build()` and `from_prop()` both ensure
+that, which is the part of #3216 that still applies.
 """
 
 from __future__ import annotations
