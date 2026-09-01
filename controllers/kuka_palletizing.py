@@ -47,11 +47,20 @@ TRACE = "/tmp/kuka_palletizing.log"
 DOWN = [0.0, 1.0, 0.0, 0.0]
 
 BOX = 0.30                      # full box size, metres
-BELT_DECK = 0.90
-BELT_LENGTH = 3.2
-BELT_WIDTH = 0.70
-BELT_SPEED = 0.30
-BELT_STOP_X = 1.90              # where the stop is, and so where a box waits
+# Exactly what demo/kuka_palletizing.py's build() reported, pasted in rather
+# than re-derived. Re-deriving it is what put the controller's idea of the belt
+# a metre away from the real one when the cell layout moved.
+BELT_DESCRIPTION = {
+    "belt_path": "/World/Conveyor",
+    "direction": [1.0, 0.0, 0.0],
+    "centre": [-0.30, -1.05, 0.90],
+    "speed": 0.30,
+    "top_z": 0.90,
+    "length": 3.2,
+    "width": 0.70,
+    "gate_path": "/World/ConveyorGate",
+    "box_size": [0.30, 0.30, 0.30],
+}
 PALLET_Y = 1.90
 PALLET_DECK_Z = 0.1425
 ROWS, COLS, LAYERS = 2, 2, 2
@@ -145,13 +154,7 @@ def compute(db=None):
         # `build()` from inside compute() would author a second belt over the
         # first one on every Play. On a replay the boxes are back at their
         # authored poses and the belt is still driven, so the queue re-forms.
-        _belt = Conveyor.attach(
-            BELT,
-            direction=(1, 0, 0), speed=BELT_SPEED,
-            top_z=BELT_DECK, length=BELT_LENGTH, width=BELT_WIDTH,
-            centre=[BELT_STOP_X - BELT_LENGTH / 2.0, 0.0, BELT_DECK],
-            scene=scene,
-        )
+        _belt = Conveyor.from_description(BELT_DESCRIPTION, scene=scene)
         paths = sorted(scene.find("Box"))
         _belt.track([RigidObject(path, scene=scene) for path in paths])
         _trace("bound %d boxes: %s" % (len(paths), paths))

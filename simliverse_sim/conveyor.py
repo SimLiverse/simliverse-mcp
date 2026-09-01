@@ -698,20 +698,55 @@ class Conveyor:
         return self.box_at_gate(**kwargs) is not None
 
     def describe(self) -> dict[str, Any]:
-        """What this belt is and whether it is actually driving."""
+        """What this belt is and whether it is actually driving.
+
+        **Everything `attach()` needs is in here, including `centre`.** That is
+        not tidiness. A controller has to rebuild its handle on every Play, and
+        the alternative is re-deriving the belt's centre from the numbers the
+        scene was authored with — which is a duplicated calculation in a second
+        file. Moving the cell's layout once put the two out of step, the
+        re-derived centre was a metre off, and `box_at_gate` then reported that
+        nothing had ever arrived on a belt that was working perfectly.
+        """
         return {
             "belt_path": self.belt_path,
             "body_path": self.body_path,
             "gate_path": self.gate_path,
             "direction": self.direction.round(4).tolist(),
+            "centre": self._origin.round(4).tolist(),
             "speed": self.speed,
             "running": self._driven,
             "top_z": self.top_z,
             "length": self.length,
             "width": self.width,
+            "box_size": None if self.box_size is None else self.box_size.round(4).tolist(),
             "boxes": [b.prim_path for b in self._boxes],
             "mechanism": "PhysxSurfaceVelocityAPI",
         }
+
+    @classmethod
+    def from_description(cls, described: dict[str, Any], *, scene: Any = None) -> "Conveyor":
+        """Rebuild a handle from what `describe()` reported. Authors nothing.
+
+        The pairing that keeps a controller honest: the scene records what it
+        built, the controller attaches to that record, and neither one restates
+        the geometry.
+        """
+        belt = cls.attach(
+            described["belt_path"],
+            direction=described["direction"],
+            speed=described["speed"],
+            top_z=described["top_z"],
+            length=described["length"],
+            width=described.get("width"),
+            centre=described.get("centre"),
+            gate_path=described.get("gate_path"),
+            scene=scene,
+        )
+        size = described.get("box_size")
+        if size is not None:
+            belt.box_size = np.asarray(size, dtype=float)
+        return belt
 
 
 #: What the belt surface is called inside the shipped conveyor assets. Both
