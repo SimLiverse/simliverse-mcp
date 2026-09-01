@@ -27,7 +27,11 @@ classifiers = [
     "Topic :: Software Development :: Libraries",
 ]
 dependencies = [
-    "mcp[cli]",
+    # `<2` because `isaac_mcp/server.py` imports `mcp.server.fastmcp.FastMCP`,
+    # which the SDK's 2.0 release renamed to `mcp.server.mcpserver.MCPServer`.
+    # The Dockerfile installs this separately and carries the same bound and the
+    # full story; keep the two in step. Remove both only with the migration.
+    "mcp[cli]>=1.2.0,<2",
 ]
 
 [dependency-groups]
