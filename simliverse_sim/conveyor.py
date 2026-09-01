@@ -42,7 +42,8 @@ means the whole thing replays from Play with no controller involvement at all.
     from simliverse_sim import Conveyor
 
     belt = Conveyor.build(
-        length=3.0, width=0.8, height=0.55,
+        length=3.0, width=0.8,
+        position=[0, 0, 0.55],          # z is the DECK, where a box rests
         speed=0.30, direction=(1, 0, 0),
     )
     boxes = belt.load(4, box=(0.18, 0.13, 0.11), mass=1.5)
@@ -265,7 +266,6 @@ class Conveyor:
         *,
         length: float = 3.0,
         width: float = 0.8,
-        height: float = 0.5,
         position: Any = (0.0, 0.0, 0.0),
         direction: Any = (1.0, 0.0, 0.0),
         speed: float = 0.25,

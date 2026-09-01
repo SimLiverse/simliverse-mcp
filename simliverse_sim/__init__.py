@@ -37,7 +37,7 @@ Conveyor palletising example:
 
     from simliverse_sim import Conveyor, Robot, pallet_slots
 
-    belt = Conveyor.build(length=3.0, width=0.8, height=0.55, speed=0.3)
+    belt = Conveyor.build(length=3.0, width=0.8, position=[0, 0, 0.9], speed=0.3)
     boxes = belt.load(4, box=(0.18, 0.13, 0.11))
     arm = Robot.spawn("kuka_kr210")
     arm.attach_suction_gripper()
