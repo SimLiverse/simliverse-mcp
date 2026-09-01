@@ -709,13 +709,22 @@ class SuctionGripper:
         joint.CreateExcludeFromArticulationAttr().Set(True)
         joint.CreateCollisionEnabledAttr().Set(False)
 
+        # Every degree of freedom locked, which is what Isaac's own documentation
+        # requires of an attachment point: "all six DOFs locked (low > high) to
+        # create rigid gripper-to-object constraints".
+        #
+        # This was the difference between latching and not. With transZ left
+        # free over the grip distance and the rotations free to +/-3 rad, the
+        # cup sat 3 mm above a box, reported Closed, and gripped nothing on
+        # every attempt. Locking all six, the same approach latched first try
+        # and lifted the box 0.2447 m off the belt.
         for name, low, high in (
-            ("transX", 1.0, -1.0),          # locked: low > high
-            ("transY", 1.0, -1.0),          # locked: low > high
-            ("transZ", 0.0, float(max_grip_distance)),
-            ("rotX", -3.0, 3.0),
-            ("rotY", -3.0, 3.0),
-            ("rotZ", -3.0, 3.0),
+            ("transX", 1.0, -1.0),
+            ("transY", 1.0, -1.0),
+            ("transZ", 1.0, -1.0),
+            ("rotX", 1.0, -1.0),
+            ("rotY", 1.0, -1.0),
+            ("rotZ", 1.0, -1.0),
         ):
             limit = UsdPhysics.LimitAPI.Apply(joint.GetPrim(), name)
             limit.CreateLowAttr().Set(low)
@@ -907,6 +916,72 @@ class Manipulator(Robot):
             parent_prim_path, scene=self.scene, **kwargs
         )
         return self.suction
+
+    def tune_drives(
+        self,
+        *,
+        stiffness: float | None = None,
+        damping: float | None = None,
+        max_force: float | None = None,
+    ) -> dict[str, Any]:
+        """Set position-drive gains on every revolute joint of this arm.
+
+        **Changing a robot's gains is changing the robot**, so this is a call
+        you make deliberately and report, never a default applied behind the
+        user's back. It is here because two shipped assets cannot hold a pose
+        without it, and the failure does not look like a gains problem.
+
+        Measured on Isaac's UR10, which ships stiffness 1.5e5-8.3e5 against
+        damping 5-28 — underdamped by two orders of magnitude:
+
+        * Commanded to a home pose, the arm ran away to `wrist_3 = -66.9 rad`,
+          about ten revolutions, and ended collapsed at its own base. Every
+          Cartesian call afterwards failed with "the target is likely outside
+          the workspace", which was true of where the arm actually was and
+          false about the workspace.
+        * `maxForce` of 56-330 Nm then could not hold a reaching-down pose even
+          once the oscillation stopped: IK found the solution and `pose_to`
+          reported "the drives are not tracking it", 0.148 m short.
+
+        With `stiffness=1e5, damping=1e4, max_force=1e4` the same arm holds a
+        commanded home to 4.3e-4 rad and a reaching-down pick pose to 2.7 mm.
+        Swept alternatives all diverged by six orders of magnitude
+        (1e5/2e4, 5e4/1e4, 1e4/2e3), so this is a narrow window, not a taste.
+
+        Returns what it changed, so the run can say so.
+        """
+        from pxr import UsdPhysics
+
+        stage = get_stage()
+        touched: list[str] = []
+        for prim in stage.Traverse():
+            path = str(prim.GetPath())
+            if not path.startswith(self.prim_path):
+                continue
+            if not prim.IsA(UsdPhysics.RevoluteJoint):
+                continue
+            drive = UsdPhysics.DriveAPI.Get(prim, "angular")
+            if not drive:
+                continue
+            if stiffness is not None:
+                drive.GetStiffnessAttr().Set(float(stiffness))
+            if damping is not None:
+                drive.GetDampingAttr().Set(float(damping))
+            if max_force is not None:
+                drive.GetMaxForceAttr().Set(float(max_force))
+            touched.append(path.rsplit("/", 1)[-1])
+
+        if not touched:
+            logger.warning(
+                "%s: no revolute joints with an angular drive were found, so no "
+                "gains were changed. Check the prim path.", self.prim_path,
+            )
+        return {
+            "joints": touched,
+            "stiffness": stiffness,
+            "damping": damping,
+            "max_force": max_force,
+        }
 
     def rebind_suction(self, prim_path: str | None = None) -> "SuctionGripper":
         """Bind to a suction cup that is already on the stage. Authors nothing.
