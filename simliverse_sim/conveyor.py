@@ -63,6 +63,23 @@ that does it replays differently every run. `load()` places them along the belt
 at authoring time and lets the belt carry them in — deterministic, and the queue
 looks the same on every Play.
 
+**Start the belt after Play, not before.** `build()` and `from_prop()` switch it
+on as they finish, which is enough when nothing stops the timeline afterwards.
+Anything that *does* stop it between then and Play drops the drive: PhysX picks
+surface velocity up when the simulation starts, and an attribute set before a
+stop is not re-read. `attach_suction_gripper` stops the timeline — authoring a
+surface gripper requires it — so in a cell with a suction cup the belt is
+authored, started, stopped under, and played, and it conveys nothing. Measured:
+four boxes sat at their spawn positions through ten seconds of Play, then moved
++0.11 / +0.26 / +0.41 / +0.56 m and queued against the stop the moment
+`start()` was called again after Play. So:
+
+    scene.play()
+    belt.start()          # after Play. Idempotent, and cheap.
+    scene.settle(8.0)
+
+A controller does this in its INIT state, which runs after Play by construction.
+
 **GPU dynamics does not have to be turned off, whatever the forums say.**
 IsaacLab discussion #3216 is the first thing anyone finds on this, and its
 working recipe disables GPU dynamics and runs PhysX on the CPU

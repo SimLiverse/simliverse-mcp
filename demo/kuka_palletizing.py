@@ -171,7 +171,10 @@ if __name__ == "__main__":
     scene = Scene.get()
     info = build(scene)
     scene.play()
-    scene.settle(6.0)
+    # The cup's authoring stopped the timeline after the belt was switched on,
+    # which drops the drive. Re-assert it now that physics is running.
+    Conveyor.from_description(info["belt"], scene=scene).start()
+    scene.settle(8.0)
 
     print("cell built")
     for key in ("arm", "gripper", "pallet", "pick_height", "carry_z"):

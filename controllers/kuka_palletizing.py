@@ -159,6 +159,11 @@ def compute(db=None):
         _belt.track([RigidObject(path, scene=scene) for path in paths])
         _trace("bound %d boxes: %s" % (len(paths), paths))
 
+        # After Play, always. A stop between the belt being switched on and the
+        # timeline starting drops the drive, and authoring the suction cup stops
+        # the timeline. Cheap and idempotent, so it is done unconditionally.
+        _belt.start()
+
         _slots = pallet_slots(
             origin=[0.0, PALLET_Y, PALLET_DECK_Z], box=(BOX, BOX, BOX),
             rows=ROWS, cols=COLS, layers=LAYERS, gap=0.01,
