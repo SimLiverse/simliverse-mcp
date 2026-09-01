@@ -620,19 +620,14 @@ class SuctionGripper:
         direction["XYZ".index(axis[-1])] = -1.0 if axis.startswith("-") else 1.0
         mount = direction * (float(offset) + float(cup_length) / 2.0)
 
-        # Where the cup sits in the world right now, so it can be authored
-        # outside the articulation and still start in the right place.
-        link_world = UsdGeom.Xformable(
-            scene.stage.GetPrimAtPath(parent_prim_path)
-        ).ComputeLocalToWorldTransform(0)
-        local = Gf.Matrix4d(1.0)
-        local.SetRotateOnly(Gf.Quatd(rot))
-        local.SetTranslateOnly(Gf.Vec3d(*[float(v) for v in mount]))
-        cup_world = local * link_world
-
-        parent = cup_parent or parent_prim_path.rsplit("/", 1)[0]
-        stem = parent_prim_path.strip("/").replace("/", "_")
-        cup_path = f"{parent}/{stem}_SuctionCup"
+        # Under the end-effector link, not beside the robot. Isaac's own surface
+        # gripper documentation is explicit that the gripper "does not require a
+        # separate rigid body or cup geometry in the physics simulation" - the
+        # cup is decoration and the grasp is the D6 joint. Visual geometry
+        # parented to a link is not a rigid body, so the rule that parenting a
+        # *body* under an articulation link is fatal does not apply to it.
+        # `cup_parent` is accepted for callers that still pass it and ignored.
+        cup_path = f"{parent_prim_path}/SuctionCup"
         cup = UsdGeom.Cylinder.Define(scene.stage, cup_path)
         cup.CreateRadiusAttr(float(cup_radius))
         cup.CreateHeightAttr(float(cup_length))
@@ -653,35 +648,35 @@ class SuctionGripper:
         # `spawn_rigid` and `spawn_prop` have both cleared their op order for
         # this reason; this was the one authoring path that did not.
         xform.ClearXformOpOrder()
-        xform.AddTranslateOp().Set(cup_world.ExtractTranslation())
-        xform.AddOrientOp().Set(Gf.Quatf(cup_world.ExtractRotationQuat()))
-        UsdPhysics.CollisionAPI.Apply(cup_prim)
-        UsdPhysics.RigidBodyAPI.Apply(cup_prim)
-        UsdPhysics.MassAPI.Apply(cup_prim).CreateMassAttr(float(cup_mass))
+        # A child of the link, so the offset is local and it simply rides along.
+        xform.AddTranslateOp().Set(Gf.Vec3d(*[float(v) for v in mount]))
+        xform.AddOrientOp().Set(rot)
+        # No collider, no rigid body, no mass. Deliberately. The cup used to be
+        # a dynamic body bolted to the flange with a fixed joint, and that extra
+        # body is what made the arm unusable: measured on a UR10, a Cartesian
+        # move that a bare arm completes to 8 mm could not get within 0.65 m
+        # with the cup fitted, and on a KR210 the tool drifted 0.21 m off the
+        # box during a slow descent and sealed on empty air.
 
-        # Two joints, and the split matters. A fixed joint carries the cup on the
-        # flange; the attachment joint - the one the gripper casts from - is left
-        # with `body1` empty for the gripper to fill in when it latches.
+        # One joint now, not two. The fixed joint that carried the cup is gone
+        # with the cup's rigid body, and the attachment joint anchors to the
+        # end-effector link itself rather than to a floating cup.
         #
-        # Wiring the attachment joint straight to the flange instead (body1 set)
-        # leaves nothing holding the cup: measured, it drifted 0.29 m away inside
-        # a second while the gripper reported a perfectly healthy status.
-        mount_path = f"{cup_path}_Mount"
-        fixed = UsdPhysics.FixedJoint.Define(scene.stage, mount_path)
-        fixed.CreateBody0Rel().SetTargets([parent_prim_path])
-        fixed.CreateBody1Rel().SetTargets([cup_path])
-        fixed.CreateLocalPos0Attr().Set(Gf.Vec3f(*[float(v) for v in mount]))
-        fixed.CreateLocalRot0Attr().Set(rot)
-        fixed.CreateLocalPos1Attr().Set(Gf.Vec3f(0.0, 0.0, 0.0))
-        fixed.CreateLocalRot1Attr().Set(Gf.Quatf(1, 0, 0, 0))
-        fixed.CreateExcludeFromArticulationAttr().Set(True)
-        fixed.CreateCollisionEnabledAttr().Set(False)
-
+        # The old arrangement is documented in git history as a known defect
+        # kept on purpose: the attachment joint left `body1` empty, PhysX reads
+        # an empty body as *the world*, and the resulting world-anchored joint
+        # fought the mount joint dragging the same cup along with the arm. The
+        # recorded symptom was a cup-to-flange gap swinging between 0.008 m and
+        # 0.180 m instead of holding at 0.010 m. With `body0` on the link there
+        # is no second joint to fight and nothing anchored to the world.
         attach_path = f"{cup_path}_AttachPoint"
         joint = UsdPhysics.Joint.Define(scene.stage, attach_path)
-        joint.CreateBody0Rel().SetTargets([cup_path])
-        joint.CreateLocalPos0Attr().Set(Gf.Vec3f(0.0, 0.0, 0.0))
-        joint.CreateLocalRot0Attr().Set(Gf.Quatf(1, 0, 0, 0))
+        # Body 0 is the end effector. Isaac requires every attachment point on a
+        # gripper to share the same Body 0, and that body is the link the
+        # gripper is mounted on.
+        joint.CreateBody0Rel().SetTargets([parent_prim_path])
+        joint.CreateLocalPos0Attr().Set(Gf.Vec3f(*[float(v) for v in mount]))
+        joint.CreateLocalRot0Attr().Set(rot)
         joint.CreateLocalPos1Attr().Set(Gf.Vec3f(0.0, 0.0, 0.0))
         joint.CreateLocalRot1Attr().Set(Gf.Quatf(1, 0, 0, 0))
         # KNOWN DEFECT, left enabled on purpose: this is the only setting that
