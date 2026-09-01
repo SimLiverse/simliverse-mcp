@@ -159,6 +159,34 @@ def test_the_box_resting_against_the_stop_is_the_one_returned(belt) -> None:
     assert picked is not None and picked.prim_path == "/World/Box0"
 
 
+def test_an_arrived_box_is_found_though_its_centre_is_half_a_box_short(belt) -> None:
+    """The live failure this fix comes from.
+
+    Measured on the worker: a 3.2 m belt carrying 30 cm boxes brought the lead
+    box to rest with its centre 0.15 m from the stop — exactly half a box, since
+    it rests on its face and `position` is a centre. Measuring that gap against
+    zero rejected it, so the belt conveyed perfectly and the arm was never told
+    a box had arrived. The expected gap has to come from the box size.
+    """
+    belt.load(1, box=(0.30, 0.30, 0.30))          # sets box_size
+    far = 2.0                                      # length / 2
+    belt._boxes = [
+        _FakeBody("/World/Box0", [far - 0.15, 0, 1.15], speed=0.0),
+    ]
+    picked = belt.box_at_gate()
+    assert picked is not None and picked.prim_path == "/World/Box0"
+
+
+def test_a_box_a_whole_box_further_back_has_not_arrived(belt) -> None:
+    """The one queued behind it must not be mistaken for the one at the stop."""
+    belt.load(1, box=(0.30, 0.30, 0.30))
+    far = 2.0
+    belt._boxes = [
+        _FakeBody("/World/Box1", [far - 0.45, 0, 1.15], speed=0.0),
+    ]
+    assert belt.box_at_gate() is None
+
+
 def test_a_box_still_being_pushed_is_not_ready_to_pick(belt) -> None:
     """Closing on a box that is still moving fails as if the gripper were bad."""
     far = 2.0

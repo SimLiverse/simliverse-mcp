@@ -317,22 +317,10 @@ class Conveyor:
 
         gate_path = None
         if gate:
-            # The stop sits just past the far end, spanning the full width. Its
-            # inner face is what a box comes to rest against, so the pick pose
-            # is `gate_face - half a box` and nothing has to be timed.
-            far = centre[:2] + heading[:2] * (length / 2.0 + gate_thickness / 2.0)
-            gate_path = f"{prim_path}Gate"
-            scene.spawn_rigid(
-                gate_path,
-                shape="cube",
-                scale=[gate_thickness / 2.0, width / 2.0, gate_height / 2.0],
-                position=[float(far[0]), float(far[1]), centre[2] + gate_height / 2.0],
-                orientation=[0.0, 0.0, yaw],
-                mass=0.0,
-                friction=0.4,
-                restitution=0.0,
-                static=True,
-                color=(0.55, 0.13, 0.13),
+            gate_path = _build_gate(
+                scene, f"{prim_path}Gate", centre=centre, heading=heading,
+                length=length, width=width, yaw=yaw,
+                height=gate_height, thickness=gate_thickness,
             )
 
         belt = cls(
@@ -360,6 +348,9 @@ class Conveyor:
         direction: Any = (1.0, 0.0, 0.0),
         speed: float = 0.25,
         friction: float = 0.9,
+        gate: bool = True,
+        gate_height: float = 0.35,
+        gate_thickness: float = 0.04,
         scene: Any = None,
     ) -> "Conveyor":
         """Drive one of the real `ConveyorBelt_A*` assets.
@@ -432,6 +423,17 @@ class Conveyor:
         )
         belt._across = across_v
         belt.asset = entry
+        if gate:
+            # The shipped belts have no stop, so without this boxes ride off
+            # the far end and fall. Measured on A09: three boxes travelled the
+            # full length and dropped 0.88 m onto the floor.
+            belt.gate_path = _build_gate(
+                scene, f"{prim_path}Gate",
+                centre=belt._origin, heading=heading,
+                length=along, width=across,
+                yaw=float(np.degrees(np.arctan2(heading[1], heading[0]))),
+                height=gate_height, thickness=gate_thickness,
+            )
         belt.start()
         return belt
 
@@ -584,13 +586,23 @@ class Conveyor:
         end; `max_speed` refuses it until it has actually stopped moving. A pick
         commanded at the moment of contact closes on a box that is still being
         pushed, and the grasp fails in a way that looks like a gripper problem.
+
+        **A box that has arrived is half its own length short of the stop**, and
+        that is the whole subtlety here. Positions are centres; the box rests on
+        its *face*. Measured on a 3.2 m belt with 30 cm boxes: the lead box came
+        to rest with its centre 0.15 m from the gate — exactly half a box — and
+        a `within` of 0.12 measured against zero rejected it, so the belt worked
+        perfectly and the arm was never told anything had arrived. The expected
+        gap now comes from the box size `load()` already knows, and `within` is
+        the tolerance *around* it rather than an absolute distance.
         """
         if not self._boxes:
             return None
         origin = self._origin
         far = (self.length or 0.0) / 2.0
+        expected = float(self.box_size[0]) / 2.0 if self.box_size is not None else 0.0
 
-        best, best_gap = None, None
+        best, best_error = None, None
         for body in self._boxes:
             try:
                 position = np.asarray(body.position, dtype=float)
@@ -598,13 +610,13 @@ class Conveyor:
             except Exception:  # noqa: BLE001 - a despawned box is not an error
                 continue
             along = float(np.dot(position[:2] - origin[:2], self.direction[:2]))
-            gap = far - along
-            if gap > within or gap < -within:
+            error = abs((far - along) - expected)
+            if error > within:
                 continue
             if speed > max_speed:
                 continue
-            if best_gap is None or gap < best_gap:
-                best, best_gap = body, gap
+            if best_error is None or error < best_error:
+                best, best_error = body, error
         return best
 
     def arrived(self, **kwargs: Any) -> bool:
@@ -668,6 +680,46 @@ def _belt_surface(prim_path: str) -> str:
         prim_path, ", ".join(_DECK_NAMES),
     )
     return prim_path
+
+
+def _build_gate(
+    scene: Any,
+    gate_path: str,
+    *,
+    centre: Any,
+    heading: Any,
+    length: float,
+    width: float,
+    yaw: float,
+    height: float = 0.25,
+    thickness: float = 0.04,
+) -> str:
+    """The stop at the end of a belt, spanning its full width.
+
+    Its inner face is what a box comes to rest against, which is what turns a
+    moving target into one fixed pick pose. Shared by `build` and `from_prop`
+    because a real conveyor asset needs a stop exactly as much as a slab does —
+    the shipped belts have none, so boxes ride off the end and fall. Measured
+    on `ConveyorBelt_A09`: three boxes travelled the length of the belt and
+    dropped 0.88 m onto the floor, which looks like a physics bug and is only a
+    missing piece of the cell.
+    """
+    centre = np.asarray(centre, dtype=float)
+    heading = np.asarray(heading, dtype=float)
+    far = centre[:2] + heading[:2] * (length / 2.0 + thickness / 2.0)
+    scene.spawn_rigid(
+        gate_path,
+        shape="cube",
+        scale=[thickness / 2.0, width / 2.0, height / 2.0],
+        position=[float(far[0]), float(far[1]), float(centre[2] + height / 2.0)],
+        orientation=[0.0, 0.0, float(yaw)],
+        mass=0.0,
+        friction=0.4,
+        restitution=0.0,
+        static=True,
+        color=(0.55, 0.13, 0.13),
+    )
+    return gate_path
 
 
 def _force_kinematic(prim_path: str) -> None:
