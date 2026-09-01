@@ -33,6 +33,19 @@ Manipulation example:
     print(verify_grasp(robot, ball, previous_position=before))
     print(robot.throw(ball, direction=[1, 0, 0.8], speed=2.5))
 
+Conveyor palletising example:
+
+    from simliverse_sim import Conveyor, Robot, pallet_slots
+
+    belt = Conveyor.build(length=3.0, width=0.8, height=0.55, speed=0.3)
+    boxes = belt.load(4, box=(0.18, 0.13, 0.11))
+    arm = Robot.spawn("kuka_kr210")
+    arm.attach_suction_gripper()
+
+    slots = pallet_slots(origin=[0.0, 1.2, 0.145], box=(0.18, 0.13, 0.11),
+                         rows=2, cols=2)
+    ready = belt.box_at_gate()          # settled against the stop
+
 Navigation example:
 
     rover = Robot.spawn("carter", position=[0, 0, 0.1])
@@ -60,6 +73,7 @@ from .assertions import (
 )
 from . import controller
 from .controller import ControllerError
+from .conveyor import Conveyor, ConveyorError, drive_surface
 from .objects import RigidObject
 from .robots import (
     AerialRobot,
@@ -82,6 +96,7 @@ from .robots import (
     list_robots,
     spawn_robot,
 )
+from .palletizing import PalletError, pallet_slots, verify_pallet
 from .props import (
     PropNotFound,
     find_prop,
@@ -95,6 +110,8 @@ __all__ = [
     "AerialRobot",
     "Check",
     "ControllerError",
+    "Conveyor",
+    "ConveyorError",
     "controller",
     "DexterousHand",
     "FlightError",
@@ -110,6 +127,7 @@ __all__ = [
     "MotionError",
     "MotionResult",
     "NavigationError",
+    "PalletError",
     "PhysicsConfig",
     "Report",
     "RigidObject",
@@ -118,6 +136,7 @@ __all__ = [
     "StaleArticulation",
     "WheeledRobot",
     "airborne",
+    "drive_surface",
     "grasped",
     "isaac_version",
     "list_robots",
@@ -128,12 +147,14 @@ __all__ = [
     "spawn_robot",
     "moved_under_own_power",
     "not_teleported",
+    "pallet_slots",
     "physics_running",
     "reached_height",
     "reached_position",
     "travelled",
     "upright",
     "verify_grasp",
+    "verify_pallet",
     "verify_navigation",
     "verify_throw",
 ]
