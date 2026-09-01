@@ -180,15 +180,30 @@ def pick_waiting_box(cell: dict) -> dict:
         return {"picked": False, "reason": "no box settled against the stop in 12 s"}
 
     start = np.asarray(box.position, dtype=float).copy()
-    box_top = float(start[2]) + BOX / 2.0
     belt.halt()
 
+    # Home first, then read the box. Reading it before homing and descending to
+    # that reading is how the cup ends up on a corner: the box keeps settling
+    # while the arm swings across, and a 15 cm box only has to drift 3 cm for
+    # the cup to land on its top-back edge instead of the middle of its face.
+    # Measured that way, the box was grabbed by a corner and swung 3.4 cm during
+    # the lift. Every pose below comes from a reading taken after the arm has
+    # already stopped moving.
     arm.set_joint_positions(HOME, settle_steps=90)
-    arm.move_ee_to([float(start[0]), float(start[1]), box_top + cup.tip_offset + 0.18],
+    arm.scene.settle(0.5)
+
+    here = np.asarray(box.position, dtype=float)
+    box_top = float(here[2]) + BOX / 2.0
+    arm.move_ee_to([float(here[0]), float(here[1]), box_top + cup.tip_offset + 0.18],
                    DOWN, tolerance=0.015)
 
+    # Re-read once more now the arm is parked above it, so the descent is
+    # centred on the face rather than on where the box used to be.
+    here = np.asarray(box.position, dtype=float)
+    box_top = float(here[2]) + BOX / 2.0
+
     # IK, not RMPflow: the reactive policy pushes the tool off this target.
-    arm.pose_to([float(start[0]), float(start[1]), box_top + cup.tip_offset + 0.004], DOWN)
+    arm.pose_to([float(here[0]), float(here[1]), box_top + cup.tip_offset + 0.004], DOWN)
     arm.scene.settle(1.0)
     for _ in range(5):
         arm.refine_pose()
@@ -202,17 +217,20 @@ def pick_waiting_box(cell: dict) -> dict:
     if not cup.holding:
         return {"picked": False, "reason": f"cup did not seal (status {cup.status})"}
 
-    arm.pose_to([float(start[0]), float(start[1]), box_top + cup.tip_offset + 0.30], DOWN)
+    arm.pose_to([float(here[0]), float(here[1]), box_top + cup.tip_offset + 0.30], DOWN)
     arm.scene.settle(1.2)
     for _ in range(3):
         arm.refine_pose()
         arm.scene.settle(0.3)
 
     end = np.asarray(box.position, dtype=float)
+    ee = arm.ee_position
+    offcentre = float(np.linalg.norm(np.asarray(ee)[:2] - here[:2]))
     return {
         "picked": bool(cup.holding),
         "box": box.prim_path,
         "rise": round(float(end[2] - start[2]), 4),
+        "off_centre": round(offcentre, 4),
         "from": start.round(4).tolist(),
         "to": end.round(4).tolist(),
         "gripped": cup.gripped_objects,
