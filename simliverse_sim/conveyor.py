@@ -669,7 +669,7 @@ class Conveyor:
         self,
         *,
         max_speed: float = 0.02,
-        within: float = 0.12,
+        within: float | None = None,
     ) -> Any | None:
         """The box resting against the stop, or None while none has settled.
 
@@ -692,6 +692,18 @@ class Conveyor:
         origin = self._origin
         far = (self.length or 0.0) / 2.0
         expected = float(self.box_size[0]) / 2.0 if self.box_size is not None else 0.0
+        if within is None:
+            # Scaled to the box, not a fixed distance. A flat 0.12 m accepted a
+            # 15 cm box while it was still 6.5 cm short of the stop and creeping:
+            # the pick then descended onto where the box had been, clipped its
+            # edge, and shoved it 3.4 cm, so the cup latched on a corner and the
+            # carton hung off it. A quarter of a box is close enough to be at
+            # the stop and tight enough to exclude one still on its way.
+            # With no box size to scale against there is nothing better than a
+            # fixed guess, and a loose one is the lesser evil: too tight and a
+            # belt whose boxes were not placed by `load()` never reports an
+            # arrival at all.
+            within = 0.5 * expected if self.box_size is not None else 0.12
 
         best, best_error = None, None
         for body in self._boxes:

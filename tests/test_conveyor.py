@@ -288,3 +288,23 @@ def test_belt_surface_prefers_a_child_named_belt(monkeypatch) -> None:
 
     monkeypatch.setattr(C, "get_stage", lambda: _Stage())
     assert C._belt_surface("/World/Conveyor") == "/World/Conveyor/Belt"
+
+
+def test_a_box_still_short_of_the_stop_is_not_reported_as_arrived(belt) -> None:
+    """The corner-grab bug, from the live sim.
+
+    A fixed 0.12 m tolerance accepted a 15 cm box while it was still 6.5 cm
+    short of the stop and creeping. The pick then descended onto where the box
+    had been, clipped its top edge, shoved it 3.4 cm, and the cup latched on a
+    corner with the carton hanging off it. The tolerance has to scale with the
+    box: a quarter of one, not a fixed distance.
+    """
+    belt.load(1, box=(0.15, 0.15, 0.15))
+    far = 2.0
+    # Arrived: centre half a box short of the stop.
+    belt._boxes = [_FakeBody("/World/Box0", [far - 0.075, 0, 1.15], speed=0.0)]
+    assert belt.box_at_gate() is not None
+
+    # Still 6.5 cm out, which the old fixed tolerance accepted.
+    belt._boxes = [_FakeBody("/World/Box0", [far - 0.14, 0, 1.15], speed=0.0)]
+    assert belt.box_at_gate() is None
