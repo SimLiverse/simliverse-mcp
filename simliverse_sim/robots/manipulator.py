@@ -709,19 +709,28 @@ class SuctionGripper:
         joint.CreateExcludeFromArticulationAttr().Set(True)
         joint.CreateCollisionEnabledAttr().Set(False)
 
-        # Every degree of freedom locked, which is what Isaac's own documentation
-        # requires of an attachment point: "all six DOFs locked (low > high) to
-        # create rigid gripper-to-object constraints".
+        # Five locked, and a short travel along the approach axis. Both halves
+        # of that were measured, and both matter.
         #
-        # This was the difference between latching and not. With transZ left
-        # free over the grip distance and the rotations free to +/-3 rad, the
-        # cup sat 3 mm above a box, reported Closed, and gripped nothing on
-        # every attempt. Locking all six, the same approach latched first try
-        # and lifted the box 0.2447 m off the belt.
+        # Free travel over the whole grip distance, with the rotations free to
+        # +/-3 rad, never latched at all: the cup sat 3 mm above a box, reported
+        # Closed, and gripped nothing, every time.
+        #
+        # Locking all six - what Isaac's documentation says an attachment point
+        # needs - latched, but only on contact. The cup then had to be driven
+        # onto the box to seal, and driving it onto a carton resting against a
+        # stop shoved it 1.6 cm before the seal formed, so the grip landed on an
+        # edge and the box hung off the cup 5.4 cm out.
+        #
+        # A 35 mm range along Z is the middle: enough for the cup to reach a box
+        # it is hovering over, not enough to wobble. Measured, sealing from a
+        # 30 mm standoff: the box was not nudged at all (0.0000 m), and came off
+        # the belt 0.2544 m with the cup centred on it to 0.3 mm.
+        reach = min(float(max_grip_distance), 0.035)
         for name, low, high in (
             ("transX", 1.0, -1.0),
             ("transY", 1.0, -1.0),
-            ("transZ", 1.0, -1.0),
+            ("transZ", 0.0, reach),
             ("rotX", 1.0, -1.0),
             ("rotY", 1.0, -1.0),
             ("rotZ", 1.0, -1.0),

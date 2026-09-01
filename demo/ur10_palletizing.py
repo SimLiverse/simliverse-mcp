@@ -92,6 +92,10 @@ PALLET_Y = 0.75
 HOME = [0.0, -1.2, 1.6, -1.9, -1.57, 0.0]
 #: Flange pointing at the floor.
 DOWN = [0.0, 1.0, 0.0, 0.0]
+#: How far above the box the cup stops. It seals across this gap rather than
+#: touching: measured, a 30 mm standoff left the box completely undisturbed
+#: (0.0000 m of nudge) and centred the cup on it to 0.3 mm.
+STANDOFF = 0.030
 
 
 def build(scene: Scene | None = None, *, boxes: int = 4) -> dict:
@@ -202,8 +206,13 @@ def pick_waiting_box(cell: dict) -> dict:
     here = np.asarray(box.position, dtype=float)
     box_top = float(here[2]) + BOX / 2.0
 
-    # IK, not RMPflow: the reactive policy pushes the tool off this target.
-    arm.pose_to([float(here[0]), float(here[1]), box_top + cup.tip_offset + 0.004], DOWN)
+    # Seal from a standoff; never drive the cup onto the box. The attachment
+    # joint has 35 mm of travel along its approach axis, so it reaches down to
+    # a box it is hovering over. Descending to contact instead shoves a carton
+    # resting against the stop 1.6 cm before the seal forms, and the grip then
+    # lands on an edge with the box hanging off the cup.
+    arm.pose_to([float(here[0]), float(here[1]),
+                 box_top + cup.tip_offset + STANDOFF], DOWN)
     arm.scene.settle(1.0)
     for _ in range(5):
         arm.refine_pose()
@@ -225,7 +234,9 @@ def pick_waiting_box(cell: dict) -> dict:
 
     end = np.asarray(box.position, dtype=float)
     ee = arm.ee_position
-    offcentre = float(np.linalg.norm(np.asarray(ee)[:2] - here[:2]))
+    # Tool against the *box*, not against the target it was sent to - the
+    # latter is trivially zero and reported 0.0 through every corner grab.
+    offcentre = float(np.linalg.norm(np.asarray(ee)[:2] - end[:2]))
     return {
         "picked": bool(cup.holding),
         "box": box.prim_path,
