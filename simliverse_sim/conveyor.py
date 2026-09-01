@@ -223,6 +223,7 @@ class Conveyor:
         length: float | None = None,
         width: float | None = None,
         gate_path: str | None = None,
+        centre: Any = None,
         scene: Any = None,
     ) -> None:
         from .scene import Scene as _Scene
@@ -241,7 +242,10 @@ class Conveyor:
         # Centre of the belt deck and the across-travel axis. Set here so every
         # reader can rely on them; `build`/`from_prop` overwrite them with the
         # measured values rather than leaving later code to `getattr` a default.
-        self._origin = np.zeros(3)
+        self._origin = (
+            np.zeros(3) if centre is None
+            else as_vec3(centre, name="centre").astype(float)
+        )
         self._across = np.array([-self.direction[1], self.direction[0], 0.0])
         self.box_size: np.ndarray | None = None
         self.asset: dict[str, Any] | None = None
@@ -522,6 +526,49 @@ class Conveyor:
     def boxes(self) -> list[Any]:
         """The boxes this belt is carrying, in arrival order."""
         return list(self._boxes)
+
+    def track(self, objects: Any) -> list[Any]:
+        """Watch boxes that are already on the stage.
+
+        What a controller needs on the second Play. `load()` authors boxes and
+        is a scene-building call; a controller must not author anything, but it
+        does have to know which prims to watch — and on a replay those are the
+        same prims, returned to their authored poses by the timeline stopping.
+        """
+        self._boxes = list(objects)
+        return self._boxes
+
+    @classmethod
+    def attach(
+        cls,
+        prim_path: str,
+        *,
+        direction: Any,
+        speed: float,
+        top_z: float,
+        length: float,
+        width: float | None = None,
+        centre: Any = None,
+        gate_path: str | None = None,
+        scene: Any = None,
+    ) -> "Conveyor":
+        """A handle on a belt that is already on the stage. Authors nothing.
+
+        The counterpart to `Robot.attach`. A controller runs against a scene it
+        did not build, and re-running `build()` from inside `compute()` would
+        author a second belt over the first one on every Play.
+        """
+        return cls(
+            prim_path,
+            direction=direction,
+            speed=speed,
+            top_z=top_z,
+            length=length,
+            width=width,
+            gate_path=gate_path,
+            centre=centre,
+            scene=scene,
+        )
 
     # ── Reading the queue ────────────────────────────────────────────────────
 
