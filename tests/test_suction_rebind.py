@@ -93,9 +93,15 @@ def _arm(prim_path="/World/Arm"):
 
 @pytest.fixture
 def fake_usd(monkeypatch):
-    """Patch the stage and PrimRange the finder walks."""
+    """Patch the stage, and the one `pxr` the code under test imports.
 
-    def install(prims):
+    One coherent fake module rather than several: `rebind_suction` imports
+    `Usd`/`UsdPhysics` to find the gripper and `UsdGeom` to measure the cup, so
+    a fake carrying only some of those falls through to the real pxr and fails
+    with a Boost argument error that says nothing about the test.
+    """
+
+    def install(prims, cup_height=None):
         stage = _Stage(prims)
         monkeypatch.setattr(M, "get_stage", lambda: stage)
 
@@ -104,9 +110,22 @@ def fake_usd(monkeypatch):
             def PrimRange(_root):
                 return list(prims)
 
-        monkeypatch.setitem(
-            __import__("sys").modules, "pxr", type("pxr", (), {"Usd": _Usd})
-        )
+        class _UsdPhysics:
+            RigidBodyAPI = object()
+
+        class _Cylinder:
+            def __init__(self, _prim):
+                pass
+
+            def GetHeightAttr(self):
+                return _Attr(cup_height)
+
+        fake = type("pxr", (), {
+            "Usd": _Usd,
+            "UsdPhysics": _UsdPhysics,
+            "UsdGeom": type("UsdGeom", (), {"Cylinder": _Cylinder}),
+        })
+        monkeypatch.setitem(__import__("sys").modules, "pxr", fake)
         return stage
 
     return install
@@ -191,3 +210,42 @@ def test_rebind_accepts_an_explicit_path_without_searching(fake_usd, monkeypatch
     monkeypatch.setattr(M, "SuctionGripper", _FakeGripper)
     arm = _arm()
     assert arm.rebind_suction("/World/Explicit").prim_path == "/World/Explicit"
+
+
+def test_rebind_measures_the_cup_so_pick_heights_are_right(fake_usd, monkeypatch) -> None:
+    """A rebound cup reporting tip_offset 0.0 buries itself in the object.
+
+    Measured on the worker: the flange was sent to `box top + 0.0 + clearance`,
+    which put the cup 45 mm inside a 30 cm carton and shoved it off the belt
+    sideways rather than sealing on it. The number is the cup cylinder's own
+    height and it is on the stage, so nothing has to be remembered.
+    """
+    path = "/World/Arm_tool0_SuctionCup/SurfaceGripper"
+    fake_usd([_Prim(path, "SurfaceGripper", {})], cup_height=0.05)
+
+    class _FakeGripper:
+        def __init__(self, prim_path, *, scene=None, **settings):
+            self.prim_path = prim_path
+            self.tip_offset = 0.0
+            self.cup_path = None
+
+    monkeypatch.setattr(M, "SuctionGripper", _FakeGripper)
+    bound = _arm().rebind_suction()
+    assert bound.tip_offset == pytest.approx(0.05)
+    assert bound.cup_path == "/World/Arm_tool0_SuctionCup"
+
+
+def test_an_unmeasurable_cup_leaves_tip_offset_zero_and_says_so(fake_usd, monkeypatch, caplog) -> None:
+    path = "/World/Arm_tool0_SuctionCup/SurfaceGripper"
+    fake_usd([_Prim(path, "SurfaceGripper", {})], cup_height=None)
+
+    class _FakeGripper:
+        def __init__(self, prim_path, *, scene=None, **settings):
+            self.tip_offset = 0.0
+            self.cup_path = None
+
+    monkeypatch.setattr(M, "SuctionGripper", _FakeGripper)
+    with caplog.at_level("WARNING"):
+        bound = _arm().rebind_suction()
+    assert bound.tip_offset == 0.0
+    assert "bury the cup" in caplog.text

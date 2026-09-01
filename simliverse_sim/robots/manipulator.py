@@ -930,10 +930,13 @@ class Manipulator(Robot):
         controller that calls `arm.gripper.close()` commands fingers that are
         not there and reports no error worth reading.
 
-        `tip_offset` is not recovered — it is a fact about how the cup was
-        authored, not something written on the prim — so a rebound gripper
-        reports 0.0 and pick heights must come from the scene rather than from
-        this handle.
+        `tip_offset` **is** recovered, by measuring the cup. It has to be. A
+        pick height is `box top + tip_offset + clearance`, so a rebound gripper
+        reporting 0.0 sends the flange to where the tip belongs and buries the
+        cup in the box: measured here, the cup went 45 mm into a 30 cm carton,
+        shoved it off the belt sideways, and the seal never formed. The number
+        is the cup cylinder's own height, which is on the stage, so nothing has
+        to be remembered from the build.
         """
         path = prim_path or self._find_surface_gripper()
         settings = {}
@@ -952,6 +955,29 @@ class Manipulator(Robot):
                 if attribute and attribute.Get() is not None:
                     settings[key] = float(attribute.Get())
         self.suction = SuctionGripper(path, scene=self.scene, **settings)
+        # The cup is the SurfaceGripper's parent: `create` authors the cylinder
+        # and puts the gripper prim beneath it.
+        cup_path = path.rsplit("/", 1)[0]
+        try:
+            from pxr import UsdGeom
+
+            cup_prim = get_stage().GetPrimAtPath(cup_path)
+            height = UsdGeom.Cylinder(cup_prim).GetHeightAttr().Get() if cup_prim.IsValid() else None
+        except Exception:  # noqa: BLE001 - a cup we cannot measure is not fatal
+            logger.debug("Could not measure the cup at %s", cup_path, exc_info=True)
+            height = None
+        if height:
+            self.suction.cup_path = cup_path
+            self.suction.tip_offset = float(height)
+        else:
+            logger.warning(
+                "Could not measure the suction cup at %s, so tip_offset stays "
+                "0.0. Pick heights computed as 'box top + tip_offset' will send "
+                "the flange to where the tip belongs and bury the cup in the "
+                "object — measured at 45 mm into a carton, which shoved it off "
+                "the conveyor instead of sealing on it.",
+                cup_path,
+            )
         return self.suction
 
     def _find_surface_gripper(self) -> str:
