@@ -136,6 +136,11 @@ def compute(db=None):
 
         scene = Scene.get()
         _arm = Robot.attach(ARM, scene=scene)
+        # The cup was authored while the scene was built, because a surface
+        # gripper created after the timeline starts is never registered. This
+        # handle is new on every Play, so bind it to the cup already there —
+        # calling attach_suction_gripper() here would author a second one.
+        _arm.rebind_suction()
         # Attach to the belt already on the stage rather than rebuilding it —
         # `build()` from inside compute() would author a second belt over the
         # first one on every Play. On a replay the boxes are back at their
@@ -187,12 +192,12 @@ def compute(db=None):
         # Onto the box's top face, not its centre.
         target_z = _pick[2] + BOX / 2.0 + GRIP_LIFT
         if _arm.servo_to([_pick[0], _pick[1], target_z], DOWN, tolerance=0.012):
-            _arm.gripper.close()
+            _arm.suction.close(settle_steps=0)
             _go(GRIP)
 
     elif _state == GRIP:
         if _frame >= GRIP_FRAMES:
-            if not _arm.gripper.holding:
+            if not _arm.suction.holding:
                 _trace("  cup did not seal on %s" % _held.prim_path)
                 _go(FAILED)
                 return True
@@ -216,7 +221,7 @@ def compute(db=None):
         # is already stacked; measured on a three-cube tower that came apart.
         if _arm.servo_to([slot["rest"][0], slot["rest"][1],
                           slot["rest"][2] + BOX / 2.0 + FINAL], DOWN, tolerance=0.008):
-            _arm.gripper.open()
+            _arm.suction.open(settle_steps=0)
             _go(RELEASE)
 
     elif _state == RELEASE:

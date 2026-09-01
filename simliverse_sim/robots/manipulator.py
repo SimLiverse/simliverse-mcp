@@ -903,6 +903,79 @@ class Manipulator(Robot):
         )
         return self.suction
 
+    def rebind_suction(self, prim_path: str | None = None) -> "SuctionGripper":
+        """Bind to a suction cup that is already on the stage. Authors nothing.
+
+        A controller is the reason this exists. The cup is authored once, while
+        the scene is built, because a surface gripper created after the timeline
+        starts is never registered. But a controller builds fresh handles inside
+        `compute()` on every Play, and `Robot.attach` knows nothing about a cup
+        someone else authored — so `arm.suction` is None on a replay and the
+        obvious next move, calling `attach_suction_gripper` again, authors a
+        second cup on top of the first.
+
+        Note that `arm.gripper` is **not** the cup. It is the finger gripper,
+        which stays available so an arm can have both, and on an arm that ships
+        with a bare flange it exists and holds nothing. A KR210 palletising
+        controller that calls `arm.gripper.close()` commands fingers that are
+        not there and reports no error worth reading.
+
+        `tip_offset` is not recovered — it is a fact about how the cup was
+        authored, not something written on the prim — so a rebound gripper
+        reports 0.0 and pick heights must come from the scene rather than from
+        this handle.
+        """
+        path = prim_path or self._find_surface_gripper()
+        settings = {}
+        prim = get_stage().GetPrimAtPath(path)
+        if prim.IsValid():
+            # `create` writes these onto the prim precisely so they survive a
+            # stop/play, which is what makes rebinding give the same gripper
+            # rather than one wearing default limits.
+            for key, attr in (
+                ("max_grip_distance", "isaac:maxGripDistance"),
+                ("coaxial_force_limit", "isaac:coaxialForceLimit"),
+                ("shear_force_limit", "isaac:shearForceLimit"),
+                ("retry_interval", "isaac:retryInterval"),
+            ):
+                attribute = prim.GetAttribute(attr)
+                if attribute and attribute.Get() is not None:
+                    settings[key] = float(attribute.Get())
+        self.suction = SuctionGripper(path, scene=self.scene, **settings)
+        return self.suction
+
+    def _find_surface_gripper(self) -> str:
+        """The one surface gripper on the stage, or an error naming what it found."""
+        from pxr import Usd
+
+        stage = get_stage()
+        found = [
+            str(prim.GetPath())
+            for prim in Usd.PrimRange(stage.GetPseudoRoot())
+            if "SurfaceGripper" in str(prim.GetTypeName())
+        ]
+        if not found:
+            raise MotionError(
+                f"{self.prim_path}: no surface gripper on the stage to bind to. "
+                f"A cup has to be authored before physics starts — call "
+                f"attach_suction_gripper() while building the scene, not from a "
+                f"controller."
+            )
+        if len(found) == 1:
+            return found[0]
+        # More than one arm, or a cup left behind by an earlier build. Prefer one
+        # that names this robot; a wrong guess here drives the other arm's cup.
+        stem = self.prim_path.strip("/").replace("/", "_")
+        owned = [path for path in found if stem in path]
+        if len(owned) == 1:
+            return owned[0]
+        raise MotionError(
+            f"{self.prim_path}: {len(found)} surface grippers on the stage "
+            f"({', '.join(found)}) and {len(owned)} of them name this robot, so "
+            f"which one to drive is ambiguous. Pass the path explicitly: "
+            f"rebind_suction('/World/...')."
+        )
+
     def remove_suction_gripper(self) -> None:
         """Delete a cup authored by `attach_suction_gripper`, if there is one."""
         gripper = getattr(self, "suction", None)
