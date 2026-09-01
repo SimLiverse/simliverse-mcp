@@ -141,6 +141,11 @@ def build(scene: Scene | None = None, *, boxes: int = 4) -> dict:
 
     belt = Conveyor.from_description(described, scene=scene)
     belt.track([RigidObject(path, scene=scene) for path in described["boxes"]])
+    # Leave the cell in a state a pick can start from: a box actually settled
+    # against the stop, and the belt off so the queue stops pressing on it.
+    # Sampling `box_at_gate()` once is not enough - a box that has arrived is
+    # still jostling above the settled-speed threshold for a second or two.
+    wait_for_box(belt)
 
     return {
         "arm": arm, "cup": cup, "belt": belt, "slots": slots,
@@ -148,12 +153,31 @@ def build(scene: Scene | None = None, *, boxes: int = 4) -> dict:
     }
 
 
+def wait_for_box(belt, *, seconds: float = 12.0, step: float = 0.5):
+    """Run the belt until a box is settled against the stop, then halt it.
+
+    Returns the box, or None if none arrived in time. The belt is left off
+    either way: with it running the queue keeps pressing on the box being
+    picked, and the pick pose moves under the cup.
+    """
+    elapsed = 0.0
+    while elapsed < seconds:
+        box = belt.box_at_gate()
+        if box is not None:
+            belt.halt()
+            return box
+        belt.scene.settle(step)
+        elapsed += step
+    belt.halt()
+    return None
+
+
 def pick_waiting_box(cell: dict) -> dict:
     """Seal on the box at the stop and lift it clear. Returns what was measured."""
     arm, cup, belt = cell["arm"], cell["cup"], cell["belt"]
-    box = belt.box_at_gate()
+    box = belt.box_at_gate() or wait_for_box(belt)
     if box is None:
-        return {"picked": False, "reason": "no box has settled against the stop"}
+        return {"picked": False, "reason": "no box settled against the stop in 12 s"}
 
     start = np.asarray(box.position, dtype=float).copy()
     box_top = float(start[2]) + BOX / 2.0
