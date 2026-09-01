@@ -751,6 +751,14 @@ class SuctionGripper:
         joint_prim.GetAttribute("isaac:forwardAxis").Set("Z")
         joint_prim.GetAttribute("isaac:clearanceOffset").Set(float(clearance_offset))
 
+        # Clear any gripper already under this cup. `create_surface_gripper`
+        # does not reuse one: authoring the cell twice in a session left
+        # SurfaceGripper in place and made SurfaceGripper_01 beside it, and the
+        # arm then had two grippers with no way to tell which one was live.
+        for existing in list(scene.stage.GetPrimAtPath(cup_path).GetChildren()):
+            if "SurfaceGripper" in str(existing.GetTypeName()) or                     existing.GetName().startswith("SurfaceGripper"):
+                scene.stage.RemovePrim(existing.GetPath())
+
         prim = create_surface_gripper(scene.stage, cup_path)
         prim.GetRelationship("isaac:attachmentPoints").SetTargets([attach_path])
 
@@ -1078,10 +1086,15 @@ class Manipulator(Robot):
             )
         if len(found) == 1:
             return found[0]
-        # More than one arm, or a cup left behind by an earlier build. Prefer one
-        # that names this robot; a wrong guess here drives the other arm's cup.
-        stem = self.prim_path.strip("/").replace("/", "_")
-        owned = [path for path in found if stem in path]
+        # More than one arm, or a cup left behind by an earlier build. A cup is
+        # parented under the end-effector link, so "is it under this robot" is
+        # exact - and the old heuristic, matching a flattened name stem like
+        # `World_UR` against the path, stopped matching anything the moment the
+        # cup moved inside the robot. It reported every gripper as unowned.
+        owned = [path for path in found if path.startswith(self.prim_path + "/")]
+        if not owned:
+            stem = self.prim_path.strip("/").replace("/", "_")
+            owned = [path for path in found if stem in path]
         if len(owned) == 1:
             return owned[0]
         raise MotionError(
