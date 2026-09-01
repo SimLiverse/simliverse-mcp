@@ -352,8 +352,65 @@ class Conveyor:
         )
         belt._origin = centre.copy()
         belt._across = across
+        overlaps = belt._robots_in_the_way()
+        if overlaps:
+            belt.overlaps = overlaps
+            for hit in overlaps:
+                logger.warning(
+                    "%s runs through the robot at %s (base %.2f m from the belt "
+                    "centre-line, belt half-width %.2f m). A belt is placed by "
+                    "its centre and is metres long, so a stop positioned at the "
+                    "robot's reach puts the *middle* of the belt on top of the "
+                    "base. The arm is then inside the conveyor: its joints stop "
+                    "responding to position commands and every target reads as "
+                    "'outside the workspace'. Measured on a KR210 — commanded "
+                    "home, joints did not move, end effector pinned at the deck "
+                    "height. Offset the belt across its travel, or shorten it.",
+                    prim_path, hit["robot"], hit["offset"], hit["half_width"],
+                )
         belt.start()
         return belt
+
+    def _robots_in_the_way(self) -> list[dict[str, Any]]:
+        """Robot bases sitting under the belt's footprint.
+
+        The conveyor equivalent of the check `spawn_prop` already does, and it
+        exists for the same reason: these things are positioned by their centre
+        and are large, so the number you reason about (where the *stop* goes)
+        is metres away from the volume the object actually occupies.
+        """
+        from pxr import Usd, UsdPhysics
+
+        try:
+            stage = get_stage()
+        except Exception:  # noqa: BLE001 - no stage is not this check's problem
+            return []
+
+        half_width = float(self.width or 0.0) / 2.0
+        half_length = float(self.length or 0.0) / 2.0
+        hits = []
+        for prim in Usd.PrimRange(stage.GetPseudoRoot()):
+            if not prim.HasAPI(UsdPhysics.ArticulationRootAPI):
+                continue
+            path = str(prim.GetPath())
+            if path.startswith(self.belt_path):
+                continue
+            bounds = _world_bounds(path)
+            if bounds is None:
+                continue
+            low, high = bounds
+            base = np.array([(low[0] + high[0]) / 2.0, (low[1] + high[1]) / 2.0])
+            delta = base - self._origin[:2]
+            along = abs(float(np.dot(delta, self.direction[:2])))
+            across = abs(float(np.dot(delta, self._across[:2])))
+            if along <= half_length and across <= half_width:
+                hits.append({
+                    "robot": path,
+                    "offset": round(across, 4),
+                    "along": round(along, 4),
+                    "half_width": round(half_width, 4),
+                })
+        return hits
 
     @classmethod
     def from_prop(

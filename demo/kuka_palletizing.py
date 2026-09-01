@@ -69,8 +69,21 @@ BELT_LENGTH = 3.2
 BELT_WIDTH = 0.70
 BELT_SPEED = 0.30             # m/s. A real palletising infeed runs 0.2-0.5.
 
-BELT_REACH = 1.90             # belt stop, on +X
-PALLET_REACH = 1.90           # pallet centre, on +Y
+# The cell layout, and the number that matters is BELT_OFFSET_Y.
+#
+# The obvious arrangement - belt along +X with its stop at the arm's reach -
+# puts the *middle* of a 3.2 m belt directly on top of a robot standing at the
+# origin, because a belt is placed by its centre. Measured on the live sim: the
+# KR210 ended up inside the conveyor, its joints stopped responding to position
+# commands entirely, and every target came back "outside the workspace" with
+# the end effector pinned at the belt's deck height. Nothing in the error said
+# "your robot is inside a conveyor".
+#
+# So the belt runs *past* the arm, offset across its travel, which is also how
+# a real infeed is laid out: the arm stands beside the line, not on it.
+BELT_STOP_X = 1.30            # where the stop is, and so where a box waits
+BELT_OFFSET_Y = -1.05         # belt centre-line, clear of the arm's base
+PALLET_REACH = 1.70           # pallet centre, on +Y
 
 PALLET_DECK_Z = 0.1425        # measured from Isaac's pallet.usd
 PALLET_DECK = (1.2132, 0.8023)
@@ -78,7 +91,7 @@ PALLET_DECK = (1.2132, 0.8023)
 ROWS, COLS, LAYERS = 2, 2, 2  # eight boxes
 
 
-def build(scene: Scene | None = None, *, asset: bool = False, boxes: int = 8) -> dict:
+def build(scene: Scene | None = None, *, asset: bool = False, boxes: int = 4) -> dict:
     """Author the cell. Returns what the controller needs to drive it."""
     scene = scene or Scene.get()
     scene.stop()
@@ -90,12 +103,12 @@ def build(scene: Scene | None = None, *, asset: bool = False, boxes: int = 8) ->
     # The belt runs along +X and stops short of the arm, so the last box sits at
     # BELT_REACH with its far face against the stop. Centre it so that the stop
     # lands there rather than working backwards from the belt's midpoint later.
-    belt_centre_x = BELT_REACH - BELT_LENGTH / 2.0
+    belt_centre_x = BELT_STOP_X - BELT_LENGTH / 2.0
     if asset:
         belt = Conveyor.from_prop(
             "conveyorbelt_a09",
             prim_path=BELT,
-            position=[belt_centre_x, 0.0, 0.0],
+            position=[belt_centre_x, BELT_OFFSET_Y, 0.0],
             direction=(1, 0, 0),
             speed=BELT_SPEED,
             scene=scene,
@@ -105,7 +118,7 @@ def build(scene: Scene | None = None, *, asset: bool = False, boxes: int = 8) ->
             BELT,
             length=BELT_LENGTH,
             width=BELT_WIDTH,
-            position=[belt_centre_x, 0.0, BELT_DECK],
+            position=[belt_centre_x, BELT_OFFSET_Y, BELT_DECK],
             direction=(1, 0, 0),
             speed=BELT_SPEED,
             gate=True,
