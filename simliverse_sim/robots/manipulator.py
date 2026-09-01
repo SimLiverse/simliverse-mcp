@@ -643,6 +643,16 @@ class SuctionGripper:
         ])
         cup_prim = cup.GetPrim()
         xform = UsdGeom.Xformable(cup_prim)
+        # Clear first. `Define` returns the *existing* prim when one is already
+        # at this path, and AddTranslateOp then throws "the xformOp
+        # 'xformOp:translate' already exists in xformOpOrder". That happens the
+        # second time a scene is built in one session, which is the normal way
+        # an agent works: build, look, adjust, build again. The first build
+        # succeeded and the second died inside attach_suction_gripper, so the
+        # cell could never be re-authored without restarting the simulator.
+        # `spawn_rigid` and `spawn_prop` have both cleared their op order for
+        # this reason; this was the one authoring path that did not.
+        xform.ClearXformOpOrder()
         xform.AddTranslateOp().Set(cup_world.ExtractTranslation())
         xform.AddOrientOp().Set(Gf.Quatf(cup_world.ExtractRotationQuat()))
         UsdPhysics.CollisionAPI.Apply(cup_prim)
