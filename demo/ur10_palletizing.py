@@ -109,6 +109,8 @@ def build(scene: Scene | None = None, *, boxes: int = 4) -> dict:
     scene.configure_physics()
     scene.ensure_ground_plane()
 
+    light_the_cell(scene)
+
     arm = Robot.spawn("ur10", position=[0.0, 0.0, 0.0], prim_path=ARM)
     gains = arm.tune_drives(stiffness=1.0e5, damping=1.0e4, max_force=1.0e4)
 
@@ -155,6 +157,39 @@ def build(scene: Scene | None = None, *, boxes: int = 4) -> dict:
         "arm": arm, "cup": cup, "belt": belt, "slots": slots,
         "gains": gains, "described": described, "box_size": BOX,
     }
+
+
+def light_the_cell(scene, *, dome: float = 1200.0, key: float = 3000.0) -> list[str]:
+    """A dome and a key light, because an unlit cell looks broken.
+
+    Isaac's default stage has almost no light in it, so a perfectly healthy
+    scene renders as dark shapes on black and reads as a rendering fault - the
+    first thing anyone says about it is that the simulator is glitching. This
+    is presentation only and touches no physics, but a cell nobody can see is
+    not a demo.
+    """
+    from pxr import Gf, UsdGeom, UsdLux
+
+    stage = scene.stage
+    made = []
+
+    dome_path = "/World/CellDomeLight"
+    stage.RemovePrim(dome_path)
+    dome_light = UsdLux.DomeLight.Define(stage, dome_path)
+    dome_light.CreateIntensityAttr(float(dome))
+    made.append(dome_path)
+
+    key_path = "/World/CellKeyLight"
+    stage.RemovePrim(key_path)
+    key_light = UsdLux.DistantLight.Define(stage, key_path)
+    key_light.CreateIntensityAttr(float(key))
+    key_light.CreateAngleAttr(1.0)
+    xform = UsdGeom.Xformable(key_light.GetPrim())
+    xform.ClearXformOpOrder()
+    # Down and across the cell, so the cartons cast a shadow and read as solid.
+    xform.AddRotateXYZOp().Set(Gf.Vec3f(-45.0, 0.0, 35.0))
+    made.append(key_path)
+    return made
 
 
 def wait_for_box(belt, *, seconds: float = 12.0, step: float = 0.5):
