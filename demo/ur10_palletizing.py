@@ -220,6 +220,8 @@ def build(
     cols: int = 2,
     layers: int = 1,
     robot: str = "ur10",
+    guides: bool = True,
+    grip_distance: float | None = None,
 ) -> dict:
     """Author the cell and leave it playing with a box waiting at the stop.
 
@@ -263,7 +265,7 @@ def build(
         direction=(1, 0, 0), speed=speed,
         gate=True, gate_height=gate_height,
         # A queue pressing on a stop needs somewhere for that force to go.
-        guides=True, guide_height=max(0.10, box * 0.8),
+        guides=guides, guide_height=max(0.10, box * 0.8),
         scene=scene,
     )
     belt.load(boxes, box=(box, box, box), mass=box_mass,
@@ -271,6 +273,17 @@ def build(
 
     spawn_prop("pallet", prim_path=PALLET,
                position=[0.0, pallet_y, 0.0], scene=scene)
+    # A pallet is 1.21 m long and is placed by its centre, so a pallet_y that
+    # sounds merely close - 0.60 - puts its near edge at -0.005 and the arm's
+    # base inside it. `spawn_prop` warns; a warning in a sweep of twelve cells
+    # scrolls past. Recording it lets a caller tell "this cell is impossible"
+    # apart from "this code is wrong", which are not the same result.
+    from simliverse_sim.props import _overlapping_robots
+
+    try:
+        fouled = _overlapping_robots(PALLET)
+    except Exception:  # noqa: BLE001 - a diagnostic must not break the build
+        fouled = []
     slots = pallet_slots(origin=[0.0, pallet_y, 0.1425], box=(box, box, box),
                          rows=rows, cols=cols, layers=layers, gap=0.01)
 
@@ -278,7 +291,8 @@ def build(
 
     cup = arm.attach_suction_gripper(
         approach_axis="Z",
-        max_grip_distance=shape["max_grip_distance"],
+        max_grip_distance=(shape["max_grip_distance"]
+                           if grip_distance is None else float(grip_distance)),
         cup_radius=cup_radius, cup_length=0.04,
         # 1e6, not the 500 taken from Isaac's tutorial. At 500 the seal forms
         # and breaks within 2 mm of the first commanded motion, whatever that
@@ -316,11 +330,13 @@ def build(
     return {
         "arm": arm, "cup": cup, "belt": belt, "slots": slots,
         "gains": gains, "described": described, "box_size": box,
+        "fouled": fouled,
         "spec": {
             "boxes": boxes, "box": box, "box_mass": box_mass, "deck": deck,
             "stop_x": stop_x, "offset_y": offset_y, "speed": speed,
             "pallet_y": pallet_y, "rows": rows, "cols": cols,
-            "layers": layers, "robot": robot,
+            "layers": layers, "robot": robot, "guides": guides,
+            "grip_distance": grip_distance,
         },
     }
 

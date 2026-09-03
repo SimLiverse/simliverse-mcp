@@ -32,7 +32,11 @@ SCENARIOS: list[tuple[str, dict[str, Any]]] = [
     ("light carton", {"box_mass": 0.25}),
     ("slow belt", {"speed": 0.10}),
     ("fast belt", {"speed": 0.40}),
-    ("near pallet", {"pallet_y": 0.60}),
+    # Not 0.60: a pallet is 1.21 m long and placed by its centre, so 0.60 puts
+    # its near edge at -0.005 and the arm's base inside it. That is an
+    # impossible cell, not a failing one, and a sweep that cannot tell those
+    # apart reports a geometry mistake as a code defect.
+    ("near pallet", {"pallet_y": 0.68}),
     ("far pallet", {"pallet_y": 0.95}),
     ("low deck", {"deck": 0.35}),
     ("high deck", {"deck": 0.55}),
@@ -66,6 +70,15 @@ def sweep(
             # One more carton than slots to fill, so "no carton arrived" means
             # the belt failed to deliver rather than that the queue ran dry.
             cell = cell_mod.build(scene, boxes=cartons + 1, **spec)
+            if cell.get("fouled"):
+                row.update({
+                    "built": False,
+                    "error": "impossible cell: the pallet encloses %s" % (
+                        ", ".join(f["robot"] for f in cell["fouled"])),
+                })
+                row["wall_s"] = round(time.time() - started, 1)
+                rows.append(row)
+                continue
             report_ = cell_mod.palletise(cell, count=cartons)
             row.update({
                 "built": True,
