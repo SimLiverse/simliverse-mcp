@@ -222,6 +222,7 @@ def build(
     robot: str = "ur10",
     guides: bool = False,
     grip_distance: float | None = None,
+    pedestal: float = 0.0,
 ) -> dict:
     """Author the cell and leave it playing with a box waiting at the stop.
 
@@ -252,7 +253,22 @@ def build(
 
     light_the_cell(scene)
 
-    arm = Robot.spawn(robot, position=[0.0, 0.0, 0.0], prim_path=ARM)
+    # A pedestal is structure, not scenery: its top *is* the robot's base
+    # height. Drawing a plinth under an arm that is still on the floor gives a
+    # render of a robot growing out of a crate, so the base moves with it.
+    # Zero by default, because every number in this cell was measured with the
+    # base on the floor and a pedestal moves the whole working envelope up.
+    base_z = 0.0
+    plinth = None
+    if pedestal > 0.0:
+        from simliverse_sim import spawn_pedestal
+
+        plinth = spawn_pedestal("/World/Pedestal", position=[0.0, 0.0, 0.0],
+                                height=float(pedestal), size=(0.45, 0.45),
+                                scene=scene)
+        base_z = plinth["top"]
+
+    arm = Robot.spawn(robot, position=[0.0, 0.0, base_z], prim_path=ARM)
     gains = arm.tune_drives(stiffness=1.0e5, damping=1.0e4, max_force=1.0e4)
 
     shape = cell_geometry(box)
@@ -341,13 +357,13 @@ def build(
     return {
         "arm": arm, "cup": cup, "belt": belt, "slots": slots,
         "gains": gains, "described": described, "box_size": box,
-        "fouled": fouled,
+        "fouled": fouled, "pedestal": plinth, "base_z": base_z,
         "spec": {
             "boxes": boxes, "box": box, "box_mass": box_mass, "deck": deck,
             "stop_x": stop_x, "offset_y": offset_y, "speed": speed,
             "pallet_y": pallet_y, "rows": rows, "cols": cols,
             "layers": layers, "robot": robot, "guides": guides,
-            "grip_distance": grip_distance,
+            "grip_distance": grip_distance, "pedestal": pedestal,
         },
     }
 

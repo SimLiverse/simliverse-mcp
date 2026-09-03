@@ -422,3 +422,133 @@ def spawn_operator_platform(prim_path: str = "/World/OperatorPlatform", *,
         mass=0.0, static=True, friction=0.8, restitution=0.0, color=colour,
     )
     return prim_path
+
+
+def spawn_pedestal(prim_path: str = "/World/Pedestal", *,
+                   position: Any = (0.0, 0.0, 0.0),
+                   height: float = 0.40,
+                   size: Any = (0.45, 0.45),
+                   colour: Any = (0.30, 0.32, 0.35),
+                   scene: Any = None) -> dict[str, Any]:
+    """The plinth an arm is bolted to. Its *top* is the robot's base height.
+
+    This is structure, not scenery. A pedestal that is drawn under an arm
+    still standing on the floor is a box the arm intersects, and the render
+    then shows a robot growing out of a crate. The height returned here is
+    where the base actually goes, and a caller that spawns the arm anywhere
+    else has drawn a picture rather than built a cell.
+
+    Returns the path and the top height, because the top is the number every
+    other part of the layout needs and recomputing it from a centre is exactly
+    the arithmetic this module exists to stop people doing.
+    """
+    from .scene import Scene
+
+    scene = scene or Scene.get()
+    if height <= 0:
+        raise GuardingError(
+            f"height={height}: a pedestal with no height is not a mounting, "
+            f"and an arm bolted to it sits on the floor.")
+    at = np.asarray(position, dtype=float).reshape(3)
+    extent = np.asarray(size, dtype=float).reshape(2)
+    scene.spawn_rigid(
+        prim_path, shape="cube",
+        scale=[float(extent[0] / 2.0), float(extent[1] / 2.0),
+               float(height / 2.0)],
+        position=[float(at[0]), float(at[1]), float(at[2] + height / 2.0)],
+        mass=0.0, static=True, friction=0.6, restitution=0.0, color=colour,
+    )
+    return {"prim_path": prim_path, "top": float(at[2] + height),
+            "height": float(height)}
+
+
+#: A person is about this tall, and the figure is built to it rather than to
+#: whatever looked right: the whole point of putting one in the scene is to
+#: give every other dimension something to be read against.
+OPERATOR_HEIGHT = 1.75
+
+
+def spawn_operator(prim_path: str = "/World/Operator", *,
+                   position: Any = (0.0, 0.0, 0.0),
+                   height: float = OPERATOR_HEIGHT,
+                   facing: float = 0.0,
+                   colour: Any = (0.20, 0.30, 0.55),
+                   skin: Any = (0.85, 0.70, 0.58),
+                   fence: "SafetyFence | None" = None,
+                   scene: Any = None) -> dict[str, Any]:
+    """A standing figure, for scale. Nothing in the index, so it is primitives.
+
+    `fence`, when given, is checked: a person authored inside the guarding is
+    a picture of a cell nobody is allowed to run. It is reported rather than
+    refused, because a figure inside the fence is exactly what you draw when
+    illustrating a teach pendant or a maintenance access - but it should be a
+    thing someone chose, not a thing that happened.
+
+    The figure is static and collidable. An operator that a robot can sweep
+    through is scenery, and scenery is what makes a layout look checked when
+    it has not been.
+    """
+    from .scene import Scene
+
+    scene = scene or Scene.get()
+    if height <= 0:
+        raise GuardingError(f"height={height}: a person has positive height.")
+
+    at = np.asarray(position, dtype=float).reshape(3)
+    x, y, base = float(at[0]), float(at[1]), float(at[2])
+
+    # Proportions as fractions of height, so a shorter figure is still a
+    # person rather than the same body with a smaller head. They sum to 1.0
+    # on purpose: 0.47 + 0.40 + 2 x 0.065. The first set summed to 0.94, so a
+    # figure asked for 1.75 m stood 1.65 - which defeats the only reason to
+    # put a person in a scene, since everything else is read against them.
+    leg = height * 0.47
+    torso = height * 0.40
+    head_r = height * 0.065
+    shoulder = height * 0.22
+
+    made: list[str] = []
+    for side, sign in (("L", 1.0), ("R", -1.0)):
+        path = f"{prim_path}_Leg{side}"
+        scene.spawn_rigid(
+            path, shape="cylinder", radius=height * 0.045, size=leg,
+            position=[x, y + sign * height * 0.05, base + leg / 2.0],
+            mass=0.0, static=True, friction=0.6, restitution=0.0,
+            color=(0.15, 0.15, 0.18),
+        )
+        made.append(path)
+
+    torso_path = f"{prim_path}_Torso"
+    scene.spawn_rigid(
+        torso_path, shape="cube",
+        scale=[height * 0.055, shoulder / 2.0, torso / 2.0],
+        position=[x, y, base + leg + torso / 2.0],
+        orientation=[0.0, 0.0, float(facing)],
+        mass=0.0, static=True, friction=0.6, restitution=0.0, color=colour,
+    )
+    made.append(torso_path)
+
+    head_path = f"{prim_path}_Head"
+    scene.spawn_rigid(
+        head_path, shape="sphere", radius=head_r,
+        position=[x, y, base + leg + torso + head_r],
+        mass=0.0, static=True, friction=0.6, restitution=0.0, color=skin,
+    )
+    made.append(head_path)
+
+    report: dict[str, Any] = {
+        "prim_path": prim_path, "parts": made,
+        "height": float(height),
+        "top": float(base + leg + torso + 2.0 * head_r),
+    }
+    if fence is not None:
+        inside = fence.contains((x, y))
+        report["inside_guarding"] = bool(inside)
+        if inside:
+            logger.warning(
+                "The operator at (%.2f, %.2f) is inside the guarding at %s. "
+                "That is a cell nobody is allowed to run with the robot live, "
+                "so it wants to be a choice rather than an accident.",
+                x, y, fence.prim_path,
+            )
+    return report

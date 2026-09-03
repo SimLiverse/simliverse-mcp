@@ -33,8 +33,24 @@ class _Spawned:
         return np.asarray(self.kwargs["scale"], dtype=float)
 
     def bounds(self):
-        """World min/max of the box, which is what a layout question needs."""
-        return self.position - self.scale, self.position + self.scale
+        """World min/max, whatever primitive this is.
+
+        Cubes carry a scale; cylinders and spheres carry radius and size, so a
+        harness that only understands `scale` cannot measure a person.
+        """
+        kw = self.kwargs
+        if "scale" in kw:
+            half = np.asarray(kw["scale"], dtype=float)
+        elif kw.get("radius") is not None and kw.get("size") is not None:
+            r = float(kw["radius"])
+            half = np.array([r, r, float(kw["size"]) / 2.0])
+        elif kw.get("radius") is not None:
+            r = float(kw["radius"])
+            half = np.array([r, r, r])
+        else:
+            side = float(kw.get("size", 0.0)) / 2.0
+            half = np.array([side, side, side])
+        return self.position - half, self.position + half
 
 
 class _FakeScene:
@@ -330,3 +346,101 @@ def test_furniture_can_be_placed_outside_the_gate(scene) -> None:
 
     assert not fence.contains(station), "the operator stands outside"
     assert fence.clearance(station) < 0.0
+
+
+# ── The pedestal ─────────────────────────────────────────────────────────────
+
+
+def test_a_pedestal_stands_on_the_floor(scene) -> None:
+    G.spawn_pedestal(position=(0.0, 0.0, 0.0), height=0.4, scene=scene)
+    low, high = scene.spawned[-1].bounds()
+
+    assert low[2] == pytest.approx(0.0), "a plinth sunk into the floor"
+    assert high[2] == pytest.approx(0.4)
+
+
+@pytest.mark.parametrize("height", [0.15, 0.4, 0.75, 1.2])
+def test_the_pedestal_reports_where_the_base_actually_goes(scene, height) -> None:
+    """The top is the number the rest of the layout needs.
+
+    An arm spawned anywhere but here intersects the plinth it is supposedly
+    bolted to, and the render shows a robot growing out of a crate.
+    """
+    made = G.spawn_pedestal(position=(0.3, -0.2, 0.0), height=height,
+                            scene=scene)
+    _, high = scene.spawned[-1].bounds()
+
+    assert made["top"] == pytest.approx(height)
+    assert made["top"] == pytest.approx(high[2]), (
+        "the reported base height is not the top of the plinth")
+
+
+def test_a_pedestal_on_a_raised_floor_still_reports_its_own_top(scene) -> None:
+    made = G.spawn_pedestal(position=(0.0, 0.0, 0.25), height=0.4, scene=scene)
+    assert made["top"] == pytest.approx(0.65)
+
+
+def test_a_pedestal_with_no_height_is_refused(scene) -> None:
+    """Zero height is an arm on the floor with a decal under it."""
+    with pytest.raises(GuardingError, match="not a mounting"):
+        G.spawn_pedestal(height=0.0, scene=scene)
+    with pytest.raises(GuardingError, match="not a mounting"):
+        G.spawn_pedestal(height=-0.3, scene=scene)
+
+
+# ── The operator ─────────────────────────────────────────────────────────────
+
+
+def test_the_operator_stands_on_the_floor_and_is_person_sized(scene) -> None:
+    made = G.spawn_operator(position=(0.0, -3.0, 0.0), scene=scene)
+
+    lowest = min(p.bounds()[0][2] for p in scene.spawned)
+    assert lowest == pytest.approx(0.0, abs=1e-6), "feet below the floor"
+    assert made["top"] == pytest.approx(G.OPERATOR_HEIGHT, abs=0.02), (
+        "the figure is not the height it reports")
+
+
+def test_the_operator_is_built_from_proportions_not_fixed_sizes(scene) -> None:
+    """A shorter figure should be a person, not the same body scaled oddly."""
+    short = G.spawn_operator("/World/Short", position=(0.0, 0.0, 0.0),
+                             height=1.2, scene=scene)
+    assert short["top"] == pytest.approx(1.2, abs=0.02)
+
+
+def test_the_operator_has_a_head_two_legs_and_a_torso(scene) -> None:
+    made = G.spawn_operator(position=(0.0, 0.0, 0.0), scene=scene)
+    names = " ".join(made["parts"])
+
+    assert "LegL" in names and "LegR" in names
+    assert "Torso" in names and "Head" in names
+
+
+def test_a_person_of_no_height_is_refused(scene) -> None:
+    with pytest.raises(GuardingError, match="positive height"):
+        G.spawn_operator(height=0.0, scene=scene)
+
+
+def test_an_operator_outside_the_guarding_is_the_normal_case(scene) -> None:
+    fence = SafetyFence.build(size=(4.0, 4.0), gate="south", scene=scene)
+    made = G.spawn_operator(position=(0.0, -3.0, 0.0), fence=fence,
+                            scene=scene)
+
+    assert made["inside_guarding"] is False
+
+
+def test_an_operator_inside_the_guarding_is_reported(scene) -> None:
+    """A person inside the fence is a cell nobody may run with the robot live.
+
+    Reported rather than refused: it is exactly what you draw to illustrate a
+    teach pendant or maintenance access. It should be a thing someone chose.
+    """
+    fence = SafetyFence.build(size=(4.0, 4.0), gate="south", scene=scene)
+    made = G.spawn_operator(position=(0.0, 0.0, 0.0), fence=fence, scene=scene)
+
+    assert made["inside_guarding"] is True
+
+
+def test_without_a_fence_no_safety_claim_is_made(scene) -> None:
+    """Silence, not a guess: nothing was checked, so nothing is reported."""
+    made = G.spawn_operator(position=(0.0, 0.0, 0.0), scene=scene)
+    assert "inside_guarding" not in made

@@ -80,7 +80,9 @@ from .guarding import (
     SafetyFence,
     spawn_beacon,
     spawn_cabinet,
+    spawn_operator,
     spawn_operator_platform,
+    spawn_pedestal,
 )
 from .objects import RigidObject
 from .robots import (
@@ -125,7 +127,9 @@ __all__ = [
     "SafetyFence",
     "spawn_beacon",
     "spawn_cabinet",
+    "spawn_operator",
     "spawn_operator_platform",
+    "spawn_pedestal",
     "Escapement",
     "DeadPlateError",
     "STANDARD_VIEWS",

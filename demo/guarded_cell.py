@@ -24,6 +24,7 @@ from simliverse_sim import (
     Scene,
     spawn_beacon,
     spawn_cabinet,
+    spawn_operator,
     spawn_operator_platform,
 )
 
@@ -117,10 +118,17 @@ def guard(cell: dict, *, scene: Any = None, gate: str = "south",
                            float(fence.centre[1] + fence.size[1] / 2.0 - 0.25),
                            0.0),
                  height=1.2, scene=scene)
+    platform_y = float(gate_line - 1.0)
     spawn_operator_platform("/World/OperatorPlatform",
-                            position=(float(fence.centre[0]),
-                                      float(gate_line - 1.0), 0.0),
+                            position=(float(fence.centre[0]), platform_y, 0.0),
                             size=(1.6, 1.6), scene=scene)
+    # On the platform, outside the line, facing the gate. Passing the fence
+    # means the placement is checked rather than asserted - a figure inside
+    # the guarding is a cell nobody may run with the robot live.
+    person = spawn_operator("/World/Operator",
+                            position=(float(fence.centre[0] + 0.45),
+                                      platform_y, 0.05),
+                            facing=90.0, fence=fence, scene=scene)
 
     cell["fence"] = fence
     cell["guarding"] = {
@@ -129,11 +137,13 @@ def guard(cell: dict, *, scene: Any = None, gate: str = "south",
         "cabinet": "/World/Cabinet",
         "beacon": "/World/Beacon",
         "platform": "/World/OperatorPlatform",
+        "operator": person,
     }
     return cell
 
 
-def build(scene: Any = None, *, boxes: int = 4, **spec) -> dict:
+def build(scene: Any = None, *, boxes: int = 4, pedestal: float = 0.35,
+          **spec) -> dict:
     """The measured palletising cell, fenced.
 
     Guarding is authored after the working cell rather than before it because
@@ -141,7 +151,7 @@ def build(scene: Any = None, *, boxes: int = 4, **spec) -> dict:
     guessing, and the fence is exactly the thing that must not be guessed.
     """
     scene = scene or Scene.get()
-    cell = base.build(scene, boxes=boxes, **spec)
+    cell = base.build(scene, boxes=boxes, pedestal=pedestal, **spec)
     return guard(cell, scene=scene)
 
 

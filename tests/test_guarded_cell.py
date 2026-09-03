@@ -27,6 +27,22 @@ class _Spawned:
     def scale(self):
         return np.asarray(self.kwargs["scale"], dtype=float)
 
+    def bounds(self):
+        """World min/max, whatever primitive this is."""
+        kw = self.kwargs
+        if "scale" in kw:
+            half = np.asarray(kw["scale"], dtype=float)
+        elif kw.get("radius") is not None and kw.get("size") is not None:
+            r = float(kw["radius"])
+            half = np.array([r, r, float(kw["size"]) / 2.0])
+        elif kw.get("radius") is not None:
+            r = float(kw["radius"])
+            half = np.array([r, r, r])
+        else:
+            side = float(kw.get("size", 0.0)) / 2.0
+            half = np.array([side, side, side])
+        return self.position - half, self.position + half
+
 
 class _FakeScene:
     def __init__(self):
@@ -198,3 +214,110 @@ def test_a_short_belt_ends_inside_the_guarding() -> None:
 
     assert east_line > far_x
     assert fence.openings["east"] == []
+
+
+# ── The operator, and the pedestal under the arm ─────────────────────────────
+
+
+def test_the_operator_stands_outside_the_guarding() -> None:
+    """The safety invariant. A person inside the line is not a runnable cell."""
+    from simliverse_sim.guarding import spawn_operator
+
+    scene = _FakeScene()
+    fence = _fence(scene)
+    gate_line = float(fence.centre[1] - fence.size[1] / 2.0)
+    made = spawn_operator("/World/Operator",
+                          position=(float(fence.centre[0] + 0.45),
+                                    gate_line - 1.0, 0.05),
+                          fence=fence, scene=scene)
+
+    assert made["inside_guarding"] is False
+
+
+def test_the_operator_stands_on_the_platform_not_beside_it() -> None:
+    """A figure floating next to its own standing area reads as an error.
+
+    Both feet, not just the centre-line: a person placed by their middle can
+    still have half of them off the edge.
+    """
+    from simliverse_sim.guarding import spawn_operator
+
+    scene = _FakeScene()
+    fence = _fence(scene)
+    gate_line = float(fence.centre[1] - fence.size[1] / 2.0)
+    platform_x, platform_y = float(fence.centre[0]), gate_line - 1.0
+    half = 1.6 / 2.0
+
+    spawn_operator("/World/Operator",
+                   position=(platform_x + 0.45, platform_y, 0.05),
+                   fence=fence, scene=scene)
+
+    for part in scene.spawned:
+        if "Operator" not in part.prim_path:
+            continue
+        low, high = part.bounds()
+        assert low[0] >= platform_x - half - 1e-6, part.prim_path
+        assert high[0] <= platform_x + half + 1e-6, part.prim_path
+        assert low[1] >= platform_y - half - 1e-6, part.prim_path
+        assert high[1] <= platform_y + half + 1e-6, part.prim_path
+
+
+def test_the_operator_can_see_the_cell_over_the_guarding() -> None:
+    """A 1.75 m person and 2.0 m guarding: they cannot, and that is the point.
+
+    Recorded because it is the kind of thing that looks wrong in a render and
+    is right in a cell - guarding is sized to stop a reach-over, so it stands
+    above eye level on purpose.
+    """
+    from simliverse_sim.guarding import OPERATOR_HEIGHT, PANEL_GROUND_GAP
+
+    scene = _FakeScene()
+    fence = _fence(scene)
+    panel_top = PANEL_GROUND_GAP + fence.height
+
+    assert panel_top > OPERATOR_HEIGHT
+
+
+def test_the_pedestal_puts_the_arm_base_on_top_of_it() -> None:
+    """Not beside it, and not inside it."""
+    from simliverse_sim.guarding import spawn_pedestal
+
+    scene = _FakeScene()
+    plinth = spawn_pedestal("/World/Pedestal", position=(0.0, 0.0, 0.0),
+                            height=0.35, scene=scene)
+
+    assert plinth["top"] == pytest.approx(0.35)
+    low, high = scene.spawned[-1].bounds()
+    assert low[2] == pytest.approx(0.0)
+    assert high[2] == pytest.approx(plinth["top"])
+
+
+def test_a_pedestal_keeps_the_arm_under_the_guarding() -> None:
+    """Raising the base raises the whole envelope; the fence has to still win.
+
+    A 0.35 m plinth under a 1.3 m arm reaches 1.65 m, which is under 2.1 m of
+    guarding. Say so, because the check that matters when someone raises the
+    plinth is this one and it is not obvious from either number alone.
+    """
+    from simliverse_sim.guarding import PANEL_GROUND_GAP
+
+    scene = _FakeScene()
+    fence = _fence(scene)
+    pedestal = 0.35
+    panel_top = PANEL_GROUND_GAP + fence.height
+
+    assert pedestal + REACH < panel_top, (
+        "an arm on a %.2f m plinth clears %.2f m of guarding"
+        % (pedestal, panel_top))
+
+
+def test_a_tall_pedestal_lifts_the_arm_over_the_fence() -> None:
+    """The check earns its keep: at 1.0 m the arm is over the guarding."""
+    from simliverse_sim.guarding import PANEL_GROUND_GAP
+
+    scene = _FakeScene()
+    fence = _fence(scene)
+    panel_top = PANEL_GROUND_GAP + fence.height
+
+    assert 1.0 + REACH > panel_top, (
+        "a 1 m plinth should put a 1.3 m arm above 2.1 m of guarding")
