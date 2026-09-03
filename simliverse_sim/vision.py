@@ -194,14 +194,22 @@ def capture(*, settle_frames: int = DEFAULT_SETTLE_FRAMES) -> Any:
 #: overlap and clearance are two-dimensional questions and a perspective view
 #: answers them ambiguously.
 STANDARD_VIEWS: dict[str, tuple[tuple[float, float, float], tuple[float, float, float]]] = {
-    # Straight down: footprints, spacing, overlap, reach.
-    "top": ((0.0, 0.0, 3.2), (0.0, 0.0, 0.0)),
-    # Along -Y, level-ish: heights, whether things rest on what they should.
-    "front": ((0.0, -3.0, 1.1), (0.0, 0.0, 0.35)),
+    # Near-vertical, for footprints, spacing, overlap and reach.
+    #
+    # Deliberately NOT straight down. An eye directly above its target makes the
+    # view direction parallel to the up axis, the look-at is degenerate, and the
+    # camera resolves to an arbitrary orientation - the first run of this
+    # produced a low three-quarter shot labelled "top", which is worse than no
+    # top view because it looks like a valid picture and answers none of the
+    # questions a top view exists to answer. The small -Y offset costs a few
+    # degrees of obliqueness and makes the orientation well defined.
+    "top": ((0.0, -0.9, 4.2), (0.0, 0.0, 0.0)),
+    # Along -Y, level-ish: heights, and whether things rest on what they should.
+    "front": ((0.0, -3.4, 1.2), (0.0, 0.0, 0.35)),
     # Three-quarter, the view a person would choose.
-    "hero": ((2.2, -2.2, 1.7), (0.0, 0.0, 0.35)),
+    "hero": ((2.6, -2.6, 1.9), (0.0, 0.0, 0.35)),
     # From the far side, so occlusion in one view is not occlusion in all.
-    "back": ((-2.4, 2.0, 1.5), (0.0, 0.0, 0.35)),
+    "back": ((-2.8, 2.4, 1.7), (0.0, 0.0, 0.35)),
 }
 
 
