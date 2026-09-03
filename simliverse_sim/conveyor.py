@@ -253,6 +253,46 @@ def _descendants(root: Any) -> Any:
     return iter(Usd.PrimRange(root))
 
 
+def _strip_physics(scene: Any, prim_path: str) -> int:
+    """Disable whatever physics a referenced prop's subtree brought with it.
+
+    Dressing exists to be looked at. `ConveyorBelt_A05`'s index entry says
+    `physics: "dynamic"`, and that is not a formality: its `Rollers` prim
+    carries a real `PhysicsRigidBodyAPI` and a convex-hull collider, an
+    ungrounded rigid body dropped in exactly the space the invisible physics
+    slab already occupies. Left alone, that body is what a carton actually
+    rests on - not the slab - so driving the slab's surface velocity moves
+    nothing, because the carton was never touching it. The belt looked
+    correct, the surface attribute read `enabled=True` at the right speed,
+    and every carton sat still.
+
+    Disables rather than removes: the collision and rigid-body attributes are
+    authored here, on the prim that references the asset, not on the source
+    layer, which is the supported way to turn physics off on something
+    referenced in without touching what it was referenced from.
+    """
+    try:
+        from pxr import Usd, UsdPhysics
+
+        stage = scene.stage
+        root = stage.GetPrimAtPath(prim_path)
+        if not root or not root.IsValid():
+            return 0
+        touched = 0
+        for prim in Usd.PrimRange(root):
+            schemas = set(prim.GetAppliedSchemas())
+            if "PhysicsRigidBodyAPI" in schemas:
+                UsdPhysics.RigidBodyAPI(prim).CreateRigidBodyEnabledAttr().Set(False)
+                touched += 1
+            if "PhysicsCollisionAPI" in schemas:
+                UsdPhysics.CollisionAPI(prim).CreateCollisionEnabledAttr().Set(False)
+                touched += 1
+        return touched
+    except Exception:  # noqa: BLE001 - a look is not worth failing a build for
+        logger.debug("could not strip physics from %s", prim_path, exc_info=True)
+        return 0
+
+
 class Conveyor:
     """A belt, the stop at the end of it, and the boxes queued on it.
 
@@ -495,13 +535,32 @@ class Conveyor:
                 orientation=[0.0, 0.0, yaw],
                 scene=self.scene,
             )
+            _strip_physics(self.scene, path)
             paths.append(path)
             key = entry.get("key", key)
 
         self._hide(self.belt_path)
         self.dressing = paths
+
+        real_width = None
+        extent = entry.get("extent") if entry else None
+        if extent and len(extent) >= 2:
+            real_width = float(extent[1])
+            if real_width > self.width + 1e-6:
+                # Not cosmetic: a caller sizing a fence crossing off `width`
+                # (0.4 m here, chosen for the physics) gets a slot the visible
+                # asset (1.15 m) does not fit through - the dressing then
+                # renders wider than its own doorway, straddling guarding
+                # that was correctly sized for a belt nobody can see.
+                logger.warning(
+                    "%s dresses at %.2f m wide but the belt itself is %.2f m; "
+                    "a fence crossing sized off the belt will be narrower "
+                    "than what actually has to pass through it.",
+                    prop, real_width, self.width,
+                )
+
         return {"prim_paths": paths, "prop": key, "sections": count,
-                "deck": float(deck)}
+                "deck": float(deck), "width": real_width}
 
     def _hide(self, prim_path: str) -> bool:
         """Make a prim invisible without touching its collider.

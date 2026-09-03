@@ -558,3 +558,57 @@ def test_a_single_section_keeps_the_undecorated_prim_path(dressable) -> None:
     result = belt.dress("conveyorbelt_a05", section_length=2.0)
 
     assert result["prim_paths"] == [f"{belt.belt_path}_Dressing"]
+
+
+# ── Dressing must not become the surface a carton actually rests on ─────────
+
+
+def test_dressing_strips_the_physics_the_prop_shipped_with(monkeypatch, dressable) -> None:
+    """The bug this exists for: `ConveyorBelt_A05` is indexed `physics:
+    "dynamic"`. Its `Rollers` prim is a real, ungrounded rigid body dropped
+    in the same space as the invisible physics slab, and a carton rests on
+    it - not the slab - so driving the slab's surface velocity moves
+    nothing. `enabled=True` at the right speed, and every carton sat still.
+    """
+    belt, fake = dressable
+    stripped = []
+    monkeypatch.setattr(C, "_strip_physics",
+                        lambda scene, path: stripped.append(path) or 1)
+
+    belt.dress("conveyorbelt_a05")
+
+    assert stripped == [c["prim_path"] for c in fake.calls], (
+        "every dressed section must have its physics stripped, in the "
+        "order it was spawned")
+
+
+def test_a_width_mismatch_against_the_belt_is_reported(dressable) -> None:
+    """`ConveyorBelt_A05` dresses 1.15 m wide regardless of the belt's own
+    configured width, which is exactly what put the visible conveyor wider
+    than a fence crossing sized off the belt."""
+    belt, fake = dressable
+    belt.width = 0.4
+
+    result = belt.dress("conveyorbelt_a05")
+
+    assert result["width"] == pytest.approx(1.15)
+
+
+def test_no_mismatch_reported_when_the_belt_is_already_wide_enough(dressable) -> None:
+    belt, fake = dressable
+    belt.width = 2.0
+
+    result = belt.dress("conveyorbelt_a05")
+
+    assert result["width"] == pytest.approx(1.15)
+
+
+def test_strip_physics_does_not_raise_off_a_stage_with_no_such_prim() -> None:
+    class _NoStage:
+        def GetPrimAtPath(self, path):
+            return None
+
+    class _Scene:
+        stage = _NoStage()
+
+    assert C._strip_physics(_Scene(), "/World/Nowhere") == 0
