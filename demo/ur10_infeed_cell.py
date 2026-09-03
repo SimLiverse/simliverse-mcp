@@ -113,7 +113,20 @@ BOX_MASS = 1.0
 BELT_DECK = 0.45
 PLATE_DECK = 0.33              #: 120 mm below the belt. See the module docstring.
 BELT_END = 0.50                #: where the belt stops and the carton leaves it
-PLATE_STOP = 0.88              #: inner face of the mechanical stop
+PLATE_STOP = 0.78              #: inner face of the mechanical stop
+#: A singulated carton has to reach the stop on its own momentum.
+#:
+#: With the whole queue on the plate the cartons behind push the leader onto the
+#: stop, and none of this matters. Once the escapement releases them one at a
+#: time that help disappears: the first singulated carton stopped 91 mm short,
+#: at x=0.714 against a stop at 0.88, and the cycle reported "no carton reached
+#: the stop" while a carton sat plainly on the plate.
+#:
+#: So the plate is shorter and slipperier than it was. Both, rather than one:
+#: friction alone would need a value low enough to make a carton skate off the
+#: guides, and distance alone pushes the stop back toward the belt until there
+#: is no plate left to land on.
+PLATE_FRICTION = 0.08
 OFFSET_Y = -0.40
 BELT_LENGTH, BELT_WIDTH = 1.5, 0.40
 SPEED = 0.30
@@ -173,7 +186,8 @@ def build(scene: Scene | None = None, *, boxes: int = 4) -> dict:
     plate = DeadPlate.build(
         PLATE, deck_z=PLATE_DECK, stop_x=PLATE_STOP,
         length=PLATE_STOP - BELT_END, width=0.42,
-        centre_y=OFFSET_Y, guide_height=0.10, scene=scene,
+        centre_y=OFFSET_Y, guide_height=0.10,
+        friction=PLATE_FRICTION, scene=scene,
     )
     plate.set_box_size((BOX, BOX, BOX)).track(cartons)
 
