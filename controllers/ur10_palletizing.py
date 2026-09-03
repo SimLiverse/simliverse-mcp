@@ -92,6 +92,14 @@ STANDOFF = 0.006
 DOWN = [0.0, 1.0, 0.0, 0.0]
 HOME = [0.0, -1.8, 1.5, -1.3, -1.57, 0.0]
 ARM_PATH = "/World/UR"
+#: Which cuMotion configuration describes this arm.
+#:
+#: `Robot.attach` has only the prim path to go on, so it asks the planner for a
+#: configuration called "ur" - the prim is `/World/UR` - and is told the install
+#: ships "franka, ur10". A correct message about a robot nobody meant to
+#: describe. An arm from `Robot.spawn` carries its catalogue entry and needs
+#: none of this; a controller only ever attaches.
+ROBOT_NAME = "ur10"
 
 #: Pasted, not re-derived. Re-deriving the belt inside the controller is what
 #: put its idea of the belt a metre from the real one when the cell moved.
@@ -337,7 +345,7 @@ def compute(db=None):
 
         if _plan is None:
             try:
-                _plan = _arm.plan_to(target, DOWN)
+                _plan = _arm.plan_to(target, DOWN, robot_name=ROBOT_NAME)
             except Exception as exc:  # noqa: BLE001 - NoPathFound is an answer
                 # Falling back to servo silently would drive at the same target
                 # and stall against whatever the planner just refused.

@@ -2109,8 +2109,16 @@ class Manipulator(Robot):
                 return str(source).lower()
         return self.prim_path.rstrip("/").rsplit("/", 1)[-1].lower()
 
-    def plan_to(self, position: Any, orientation: Any = None) -> Any:
+    def plan_to(self, position: Any, orientation: Any = None, *,
+                robot_name: str | None = None) -> Any:
         """Plan a collision-free route to a Cartesian target. Does not move.
+
+        `robot_name` names the cuMotion configuration when this arm cannot say
+        which one it is. An arm from `Robot.spawn` carries its catalogue entry
+        and needs nothing; one from `Robot.attach` has only its prim path, so a
+        UR10 at `/World/UR` asks the planner for a configuration called "ur" and
+        is told the install ships "franka, ur10". That is a correct message
+        about a robot nobody meant to describe.
 
         Returns a `MotionPlan`; drive it with `follow` one tick at a time inside
         a controller, or `move_along` while exploring. Raises `NoPathFound` when
@@ -2118,6 +2126,9 @@ class Manipulator(Robot):
         to reactive control silently — RMPflow would drive at the same target
         and stall against whatever the planner just told you is in the way.
         """
+        if robot_name and not getattr(self, "_robot_type", None):
+            self._robot_type = str(robot_name).lower()
+            self._planner = None          # rebuild against the named config
         planner = self.planner()
         planner.set_base_pose(self.base_position, self.base_orientation)
         q_initial = planner.joint_subset(self.joint_positions, self.joint_names)
