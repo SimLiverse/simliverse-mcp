@@ -106,6 +106,7 @@ _slot = 0
 _tries = 0
 _carton = None
 _pick = None
+_lift_z = 0.0
 _why = ""
 _placed = 0
 
@@ -152,11 +153,12 @@ def _on_timeline(event):
     import omni.timeline
 
     global _state, _frame, _arm, _cup, _belt, _scene
-    global _slot, _tries, _carton, _pick, _why, _placed
+    global _slot, _tries, _carton, _pick, _lift_z, _why, _placed
     if event.type == int(omni.timeline.TimelineEventType.STOP):
         _state, _frame = WARMUP, 0
         _arm = _cup = _belt = _scene = _carton = _pick = None
         _slot = _tries = _placed = 0
+        _lift_z = 0.0
         _why = ""
         try:
             open(STATUS_PATH, "w", encoding="utf-8").close()
@@ -181,7 +183,8 @@ def _top_of(carton):
 
 
 def compute(db=None):
-    global _arm, _cup, _belt, _scene, _slot, _tries, _carton, _pick, _placed
+    global _arm, _cup, _belt, _scene, _slot, _tries, _carton, _pick
+    global _lift_z, _placed
     _frame_tick()
 
     if _state in (DONE, FAILED):
@@ -263,8 +266,15 @@ def compute(db=None):
         return True
 
     if _state == LIFT:
-        target = [_pick[0], _pick[1], _top_of(_carton) + _cup.tip_offset + 0.30]
-        if _arm.servo_to(target, DOWN, tolerance=0.03):
+        # Fix the height once, on the frame the lift begins.
+        #
+        # Computing it from the carton every frame makes the goal rise with the
+        # thing being raised: the arm lifts the carton, `_top_of` returns a
+        # larger number, the target moves up, and the arm chases it until the
+        # frame limit and reports "could not lift clear". It was lifting fine.
+        if _frame == 1:
+            _lift_z = _top_of(_carton) + _cup.tip_offset + 0.30
+        if _arm.servo_to([_pick[0], _pick[1], _lift_z], DOWN, tolerance=0.03):
             _go(TRAVERSE)
         elif _frame > STATE_LIMIT:
             _fail("could not lift %s clear" % _carton.prim_path)
