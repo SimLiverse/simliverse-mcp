@@ -175,8 +175,36 @@ DOWN = [0.0, 1.0, 0.0, 0.0]
 STANDOFF = 0.006
 
 
-def build(scene: Scene | None = None, *, boxes: int = 4) -> dict:
-    """Author the cell and leave it playing with a box waiting at the stop."""
+def build(
+    scene: Scene | None = None,
+    *,
+    boxes: int = 4,
+    box: float = BOX,
+    box_mass: float = BOX_MASS,
+    deck: float = DECK,
+    stop_x: float = STOP_X,
+    offset_y: float = OFFSET_Y,
+    speed: float = SPEED,
+    pallet_y: float = PALLET_Y,
+    rows: int = 2,
+    cols: int = 2,
+    layers: int = 1,
+    robot: str = "ur10",
+) -> dict:
+    """Author the cell and leave it playing with a box waiting at the stop.
+
+    Every default here is the measured cell, so calling `build(scene)` still
+    reproduces the run these numbers came from. They are arguments rather than
+    constants because a cell that only works at one carton size, one belt
+    height and one pallet distance has been fitted to its own demo - and the
+    only way to find out which of these numbers is load-bearing is to be able
+    to change them.
+
+    Dimensions that follow from the carton follow from it here too: a gate
+    sized for a 15 cm box stops nothing when the box is 22 cm, and a 45 mm cup
+    overhangs a 10 cm carton. Deriving them is what keeps a scenario sweep
+    honest rather than a list of ways to mis-author a cell.
+    """
     from pxr import UsdPhysics
 
     from simliverse_sim._compat import get_stage
@@ -192,26 +220,38 @@ def build(scene: Scene | None = None, *, boxes: int = 4) -> dict:
 
     light_the_cell(scene)
 
-    arm = Robot.spawn("ur10", position=[0.0, 0.0, 0.0], prim_path=ARM)
+    arm = Robot.spawn(robot, position=[0.0, 0.0, 0.0], prim_path=ARM)
     gains = arm.tune_drives(stiffness=1.0e5, damping=1.0e4, max_force=1.0e4)
 
+    # A gate is a stop, so it has to be taller than what it stops. Belt width
+    # has to clear the carton with room for it to sit askew, and the queue has
+    # to be spaced further apart than the cartons are wide or they arrive as
+    # one block.
+    gate_height = box + 0.03
+    width = max(WIDTH, box + 0.10)
+    spacing = max(0.25, box + 0.10)
+
     belt = Conveyor.build(
-        BELT, length=LENGTH, width=WIDTH,
-        position=[STOP_X - LENGTH / 2.0, OFFSET_Y, DECK],
-        direction=(1, 0, 0), speed=SPEED,
-        gate=True, gate_height=0.18, scene=scene,
+        BELT, length=LENGTH, width=width,
+        position=[stop_x - LENGTH / 2.0, offset_y, deck],
+        direction=(1, 0, 0), speed=speed,
+        gate=True, gate_height=gate_height, scene=scene,
     )
-    belt.load(boxes, box=(BOX, BOX, BOX), mass=BOX_MASS,
-              spacing=0.25, start_offset=0.20)
+    belt.load(boxes, box=(box, box, box), mass=box_mass,
+              spacing=spacing, start_offset=0.20)
 
     spawn_prop("pallet", prim_path=PALLET,
-               position=[0.0, PALLET_Y, 0.0], scene=scene)
-    slots = pallet_slots(origin=[0.0, PALLET_Y, 0.1425], box=(BOX, BOX, BOX),
-                         rows=2, cols=2, layers=1, gap=0.01)
+               position=[0.0, pallet_y, 0.0], scene=scene)
+    slots = pallet_slots(origin=[0.0, pallet_y, 0.1425], box=(box, box, box),
+                         rows=rows, cols=cols, layers=layers, gap=0.01)
+
+    # A cup wider than the face it seals against grips the corner it hangs
+    # over. Keep it inside the carton's top with a margin.
+    cup_radius = min(0.045, box * 0.30)
 
     cup = arm.attach_suction_gripper(
         approach_axis="Z",
-        max_grip_distance=0.10, cup_radius=0.045, cup_length=0.04,
+        max_grip_distance=0.10, cup_radius=cup_radius, cup_length=0.04,
         # 1e6, not the 500 taken from Isaac's tutorial. At 500 the seal forms
         # and breaks within 2 mm of the first commanded motion, whatever that
         # motion is. Whatever these units are, they are not newtons holding a
@@ -229,7 +269,13 @@ def build(scene: Scene | None = None, *, boxes: int = 4) -> dict:
     # Handles do not survive the play; re-bind rather than reuse.
     arm = Robot.attach(ARM, scene=scene)
     cup = arm.rebind_suction()
-    arm.set_joint_positions(HOME, settle_steps=120)
+    if robot == "ur10":
+        arm.set_joint_positions(HOME, settle_steps=120)
+    else:
+        # HOME was measured on a UR10's six joints. Handing it to another arm
+        # is either a shape error or, worse, a silent pose on a different
+        # kinematic chain.
+        arm.set_joint_positions([0.0] * arm.dof, settle_steps=120)
 
     belt = Conveyor.from_description(described, scene=scene)
     belt.track([RigidObject(path, scene=scene) for path in described["boxes"]])
@@ -241,7 +287,13 @@ def build(scene: Scene | None = None, *, boxes: int = 4) -> dict:
 
     return {
         "arm": arm, "cup": cup, "belt": belt, "slots": slots,
-        "gains": gains, "described": described, "box_size": BOX,
+        "gains": gains, "described": described, "box_size": box,
+        "spec": {
+            "boxes": boxes, "box": box, "box_mass": box_mass, "deck": deck,
+            "stop_x": stop_x, "offset_y": offset_y, "speed": speed,
+            "pallet_y": pallet_y, "rows": rows, "cols": cols,
+            "layers": layers, "robot": robot,
+        },
     }
 
 
@@ -297,6 +349,24 @@ def wait_for_box(belt, *, seconds: float = 12.0, step: float = 0.5):
     return None
 
 
+def _box_of(cell: dict) -> float:
+    """The carton this cell was actually built with, not the demo's default.
+
+    Reading the module constant here is the whole overfitting failure in one
+    line: the cell builds a 22 cm carton, the pick reaches for the top of a
+    15 cm one, and the cup descends 35 mm into the box it meant to seal.
+    """
+    return float(cell.get("box_size", BOX))
+
+
+def _home_of(cell: dict) -> list[float]:
+    """A parked pose with the right number of joints for this cell's arm."""
+    spec = cell.get("spec") or {}
+    if spec.get("robot", "ur10") == "ur10":
+        return list(HOME)
+    return [0.0] * int(cell["arm"].dof)
+
+
 def pick_waiting_box(cell: dict) -> dict:
     """Seal on the box at the stop and lift it clear. Returns what was measured."""
     arm, cup, belt = cell["arm"], cell["cup"], cell["belt"]
@@ -314,18 +384,19 @@ def pick_waiting_box(cell: dict) -> dict:
     # Measured that way, the box was grabbed by a corner and swung 3.4 cm during
     # the lift. Every pose below comes from a reading taken after the arm has
     # already stopped moving.
-    arm.set_joint_positions(HOME, settle_steps=90)
+    size = _box_of(cell)
+    arm.set_joint_positions(_home_of(cell), settle_steps=90)
     arm.scene.settle(0.5)
 
     here = np.asarray(box.position, dtype=float)
-    box_top = float(here[2]) + BOX / 2.0
+    box_top = float(here[2]) + size / 2.0
     arm.move_ee_to([float(here[0]), float(here[1]), box_top + cup.tip_offset + 0.18],
                    DOWN, tolerance=0.015)
 
     # Re-read once more now the arm is parked above it, so the descent is
     # centred on the face rather than on where the box used to be.
     here = np.asarray(box.position, dtype=float)
-    box_top = float(here[2]) + BOX / 2.0
+    box_top = float(here[2]) + size / 2.0
 
     # Seal from a standoff; never drive the cup onto the box. The attachment
     # joint has 35 mm of travel along its approach axis, so it reaches down to
@@ -442,8 +513,9 @@ def place_on_slot(cell: dict, slot: dict, *, box=None) -> dict:
     place = slot["place"]
     # Release height: `place` is where the carton's centre goes, so the tool
     # sits half a box plus the cup above it.
-    place_z = float(place[2]) + BOX / 2.0 + cup.tip_offset
-    travel_z = max(float(slot["approach"][2]), 0.55) + cup.tip_offset + BOX / 2.0
+    size = _box_of(cell)
+    place_z = float(place[2]) + size / 2.0 + cup.tip_offset
+    travel_z = max(float(slot["approach"][2]), 0.55) + cup.tip_offset + size / 2.0
 
     arm.pose_to([float(place[0]), float(place[1]), travel_z], DOWN,
                 corrections=8, raise_on_fail=False)
