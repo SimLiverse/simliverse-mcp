@@ -121,8 +121,24 @@ LENGTH, WIDTH = 1.6, 0.40
 SPEED = 0.20
 PALLET_Y = 0.75
 
-#: The arm holds this to 4.3e-4 rad once the drives are tuned.
-HOME = [0.0, -1.2, 1.6, -1.9, -1.57, 0.0]
+#: Parked clear of the belt, not merely somewhere the arm can hold.
+#:
+#: The previous home put the tool at [0.858, 0.164, 0.374] - 226 mm *below* the
+#: top of a carton, and 108 mm past the stop at x=0.75. Every return home
+#: between cycles therefore swept the arm through the queue. Measured over a
+#: four-carton run: one box ended on the floor and another was shoved 94 mm off
+#: the belt centreline, after which the arm was sent to fetch a carton it could
+#: not reach and the run died blaming the workspace.
+#:
+#: This one parks at [0.526, 0.164, 0.803] - 203 mm above the cartons and well
+#: back from the stop. Candidates measured:
+#:
+#:     [0.0, -1.2, 1.6, -1.9, -1.57, 0.0]  ->  z 0.374   -226 mm   sweeps
+#:     [0.0, -1.4, 1.4, -1.6, -1.57, 0.0]  ->  z 0.641    +41 mm   marginal
+#:     [0.0, -1.8, 1.5, -1.3, -1.57, 0.0]  ->  z 0.803   +203 mm   clear
+#:
+#: The arm still holds it to 4.3e-4 rad once the drives are tuned.
+HOME = [0.0, -1.8, 1.5, -1.3, -1.57, 0.0]
 #: Flange pointing at the floor.
 DOWN = [0.0, 1.0, 0.0, 0.0]
 #: How far above the box the cup stops.
