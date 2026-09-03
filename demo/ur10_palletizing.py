@@ -308,11 +308,20 @@ def pick_waiting_box(cell: dict) -> dict:
         # is asked to seal.
         arm.scene.settle(0.6)
         cup.close(settle_steps=0)
+        # `holding` alone is not enough, and believing it cost a debugging
+        # session. It reads the gripper's status token, and the token reaches
+        # "Closed" transiently with `gripped_objects` still empty — a cup that
+        # has shut on nothing. The pick then reported success-shaped output with
+        # `gripped: []`, `rise: -0.0000` and a carton that never moved, which
+        # reads as a lift that failed rather than a grasp that never happened.
+        #
+        # Requiring a named object is the same discipline `verify()` applies
+        # when it refuses to call a run reproduced just because something moved.
         for _ in range(8):
             arm.scene.settle(0.25)
-            if cup.holding:
+            if cup.holding and cup.gripped_objects:
                 break
-        if cup.holding:
+        if cup.holding and cup.gripped_objects:
             sealed = True
             break
         cup.open(settle_steps=0)
