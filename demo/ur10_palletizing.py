@@ -63,68 +63,38 @@ timeline, and a stop between `start()` and Play drops the surface velocity.
 The sixth is in `Conveyor` itself; the rest are here because they are decisions
 about this cell rather than about the library.
 
-## OPEN: the seal forms and breaks under the first gram of load
+## 7. Force limits, and the write that hides them
 
-The cell now picks reliably in the sense that matters least: the cup seals on
-the carton, by name, on the first attempt.
+Isaac's tutorial uses coaxial and shear limits of 500. At 500 the seal forms
+correctly and then breaks within 2 mm of the first commanded motion - any
+motion, by any route. At 1e6 the same carton rides a 0.28 m lift with
+`gripped 1` at every one of fifteen steps.
 
-    SEALED on attempt 0: ['/World/Box0']
-    step 1  target_ee 0.6600  ee 0.6576  box_z 0.5266  rise +0.0017
-            holding False  gripped 0     <- lost it here
+Whatever these units are, they are not newtons restraining a 1 kg box.
 
-It detaches on the very first lift step, having raised the carton 1.7 mm. Every
-run is byte-identical, so this is deterministic rather than flaky.
+**The reason this took a dozen experiments to find is worth more than the
+number.** Writing any `isaac:*` attribute on a *closed* gripper releases it
+immediately, with the arm stationary:
 
-Ruled out, each by measurement rather than reasoning:
+    isaac:coaxialForceLimit: 500.0 -> 1e9
+    holding after raise: False 0        <- dropped, without moving
 
-- **Force limits.** Set to -1 (the schema's unlimited sentinel) for both
-  coaxial and shear. Identical detach, same millimetre.
-- **Binding on the gate.** The carton rests against the stop at x=0.75, so a
-  vertical lift could drag its face along the blade. Retreating 4 mm in -X per
-  step changes nothing.
-- **Lift aggressiveness.** 2 cm steps fail exactly as a single 30 cm move does.
-- **The correction budget and trailing refines**, both of which were real
-  defects and are fixed above; neither was this one.
-- **The collider.** A PhysX raycast finds the carton at 41.5 mm now that it is
-  an authored mesh, and the seal itself proves contact is detected.
-- **Approach axis and grip distance.** forwardAxis measures
-  [0.0002, -0.0003, -1.0], the attachment origin sits 26 mm above the carton,
-  and the runtime view reports maxGripDistance 0.1, forces 500/500, retry 0.1
-  against a prim whose type really is `IsaacSurfaceGripper`.
+So every attempt to test the force limits by raising them mid-grip destroyed
+the grasp before it could measure anything, and each one came back "identical
+detach" - which read as *force is not the cause* and sent the search elsewhere.
+Joint slack, the transZ drive, the gate, the lift profile and the motion API
+were all eliminated on the strength of an experiment that was measuring its own
+side effect.
 
-The decisive measurement, and the one that should drive whoever picks this up:
+Set the limits at authoring time. If you need to change them, re-author the
+gripper rather than writing the attribute.
 
-**The grip is indefinitely stable while the arm is still, and dies on the first
-commanded motion of any kind.** Held through ten consecutive settles — three
-simulated seconds — with `gripped 1` and the carton's z unchanged to four
-decimals. Then one move, and it is gone within 2 mm of travel.
+The eliminations were not wasted - the collider, approach axis, grip distance
+and correction budget were each genuinely checked, and two of them were real
+bugs fixed above. But the general lesson is: an experiment that mutates the
+thing it is measuring proves nothing, and here it actively pointed away from
+the answer.
 
-Also ruled out since:
-
-- **Joint slack.** Clamping the attachment joint's transZ travel from 35 mm to
-  1 mm immediately after the seal, so the carton cannot dangle, changes nothing.
-- **The transZ drive.** Stiffness 5000 → 0, damping 100 → 0, travel widened to
-  100 mm. Identical detach.
-- **The motion path.** It is not something `pose_to` does. Nudging a single
-  joint by 0.01 rad through `set_joint_positions` drops it just as fast, and
-  that path applies an `ArticulationAction` — a drive target, not a teleport —
-  so the articulation is never being re-posed underneath the constraint.
-
-So it is not force, not slack, not the drive, not the collider, not the
-approach axis, not the grip distance, not the gate, not the lift profile, and
-not the motion API. What remains is inside the surface-gripper extension: some
-condition on relative motion between cup and carton that is not the coaxial or
-shear limit, since those are set to unlimited.
-
-The next step is to read the extension's own source rather than probe it from
-outside — `SurfaceGripperComponent.cpp`, specifically whatever runs per physics
-step after `updateClosedGripper`. Probing has now cost more than reading would
-have.
-
-One configuration has lifted a carton off the stop — +0.2854 m — and it did so
-after three failed descents had already shoved the box 31.5 mm clear. That
-remains the only successful lift, and reproducing it deliberately rather than
-accidentally is the open question.
 """
 
 import numpy as np
@@ -212,7 +182,12 @@ def build(scene: Scene | None = None, *, boxes: int = 4) -> dict:
     cup = arm.attach_suction_gripper(
         approach_axis="Z",
         max_grip_distance=0.10, cup_radius=0.045, cup_length=0.04,
-        coaxial_force_limit=500.0, shear_force_limit=500.0, retry_interval=0.1,
+        # 1e6, not the 500 taken from Isaac's tutorial. At 500 the seal forms
+        # and breaks within 2 mm of the first commanded motion, whatever that
+        # motion is. Whatever these units are, they are not newtons holding a
+        # 1 kg carton: at 1e6 the same carton rides through a 0.28 m lift with
+        # `gripped 1` at every step.
+        coaxial_force_limit=1.0e6, shear_force_limit=1.0e6, retry_interval=0.1,
     )
     described = belt.describe()
 
