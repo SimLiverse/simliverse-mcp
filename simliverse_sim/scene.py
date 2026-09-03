@@ -353,6 +353,112 @@ class Scene:
 
     # ── Authoring ─────────────────────────────────────────────────────────────
 
+    def spawn_box(
+        self,
+        prim_path: str,
+        *,
+        size: Any = (0.2, 0.2, 0.2),
+        position: Any = (0.0, 0.0, 0.5),
+        mass: float = 1.0,
+        color: Any = (0.72, 0.55, 0.33),
+        friction: float = 0.9,
+        restitution: float = 0.0,
+        static: bool = False,
+        orientation: Any = None,
+    ) -> "RigidObject":
+        """A cuboid of the stated size in metres, authored *without* a scale.
+
+        Use this rather than `spawn_rigid(shape="cube", scale=...)` for anything
+        a suction gripper has to pick up.
+
+        A `UsdGeom.Cube` is a single-parameter shape: one `size` for all three
+        edges, defaulting to 2.0. The only way to get a 15 cm carton out of it is
+        an xform scale of 0.075, and the only way to get a non-cubic one is a
+        non-uniform scale. That is the configuration Isaac's own surface-gripper
+        sample warns about: grip detection is a scene-query raycast, and it does
+        not reliably hit a scaled box collider. The failure is silent — the cup
+        arrives, the cup closes, nothing attaches, and the arm lifts away empty
+        while every pose reads correct.
+
+        Authoring the geometry at its real size removes the scale entirely. Eight
+        points and six quads is more verbose than setting one attribute, and it
+        is the only shape that expresses a carton, since real cartons are not
+        cubes.
+
+        `extent` is set explicitly. USD will not compute one for a Mesh, and a
+        prim with no extent is skipped by bounding-box queries — which is how a
+        box becomes invisible to `compute_path_world_bounding_box`, and so to
+        anything that places or measures against it.
+        """
+        from pxr import Gf, UsdGeom, UsdPhysics, Vt
+
+        from .objects import RigidObject
+
+        dims = as_vec3(size, name="size").astype(float)
+        if (dims <= 0).any():
+            raise ValueError(f"size={list(dims)}: every dimension must be positive.")
+        hx, hy, hz = (float(d) / 2.0 for d in dims)
+
+        stage = self.stage
+        mesh = UsdGeom.Mesh.Define(stage, prim_path)
+        prim = mesh.GetPrim()
+
+        points = [
+            (-hx, -hy, -hz), (hx, -hy, -hz), (hx, hy, -hz), (-hx, hy, -hz),
+            (-hx, -hy, hz), (hx, -hy, hz), (hx, hy, hz), (-hx, hy, hz),
+        ]
+        # Counter-clockwise seen from outside, so the normals face out. A box
+        # wound the other way renders inside-out and reads as a missing object.
+        faces = [
+            0, 3, 2, 1,   # bottom
+            4, 5, 6, 7,   # top
+            0, 1, 5, 4,   # -Y
+            1, 2, 6, 5,   # +X
+            2, 3, 7, 6,   # +Y
+            3, 0, 4, 7,   # -X
+        ]
+        mesh.CreatePointsAttr(Vt.Vec3fArray([Gf.Vec3f(*p) for p in points]))
+        mesh.CreateFaceVertexCountsAttr(Vt.IntArray([4] * 6))
+        mesh.CreateFaceVertexIndicesAttr(Vt.IntArray(faces))
+        mesh.CreateExtentAttr(
+            Vt.Vec3fArray([Gf.Vec3f(-hx, -hy, -hz), Gf.Vec3f(hx, hy, hz)])
+        )
+        # Flat shading; a smoothed carton catches the light like a pillow.
+        mesh.CreateSubdivisionSchemeAttr().Set(UsdGeom.Tokens.none)
+
+        xform = UsdGeom.Xformable(prim)
+        xform.ClearXformOpOrder()
+        xform.AddTranslateOp().Set(Gf.Vec3d(*as_vec3(position, name="position")))
+        if orientation is not None:
+            w, x, y, z = as_quat(orientation)
+            xform.AddOrientOp().Set(
+                Gf.Quatf(float(w), Gf.Vec3f(float(x), float(y), float(z)))
+            )
+
+        if color is not None:
+            mesh.CreateDisplayColorAttr().Set(
+                [Gf.Vec3f(*as_vec3(color, name="color"))]
+            )
+
+        collision = UsdPhysics.CollisionAPI.Apply(prim)
+        # A convex hull of eight points *is* the box, exactly. Left at the
+        # default the mesh would collide as a triangle soup, which PhysX refuses
+        # to move dynamically.
+        mesh_collision = UsdPhysics.MeshCollisionAPI.Apply(prim)
+        mesh_collision.CreateApproximationAttr().Set(UsdPhysics.Tokens.convexHull)
+        del collision
+
+        if static:
+            UsdPhysics.RigidBodyAPI.Apply(prim).CreateKinematicEnabledAttr().Set(True)
+        else:
+            UsdPhysics.RigidBodyAPI.Apply(prim)
+            UsdPhysics.MassAPI.Apply(prim).CreateMassAttr().Set(float(mass))
+
+        self.apply_physics_material(
+            prim_path, friction=friction, restitution=restitution
+        )
+        return RigidObject(prim_path, scene=self)
+
     def spawn_rigid(
         self,
         prim_path: str,

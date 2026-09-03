@@ -595,10 +595,14 @@ class Conveyor:
             # so a box spawned into the belt's subtree rides it like paint
             # instead of resting on it — and surface velocity then does nothing
             # visible because there is no relative motion to generate friction.
-            body = self.scene.spawn_rigid(
+            # `spawn_box`, not a scaled cube. Grip detection raycasts, and it
+            # does not reliably hit a scaled box collider — the cup then closes
+            # on nothing and the arm lifts away empty with every pose reading
+            # correct. A carton is also rarely a cube, which `UsdGeom.Cube`
+            # cannot express at all without a non-uniform scale.
+            body = self.scene.spawn_box(
                 f"/World/{prefix}{index}",
-                shape="cube",
-                scale=[size[0] / 2.0, size[1] / 2.0, size[2] / 2.0],
+                size=[size[0], size[1], size[2]],
                 position=[
                     float(centre[0]),
                     float(centre[1]),

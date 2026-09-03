@@ -57,6 +57,10 @@ class _FakeScene:
         self.spawned.append({"prim_path": prim_path, **kwargs})
         return _FakeBody(prim_path, kwargs.get("position", (0, 0, 0)))
 
+    def spawn_box(self, prim_path, **kwargs):
+        self.spawned.append({"prim_path": prim_path, "_box": True, **kwargs})
+        return _FakeBody(prim_path, kwargs.get("position", (0, 0, 0)))
+
     def apply_physics_material(self, *args, **kwargs):
         return "/World/PhysicsMaterials/fake"
 
@@ -104,15 +108,25 @@ def test_load_places_boxes_on_the_deck_not_through_it(belt) -> None:
         assert spawn["position"][2] == pytest.approx(1.0 + 0.11 / 2, abs=0.005)
 
 
-def test_load_halves_the_box_size_for_the_cube_scale(belt) -> None:
-    """`spawn_rigid` scales a size-2 cube, so a half-extent is what goes in.
+def test_load_passes_the_full_box_size_and_never_a_scale(belt) -> None:
+    """Cartons are authored at size, not scaled.
 
-    Getting this wrong by the factor of two is how a scene comes out at double
-    the size it was specified at, and it looks plausible until something has to
-    fit through a gripper.
+    This is a regression test for a silent pick failure, not a style
+    preference. Isaac's surface gripper detects a grip by raycasting, and its
+    own sample warns that the raycast does not reliably hit a *scaled* box
+    collider. The cup arrives, closes, attaches to nothing, and lifts away
+    empty while every pose reads correct — so the symptom points at the
+    gripper, the pose, or the tolerances, and never at the box.
+
+    The old call scaled a size-2 `UsdGeom.Cube` by half the requested size,
+    which is also why the half-extent factor of two used to be a live hazard.
+    Authoring at real size removes both problems at once.
     """
     belt.load(1, box=(0.18, 0.13, 0.11))
-    assert belt.scene.spawned[0]["scale"] == pytest.approx([0.09, 0.065, 0.055])
+    spawn = belt.scene.spawned[0]
+    assert spawn["_box"], "cartons must come from spawn_box, not spawn_rigid"
+    assert spawn["size"] == pytest.approx([0.18, 0.13, 0.11])
+    assert "scale" not in spawn
 
 
 def test_boxes_are_queued_back_from_the_gate_in_arrival_order(belt) -> None:
