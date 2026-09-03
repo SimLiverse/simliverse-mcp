@@ -612,31 +612,46 @@ class SuctionGripper:
 
     @staticmethod
     def _link_reach(scene, link_path: str, direction) -> float:
-        """How far the mounting link's own geometry extends along `direction`.
+        """How far the mounting body extends along `direction`, in local metres.
 
-        Returned in the link's local metres, so a cup started here sits on the
-        face of the link rather than inside it. Zero when the link has no
-        measurable geometry, which restores the previous behaviour instead of
-        raising - a tool frame with no mesh is a legitimate mounting point.
+        Walks up to the nearest ancestor that actually has geometry. A tool
+        frame usually has none - on a UR10, `ee_link` is an empty frame and the
+        visible wrist is `wrist_3_link`, its parent - so measuring the named
+        mount link alone returns zero and the cup is authored inside the arm.
+        That was the original bug, and measuring the wrong prim reproduced it
+        exactly once already.
+
+        The cup itself is excluded. It is a child of the mount link, so on a
+        rebuild it would otherwise be measured as the very geometry it is
+        supposed to clear, and each build would push it further out.
         """
         try:
             from pxr import Usd, UsdGeom
 
-            prim = scene.stage.GetPrimAtPath(link_path)
-            if not prim:
-                return 0.0
+            axis = int(np.argmax(np.abs(direction)))
+            sign = 1.0 if direction[axis] > 0 else -1.0
             cache = UsdGeom.BBoxCache(
                 Usd.TimeCode.Default(), [UsdGeom.Tokens.default_]
             )
-            box = cache.ComputeLocalBound(prim).ComputeAlignedRange()
-            if box.IsEmpty():
-                return 0.0
-            lo, hi = np.array(box.GetMin()), np.array(box.GetMax())
-            axis = int(np.argmax(np.abs(direction)))
-            # The far corner along the approach direction, never negative: a
-            # link whose bound sits behind the origin needs no standoff at all.
-            reach = hi[axis] if direction[axis] > 0 else -lo[axis]
-            return float(max(reach, 0.0))
+            prim = scene.stage.GetPrimAtPath(link_path)
+            for _ in range(3):  # link, its parent, its grandparent
+                if not prim or not prim.IsValid():
+                    return 0.0
+                reach = 0.0
+                for child in Usd.PrimRange(prim):
+                    if child.GetName() in ("SuctionCup", "SuctionCup_AttachPoint"):
+                        continue
+                    if not child.IsA(UsdGeom.Gprim):
+                        continue
+                    box = cache.ComputeLocalBound(child).ComputeAlignedRange()
+                    if box.IsEmpty():
+                        continue
+                    lo, hi = np.array(box.GetMin()), np.array(box.GetMax())
+                    reach = max(reach, hi[axis] if sign > 0 else -lo[axis])
+                if reach > 0.0:
+                    return float(reach)
+                prim = prim.GetParent()
+            return 0.0
         except Exception:  # pragma: no cover - authoring must not die on this
             logger.debug("Could not measure %s for a cup standoff", link_path)
             return 0.0
