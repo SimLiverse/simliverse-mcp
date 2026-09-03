@@ -276,23 +276,51 @@ def pick_waiting_box(cell: dict) -> dict:
     # which is true of that instant and false about the pose, since two more
     # corrections reach 2.2 mm. Loosening the tolerance instead would hide the
     # overshoot and hand the seal a cup that is still moving.
-    arm.pose_to([float(here[0]), float(here[1]),
-                 box_top + cup.tip_offset + STANDOFF], DOWN, corrections=8)
-    # Settle, then close. Do NOT refine again here. `pose_to` has already run
-    # its corrections and returned converged; refining from a converged pose
-    # re-enters the same overshoot that made the budget of eight necessary, and
-    # at a 6 mm standoff that means the cup is moving when it is asked to seal.
-    # Measured: identical approach with a trailing five-refine loop failed to
-    # seal (rise -0.0000), without it the same pose lifts.
-    arm.scene.settle(0.8)
-
-    cup.close(settle_steps=0)
-    for _ in range(12):
-        arm.scene.settle(0.3)
+    # Descend until it seals, rather than betting the pick on one height.
+    #
+    # A single attempt at a fixed standoff is a knife edge, and the measurements
+    # say so: 30/20/12 mm never seal, 6 mm does, and 6 mm is close enough that
+    # the descent's own overshoot can land inside the carton. Worse, the same
+    # 6 mm approach seals on one run and not the next, because whether the cup
+    # is perfectly still at the instant it closes is not something the pose
+    # controller guarantees.
+    #
+    # The grip distance says this should not be necessary - the attachment
+    # origin sits 26 mm above the carton with a 100 mm grip distance, and its
+    # forward axis measures [0.0002, -0.0003, -1.0], straight down. Why the
+    # raycast does not find the box from there is unresolved. Retrying is not a
+    # workaround for not knowing: a real vacuum cell also descends until it has
+    # vacuum rather than asserting a height, so this is what the cell should
+    # have done anyway.
+    #
+    # Steps are 2 mm and it gives up after ten, so the worst case is 20 mm of
+    # travel below the first attempt - less than the overshoot a single attempt
+    # already risks.
+    sealed = False
+    for attempt in range(10):
+        arm.pose_to([float(here[0]), float(here[1]),
+                     box_top + cup.tip_offset + STANDOFF - attempt * 0.002],
+                    DOWN, corrections=8, raise_on_fail=False)
+        # Settle, then close. Do NOT refine again here. `pose_to` has already
+        # run its corrections and returned converged; refining from a converged
+        # pose re-enters the same overshoot that made the budget of eight
+        # necessary, and at this standoff that means the cup is moving when it
+        # is asked to seal.
+        arm.scene.settle(0.6)
+        cup.close(settle_steps=0)
+        for _ in range(8):
+            arm.scene.settle(0.25)
+            if cup.holding:
+                break
         if cup.holding:
+            sealed = True
             break
-    if not cup.holding:
-        return {"picked": False, "reason": f"cup did not seal (status {cup.status})"}
+        cup.open(settle_steps=0)
+        arm.scene.settle(0.2)
+
+    if not sealed:
+        return {"picked": False,
+                "reason": f"cup did not seal after 10 descents (status {cup.status})"}
 
     arm.pose_to([float(here[0]), float(here[1]), box_top + cup.tip_offset + 0.30], DOWN)
     arm.scene.settle(1.2)
