@@ -89,6 +89,19 @@ def register_tools(mcp: FastMCP, get_connection: "Callable[[], IsaacConnection]"
     ) -> str:
         """Search the NVIDIA USD asset library by text description, then load the best match.
 
+        For anything you intend to build a cell out of, prefer the indexed
+        catalogue through `run_control` — `list_props(q)` and `find_prop(q)`.
+        The index carries a measured `extent` and a `physics` kind for all 175
+        entries, so it answers "how big is it" and "can a robot pick it up"
+        without loading anything, and it covers the props a factory cell is
+        made of: 47 conveyor sections, pallets, mounts, forklifts, and 23
+        people under /Isaac/People/Characters.
+
+        Whatever you load: props are placed by their CENTRE and most of them
+        are large. A pallet is 1.21 m long, so centring one 0.60 m in front of
+        an arm puts its near edge behind the robot's base. Check `extent`
+        before choosing a position.
+
         Args:
             text_prompt: Text description of the 3D asset to search for.
             target_path: Prim path for the loaded result.
