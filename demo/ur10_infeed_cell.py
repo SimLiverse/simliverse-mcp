@@ -55,6 +55,31 @@ that cell's gate still standing at x=0.75, and the cartons queued against a wall
 from a scene that no longer existed. Every reading said "stuck at 0.675" and
 none of them said why.
 
+## OPEN: the traverse scatters the queue
+
+One carton goes all the way through - belt, drop, plate, stop, pick, pallet,
+placed 6.8 mm from its slot in 85.3 s. The second cycle then finds nothing at
+the stop, because the first has thrown the rest of the queue across the cell:
+
+    box0  [-0.085,  0.674, 0.218]   on the pallet, correct
+    box1  [-0.033,  3.457, 0.075]   3.5 m away, on the floor
+    box2  [ 0.634,  0.049, 0.075]   on the floor
+    box3  [ 0.589, -0.627, 0.505]   off the side of the plate
+
+y = 3.457 is not a nudge; something struck it hard. The belt cell had the same
+class of problem and it was the home pose sweeping the queue at belt height —
+fixed there by parking the tool 203 mm above the cartons. This cell has a
+second deck 120 mm lower and a longer traverse to the pallet, and the same home
+pose no longer clears everything it crosses.
+
+The traverse is the suspect: the path from the plate at (0.805, -0.40) to the
+pallet at (0.0, 0.75) passes over the plate and its queue, and nothing
+currently constrains its height. The fix is likely a via-point at a height
+measured from the plate rather than a single home pose, which is what the belt
+cell got away with because it had only one deck.
+
+Not yet attempted. The single-carton path is measured and works.
+
 **The stop sits at 0.88, not further out.** The pick pose is
 `stop − half a carton`, and at the first geometry that put it 1.03 m from the
 base — inside a UR10's 1.3 m reach on paper, and close enough to the edge that
