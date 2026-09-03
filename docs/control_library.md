@@ -68,6 +68,12 @@ infeed experiment held a palletising cell's carton queue with 26 N while every
 belt observable said the conveyor was fine. Call `scene.clear_world()`, which
 keeps only the physics scene, its materials and the floor.
 
+**`spawn_prop` faces world +X unless told otherwise.** Every indexed asset
+keeps the local frame it was authored in, so a conveyor prop referenced onto a
+belt running any other direction renders facing the wrong way — off the end
+of the physics slab it is meant to cover, not on top of it. Pass
+`orientation=[0, 0, yaw]`. `Conveyor.dress()` already does this.
+
 ---
 
 ## 3. Guarding: what makes it a cell rather than an arm on a floor
@@ -109,7 +115,36 @@ it is what you draw to illustrate a teach pendant, and it should be a choice.
 
 ---
 
-## 4. Conveyors
+## 4. Build straight from a drawing
+
+```python
+from simliverse_sim import fence_from_sketch, zones_from_sketch
+
+built = fence_from_sketch(sketch_text)      # rect -> fence, arrow -> crossing
+zones = zones_from_sketch(sketch_text)      # every shape, as placeable numbers
+```
+
+A `[LAYOUT SKETCH ...]` block is plan-view shapes in metres, taken off a grid
+by hand. Treat the numbers as the requested layout — Isaac is Z-up, so the
+canvas is already the XY plane and nothing needs rescaling or reprojecting.
+
+- **A rectangle is the cell.** Picked by label first ("cell", "fence",
+  "guard", ...), size only as a fallback — `chosen_by` in the result says
+  which rule fired, and `"largest, unlabelled"` means nobody said and it
+  guessed.
+- **An arrow crossing the footprint becomes an opening.** One drawn wholly
+  inside means travel direction and is left alone.
+- **A circle labelled "operator"/"worker"/"person" decides which side the
+  gate opens on** — nearest that circle. Leave `gate` unset for this to fire;
+  passing `gate=` explicitly, `None` included, always wins outright. The
+  default gate side used to be a hard-coded `"south"` no matter what was
+  drawn — it only ever looked right because the worker happened to be drawn
+  south of the cell, and the same default would have fired with the gate
+  opening onto nothing had they been drawn anywhere else.
+
+---
+
+## 5. Conveyors
 
 ```python
 belt = Conveyor.build(
@@ -127,6 +162,13 @@ belt = Conveyor.build(
 - `dressing` references a real conveyor and hides the primitive slab. The slab
   stays as the physics — kinematic body, surface velocity, known deck, a stop
   — and stops being what anyone looks at.
+- **Dressing rotates to the belt's own direction, and tiles to its full
+  length — neither used to happen.** Every indexed prop keeps the local frame
+  it was authored in; a belt built running -X still got a dressing prop
+  facing world +X, which rendered off the far end of the physics slab it was
+  meant to sit on. And `ConveyorBelt_A05` is 2.0 m regardless of belt length,
+  so one section over a 6.4 m belt left 4.4 m visibly bare. Both are fixed in
+  `dress()`; a caller does not need to think about either.
 - **A halted belt is a sleeping belt.** PhysX does not wake a body because the
   surface under it started moving. `start()` nudges every tracked body; without
   it the trace reads "no carton settled at the stop" while
@@ -142,7 +184,7 @@ belt = Conveyor.build(
 
 ---
 
-## 5. Robots
+## 6. Robots
 
 | key | reach | note |
 |---|---|---|
@@ -163,7 +205,7 @@ gripper releases it**, so do not "test" limits mid-grip.
 
 ---
 
-## 6. Look at the scene before believing it
+## 7. Look at the scene before believing it
 
 ```python
 from simliverse_sim import vision
@@ -179,7 +221,7 @@ the offsets are sized for a cell about a metre across, and a hero camera at
 
 ---
 
-## 7. The measured palletising cell
+## 8. The measured palletising cell
 
 `demo.ur10_palletizing.build()` — every default is the cell the numbers came
 from. `demo.guarded_cell.build()` wraps it in guarding with a KR210 on a

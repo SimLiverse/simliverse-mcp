@@ -97,9 +97,12 @@ def register_tools(mcp: FastMCP, get_connection: "Callable[[], IsaacConnection]"
         travel directions. Isaac is Z-up so the numbers transfer one-to-one; do
         not rescale or re-project them. A rectangle is the cell, an arrow that
         crosses it is a conveyor entering and becomes an opening, a circle is
-        where something goes. The result reports `chosen_by` — say so if it
-        reads "largest, unlabelled", because then nobody told you which
-        rectangle was the cell and it guessed.
+        where something goes. A circle labelled "operator"/"worker"/"person"
+        picks which side the GATE opens on, nearest that circle — leave `gate`
+        unset for this to fire; passing `gate=` explicitly always wins. The
+        result reports `chosen_by` for the footprint and `gate.chosen_by` for
+        the gate — say so if either reads "unlabelled" or "no operator was
+        drawn", because then nobody told you and it guessed.
 
         BUILD CELLS OUT OF REAL ASSETS. The library indexes 175 props,
         including 47 conveyor sections and 23 people. A cell authored from

@@ -416,3 +416,145 @@ def test_waking_survives_a_body_that_cannot_take_a_velocity(belt) -> None:
 
     assert belt.wake_load() == 1
     assert good.velocity_writes
+
+
+# ── Dressing: a real conveyor prop over the physics slab ────────────────────
+
+
+class _FakeSpawnProp:
+    """Records every call `dress()` makes, without touching the asset server."""
+
+    def __init__(self):
+        self.calls: list[dict] = []
+
+    def __call__(self, prop, *, prim_path, position, orientation=None, scene=None):
+        self.calls.append({
+            "prop": prop, "prim_path": prim_path,
+            "position": np.asarray(position, dtype=float),
+            "orientation": (None if orientation is None
+                            else np.asarray(orientation, dtype=float)),
+        })
+        return {"key": prop, "extent": [2.0, 1.15, 1.166]}
+
+
+@pytest.fixture
+def dressable(monkeypatch, belt):
+    """The `belt` fixture plus a spawn_prop double `dress()` can be checked
+    against, and its own `_hide` short-circuited so hiding needs no stage."""
+    fake = _FakeSpawnProp()
+    monkeypatch.setattr(C, "spawn_prop", fake, raising=False)
+    monkeypatch.setattr("simliverse_sim.props.spawn_prop", fake)
+    monkeypatch.setattr(belt, "_hide", lambda path: True)
+    return belt, fake
+
+
+def test_dressing_is_rotated_to_the_belts_own_heading(dressable) -> None:
+    """The bug this exists for: a dressing prop always faced world +X.
+
+    `belt` (the fixture) runs along +X, so that bug was invisible on it -
+    which is exactly how it shipped. A belt built running -X got a dressing
+    section facing +X anyway, rendering off the far end of its own physics
+    slab rather than on top of it.
+    """
+    belt, fake = dressable
+    belt.direction = np.array([-1.0, 0.0, 0.0])
+
+    belt.dress("conveyorbelt_a05")
+
+    assert fake.calls, "dress() made no spawn_prop calls"
+    for call in fake.calls:
+        assert call["orientation"] is not None, (
+            "a dressing prop with no orientation always faces world +X")
+        assert call["orientation"][2] == pytest.approx(180.0)
+
+
+def test_a_belt_along_plus_x_needs_no_rotation(dressable) -> None:
+    belt, fake = dressable
+    belt.dress("conveyorbelt_a05")
+    assert fake.calls[0]["orientation"][2] == pytest.approx(0.0)
+
+
+@pytest.mark.parametrize("heading,yaw", [
+    ((1.0, 0.0, 0.0), 0.0),
+    ((-1.0, 0.0, 0.0), 180.0),
+    ((0.0, 1.0, 0.0), 90.0),
+    ((0.0, -1.0, 0.0), -90.0),
+])
+def test_the_yaw_matches_the_belts_direction(dressable, heading, yaw) -> None:
+    belt, fake = dressable
+    belt.direction = np.asarray(heading, dtype=float)
+
+    belt.dress("conveyorbelt_a05")
+
+    assert fake.calls[0]["orientation"][2] == pytest.approx(yaw)
+
+
+def test_a_belt_longer_than_one_section_gets_more_than_one(dressable) -> None:
+    """One 2 m section over a longer belt used to leave the rest bare."""
+    belt, fake = dressable
+    belt.length = 6.4
+
+    result = belt.dress("conveyorbelt_a05", section_length=2.0)
+
+    assert result["sections"] == 4, "ceil(6.4 / 2.0) sections should be placed"
+    assert len(fake.calls) == 4
+    assert len(set(c["prim_path"] for c in fake.calls)) == 4, (
+        "sections must not collide on the same prim path")
+
+
+def test_a_belt_shorter_than_one_section_still_gets_one(dressable) -> None:
+    belt, fake = dressable
+    belt.length = 0.8
+
+    result = belt.dress("conveyorbelt_a05", section_length=2.0)
+
+    assert result["sections"] == 1
+    assert len(fake.calls) == 1
+
+
+def test_tiled_sections_walk_the_belts_full_length(dressable) -> None:
+    """Placed edge to edge along the belt, not stacked on top of each other."""
+    belt, fake = dressable
+    belt.length = 6.4
+    belt._origin = np.array([3.2, 0.0, 1.0])   # centre, belt spans 0.0..6.4
+
+    belt.dress("conveyorbelt_a05", section_length=2.0)
+
+    xs = sorted(c["position"][0] for c in fake.calls)
+    assert xs[0] == pytest.approx(0.0, abs=1e-6)
+    for a, b in zip(xs, xs[1:]):
+        assert b - a == pytest.approx(2.0), (
+            "sections must be spaced one section-length apart, not overlapping")
+
+
+def test_the_slab_is_hidden_after_dressing(dressable) -> None:
+    belt, fake = dressable
+    hidden = []
+    belt._hide = lambda path: hidden.append(path) or True
+
+    belt.dress("conveyorbelt_a05")
+
+    assert hidden == [belt.belt_path]
+
+
+def test_the_result_reports_every_section_placed(dressable) -> None:
+    belt, fake = dressable
+    belt.length = 5.0
+
+    result = belt.dress("conveyorbelt_a05", section_length=2.0)
+
+    assert result["sections"] == 3
+    assert len(result["prim_paths"]) == 3
+    assert result["prop"] == "conveyorbelt_a05"
+    assert result["deck"] == pytest.approx(C.DRESSING_DECK)
+
+
+def test_a_single_section_keeps_the_undecorated_prim_path(dressable) -> None:
+    """One section keeps `<belt>_Dressing`, matching what shipped before -
+    a caller storing that exact path for a short belt should not break."""
+    belt, fake = dressable
+    belt.length = 1.0
+
+    result = belt.dress("conveyorbelt_a05", section_length=2.0)
+
+    assert result["prim_paths"] == [f"{belt.belt_path}_Dressing"]

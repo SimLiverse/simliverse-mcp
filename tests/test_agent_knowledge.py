@@ -66,6 +66,22 @@ def test_the_docstring_carries_the_placement_traps() -> None:
             "run_control never warns the agent about %r" % trap)
 
 
+def test_the_docstring_covers_the_sketch_gate_derivation() -> None:
+    """The gate used to open south no matter what was drawn."""
+    source = _control_source()
+    assert "operator" in source.lower()
+    assert "gate" in source.lower()
+
+
+def test_the_guide_covers_sketch_building_and_dressing_orientation() -> None:
+    """Two gaps closed the same day: fence_from_sketch had no section at
+    all, and dressing silently faced the wrong way and never tiled."""
+    text = GUIDE.read_text(encoding="utf-8")
+    for token in ("fence_from_sketch", "zones_from_sketch", "rotates",
+                  "tiles"):
+        assert token in text, "the guide never mentions %r" % token
+
+
 def test_the_agent_is_told_to_look_at_more_than_one_view() -> None:
     source = _control_source()
     assert "vision.look" in source

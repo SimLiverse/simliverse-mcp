@@ -170,12 +170,22 @@ def spawn_prop(
     allow_partial: bool = False,
     prim_path: str | None = None,
     position: Any = (0.0, 0.0, 0.0),
+    orientation: Any = None,
     scene: Any = None,
 ) -> dict[str, Any]:
     """Reference a real prop onto the stage. Returns its index entry plus the path.
 
     Warns when the chosen asset has no rigid body, because that is the failure
     that otherwise surfaces as a grasp which mysteriously never holds.
+
+    `orientation` takes euler degrees `[x, y, z]`. Every indexed prop keeps
+    the local frame it was authored in - a conveyor section's own footprint
+    runs along its local +X regardless of which way anything using it is
+    travelling. Leaving this unset spawns the asset always facing world +X,
+    which is wrong for anything not already travelling that way: a conveyor
+    dressed onto a belt running -X rendered off the far end of its own
+    physics slab, because the visual asset extended along +X while the belt
+    it was standing in for ran the other direction entirely.
     """
     from .scene import Scene as _Scene
 
@@ -202,6 +212,9 @@ def spawn_prop(
     xform = UsdGeom.Xformable(get_stage().GetPrimAtPath(prim_path))
     xform.ClearXformOpOrder()
     xform.AddTranslateOp().Set(Gf.Vec3d(*as_vec3(position, name="position")))
+    if orientation is not None:
+        ox, oy, oz = as_vec3(orientation, name="orientation")
+        xform.AddRotateXYZOp().Set(Gf.Vec3f(float(ox), float(oy), float(oz)))
 
     if entry["physics"] != "dynamic":
         logger.warning(

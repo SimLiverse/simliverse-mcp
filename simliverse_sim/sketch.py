@@ -66,6 +66,16 @@ FENCE_WORDS = ("fence", "cell", "guard", "enclosure", "perimeter", "cage",
 #: Words for a thing that has to get through the fence line.
 FEED_WORDS = ("conveyor", "belt", "infeed", "outfeed", "feed", "line")
 
+#: Words for the person the gate exists to let in.
+OPERATOR_WORDS = ("operator", "worker", "person", "human", "attendant")
+
+#: Distinguishes "the caller did not ask" from "the caller asked for None",
+#: which means no gate at all and has to stay reachable. A default of
+#: `"south"` could never tell those apart from an explicit `gate="south"`,
+#: which is exactly why the gate ignored an operator drawn on any other side:
+#: there was no way to know a choice had not been made.
+_AUTO_GATE = object()
+
 
 def parse_sketch(text: str) -> dict[str, list[dict[str, Any]]]:
     """Pull the shapes out of a sketch payload.
@@ -133,6 +143,43 @@ def pick_footprint(rects: list[dict[str, Any]]) -> dict[str, Any]:
                 chosen_by="largest, unlabelled")
 
 
+def _nearest_side(centre, size, point) -> str:
+    """Which fence side sits nearest a point, by true distance to that side's
+    own span - not by distance to the infinite line it lies on.
+
+    The infinite-line version ties for a point sitting square off a corner of
+    a square footprint, where the distance to each of the two neighbouring
+    sides is equal - the same corner-tie failure `_crosses` had before it was
+    rewritten to solve real segment intersections instead of asking "nearest
+    line". Point-to-segment distance, clamped to each side's actual span,
+    does not tie except exactly on a diagonal, which is a genuine ambiguity
+    rather than an artefact of the method.
+    """
+    cx, cy = centre
+    hw, hh = size[0] / 2.0, size[1] / 2.0
+    px, py = float(point[0]), float(point[1])
+
+    edges = {
+        "south": ((cx - hw, cy - hh), (cx + hw, cy - hh)),
+        "north": ((cx - hw, cy + hh), (cx + hw, cy + hh)),
+        "west": ((cx - hw, cy - hh), (cx - hw, cy + hh)),
+        "east": ((cx + hw, cy - hh), (cx + hw, cy + hh)),
+    }
+    best_side, best_dist = "south", None
+    for side, (a, b) in edges.items():
+        ax, ay = a
+        bx, by = b
+        dx, dy = bx - ax, by - ay
+        span2 = dx * dx + dy * dy
+        t = (0.0 if span2 == 0.0 else
+             max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / span2)))
+        qx, qy = ax + t * dx, ay + t * dy
+        dist = float(np.hypot(px - qx, py - qy))
+        if best_dist is None or dist < best_dist:
+            best_side, best_dist = side, dist
+    return best_side
+
+
 def _crosses(fence_centre, fence_size, a, b):
     """Where a segment actually leaves the footprint, and through which side.
 
@@ -191,7 +238,7 @@ def fence_from_sketch(
     text: str,
     *,
     prim_path: str = "/World/Fence",
-    gate: str | None = "south",
+    gate: str | None | object = _AUTO_GATE,
     gate_width: float = 1.0,
     crossing_width: float = 0.7,
     scene: Any = None,
@@ -208,12 +255,32 @@ def fence_from_sketch(
     An arrow that crosses the footprint becomes an opening in the line - that
     is what someone means by drawing a conveyor running in from outside. An
     arrow drawn wholly inside means travel direction and is left alone.
+
+    `gate` left unset picks the side nearest an operator circle, if one was
+    drawn - a fence with a gate that opens next to nobody is not a mistake
+    the drawing made, it is one this function used to make on its behalf.
+    Passing `gate=` explicitly, `None` included, always wins outright.
     """
     from .guarding import SafetyFence
 
     shapes = parse_sketch(text)
     footprint = pick_footprint(shapes["rects"])
     centre, size = footprint["centre"], footprint["size"]
+
+    operator_spot = next(
+        (c for c in shapes["circles"]
+         if any(w in (c["label"] or "").lower() for w in OPERATOR_WORDS)),
+        None)
+
+    gate_side = gate
+    gate_chosen_by = "explicit"
+    if gate is _AUTO_GATE:
+        if operator_spot is not None:
+            gate_side = _nearest_side(centre, size, operator_spot["centre"])
+            gate_chosen_by = "nearest the operator (%r)" % operator_spot["label"]
+        else:
+            gate_side = "south"
+            gate_chosen_by = "default - no operator was drawn"
 
     crossings: list[dict[str, Any]] = []
     for arrow in shapes["arrows"]:
@@ -224,7 +291,7 @@ def fence_from_sketch(
                           "width": crossing_width, "for": arrow["label"]})
 
     fence = SafetyFence.build(
-        prim_path, centre=centre, size=size, gate=gate,
+        prim_path, centre=centre, size=size, gate=gate_side,
         gate_width=gate_width,
         crossings=[{k: c[k] for k in ("side", "centre", "width")}
                    for c in crossings],
@@ -235,11 +302,13 @@ def fence_from_sketch(
         "fence": fence,
         "footprint": {"label": footprint["label"], "centre": list(centre),
                       "size": list(size), "chosen_by": footprint["chosen_by"]},
+        "gate": {"side": gate_side, "chosen_by": gate_chosen_by},
         "crossings": crossings,
         "ignored": {
             "rects": [r["label"] for r in shapes["rects"]
                       if r is not footprint and r["label"] != footprint["label"]],
-            "circles": [c["label"] for c in shapes["circles"]],
+            "circles": [c["label"] for c in shapes["circles"]
+                       if c is not operator_spot],
         },
         "describe": fence.describe(),
     }

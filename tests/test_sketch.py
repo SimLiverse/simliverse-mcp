@@ -281,3 +281,132 @@ def test_a_sketch_of_only_spots_still_reports_them() -> None:
 
     assert zones["cell"] is None
     assert zones["spots"][0]["label"] == "drop zone"
+
+
+# ── Where the gate goes ──────────────────────────────────────────────────────
+
+
+def test_the_gate_opens_nearest_the_operator(scene) -> None:
+    """The bug this exists for: the gate always opened south, whatever was
+    drawn. It only ever matched an operator drawn south of the cell by
+    coincidence - the same default would have fired with nobody there."""
+    text = HEADER + """
+rect   "cell" centre (0.00, 0.00) 6.00 x 6.00 m
+circle "operator" centre (5.00, 0.00) radius 0.60 m
+"""
+    out = S.fence_from_sketch(text, scene=scene)
+
+    assert out["gate"]["side"] == "east"
+    assert out["fence"].openings["east"]
+    assert out["fence"].openings["south"] == []
+
+
+@pytest.mark.parametrize("point,side", [
+    ((0.0, 5.0), "north"),
+    ((0.0, -5.0), "south"),
+    ((5.0, 0.0), "east"),
+    ((-5.0, 0.0), "west"),
+])
+def test_the_gate_follows_the_operator_to_every_side(scene, point, side) -> None:
+    text = HEADER + (
+        '\nrect   "cell" centre (0.00, 0.00) 6.00 x 6.00 m'
+        '\ncircle "worker" centre (%.2f, %.2f) radius 0.60 m\n' % point)
+    out = S.fence_from_sketch(text, scene=scene)
+
+    assert out["gate"]["side"] == side
+
+
+def test_no_operator_falls_back_to_south_and_says_so(scene) -> None:
+    out = S.fence_from_sketch(CELL, scene=scene)
+
+    assert out["gate"]["side"] == "south"
+    assert "no operator" in out["gate"]["chosen_by"]
+
+
+def test_an_explicit_gate_wins_over_a_drawn_operator(scene) -> None:
+    """A caller that says where the gate goes should never be second-guessed."""
+    text = HEADER + """
+rect   "cell" centre (0.00, 0.00) 6.00 x 6.00 m
+circle "operator" centre (5.00, 0.00) radius 0.60 m
+"""
+    out = S.fence_from_sketch(text, scene=scene, gate="north")
+
+    assert out["gate"]["side"] == "north"
+    assert out["gate"]["chosen_by"] == "explicit"
+
+
+def test_explicit_none_still_means_no_gate_at_all(scene) -> None:
+    """None is a real answer, not "unset" - it must not be reinterpreted."""
+    text = HEADER + """
+rect   "cell" centre (0.00, 0.00) 6.00 x 6.00 m
+circle "operator" centre (5.00, 0.00) radius 0.60 m
+"""
+    out = S.fence_from_sketch(text, scene=scene, gate=None)
+
+    assert out["fence"].openings == {"north": [], "south": [], "east": [],
+                                     "west": []}
+
+
+def test_the_operator_used_for_the_gate_is_not_reported_as_ignored(scene) -> None:
+    """It was used. Calling it ignored would be a second, quieter lie."""
+    text = HEADER + """
+rect   "cell" centre (0.00, 0.00) 6.00 x 6.00 m
+circle "operator" centre (5.00, 0.00) radius 0.60 m
+"""
+    out = S.fence_from_sketch(text, scene=scene)
+
+    assert "operator" not in out["ignored"]["circles"]
+
+
+def test_a_circle_that_is_not_an_operator_does_not_move_the_gate(scene) -> None:
+    """A pallet drawn east of the cell is not a person and must not steer it."""
+    text = HEADER + """
+rect   "cell" centre (0.00, 0.00) 6.00 x 6.00 m
+circle "pallet" centre (5.00, 0.00) radius 0.60 m
+"""
+    out = S.fence_from_sketch(text, scene=scene)
+
+    assert out["gate"]["side"] == "south"
+    assert "pallet" in out["ignored"]["circles"]
+
+
+def test_the_first_operator_wins_when_more_than_one_is_drawn(scene) -> None:
+    text = HEADER + """
+rect   "cell" centre (0.00, 0.00) 6.00 x 6.00 m
+circle "operator 1" centre (5.00, 0.00) radius 0.60 m
+circle "operator 2" centre (0.00, 5.00) radius 0.60 m
+"""
+    out = S.fence_from_sketch(text, scene=scene)
+
+    assert out["gate"]["side"] == "east"
+
+
+# ── Nearest-side, on its own ─────────────────────────────────────────────────
+
+
+def test_nearest_side_does_not_tie_off_a_corner(scene) -> None:
+    """The exact failure `_crosses` had before it solved real intersections:
+    a point square off one side of a square footprint is equidistant from
+    the infinite lines of both neighbours, and the wrong one used to win by
+    list order.
+
+    (5, 1) sits east of a 6x6 square, and its y (1) is within the east edge's
+    own span (-3..3) - so the true nearest point on the east edge is a
+    perpendicular drop, distance 2. The north edge's nearest point clamps to
+    the shared corner (3, 3), distance ~2.83. East is not a tie here; a
+    version that measured distance to the infinite lines instead would call
+    it one, because both lines pass equally near the corner.
+    """
+    side = S._nearest_side((0.0, 0.0), (6.0, 6.0), (5.0, 1.0))
+    assert side == "east"
+
+    side = S._nearest_side((0.0, 0.0), (6.0, 6.0), (1.0, 5.0))
+    assert side == "north"
+
+
+def test_nearest_side_ties_are_a_real_ambiguity_not_an_artefact(scene) -> None:
+    """Exactly off a corner, on the diagonal, the two neighbouring sides are
+    genuinely equidistant. This is not the bug the fix above addresses - it
+    is what an honest tie looks like once the artefact one is gone."""
+    side = S._nearest_side((0.0, 0.0), (6.0, 6.0), (5.0, 5.0))
+    assert side in ("north", "east")

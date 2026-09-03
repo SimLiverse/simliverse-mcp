@@ -117,6 +117,13 @@ logger = logging.getLogger(__name__)
 #: tops out at 1.166 because it includes the side frames.
 DRESSING_DECK = 0.767
 
+#: How far a ConveyorBelt_A0x prop's own footprint runs along its local +X,
+#: measured off ConveyorBelt_A05 (0.0..2.0). Belts asked for any other length
+#: are tiled at this spacing rather than stretched - the asset is a real
+#: conveyor section, not a texture, and stretching one would scale its
+#: rollers into ellipses.
+DRESSING_SECTION_LENGTH = 2.0
+
 _WAKE_SPEED = 0.05
 _SANE_SPEED = (0.0, 5.0)
 
@@ -432,7 +439,8 @@ class Conveyor:
         return belt
 
     def dress(self, prop: str = "conveyorbelt_a05", *,
-              deck: float = DRESSING_DECK) -> dict[str, Any]:
+              deck: float = DRESSING_DECK,
+              section_length: float = DRESSING_SECTION_LENGTH) -> dict[str, Any]:
         """Put a real conveyor over the slab, and hide the slab.
 
         The slab is the physics: a kinematic body with a surface velocity, a
@@ -447,21 +455,52 @@ class Conveyor:
         and lands the belt surface 0.4 m out. The prop is dropped so its
         rollers land on this conveyor's deck, which is the only alignment that
         makes a carton look like it is riding the belt it is riding.
+
+        Two things the first version of this got wrong, both invisible until
+        a sketch built a belt that ran a direction other than +X:
+
+        The prop was never rotated. Every indexed asset keeps the local frame
+        it was authored in - `ConveyorBelt_A05`'s own footprint runs 0 to 2 m
+        along its local +X, whichever way anything using it actually travels.
+        A belt built running -X still got a dressing prop facing +X, which
+        rendered running away from the physics slab it was standing in for,
+        off the far end. It is rotated to `self.direction` now.
+
+        And only one section was ever placed. `ConveyorBelt_A05` is 2 m long;
+        a belt of any other length either showed 2 m of dressing over a
+        longer physics slab, with the rest bare, or - fixed to face the right
+        way - a single section sitting past the slab's own end. Sections are
+        tiled along the belt's full length now, so the last one may overhang
+        past the physics by less than one section length, which is a small
+        cosmetic overhang and a better failure than a visibly bare slab.
         """
         from .props import spawn_prop
 
-        origin = self._origin
-        start = origin[:2] - self.direction[:2] * (float(self.length or 0.0) / 2.0)
-        path = f"{self.belt_path}_Dressing"
-        entry = spawn_prop(
-            prop, prim_path=path,
-            position=[float(start[0]), float(start[1]),
-                      float(self.top_z) - float(deck)],
-            scene=self.scene,
-        )
+        heading = self.direction
+        yaw = float(np.degrees(np.arctan2(heading[1], heading[0])))
+        total = float(self.length or section_length)
+        count = max(1, int(np.ceil(total / section_length)))
+        far_end = self._origin[:2] - heading[:2] * (total / 2.0)
+
+        paths: list[str] = []
+        key = prop
+        for index in range(count):
+            at = far_end + heading[:2] * (index * section_length)
+            path = (f"{self.belt_path}_Dressing{index}" if count > 1
+                    else f"{self.belt_path}_Dressing")
+            entry = spawn_prop(
+                prop, prim_path=path,
+                position=[float(at[0]), float(at[1]),
+                          float(self.top_z) - float(deck)],
+                orientation=[0.0, 0.0, yaw],
+                scene=self.scene,
+            )
+            paths.append(path)
+            key = entry.get("key", key)
+
         self._hide(self.belt_path)
-        self.dressing = path
-        return {"prim_path": path, "prop": entry.get("key"),
+        self.dressing = paths
+        return {"prim_paths": paths, "prop": key, "sections": count,
                 "deck": float(deck)}
 
     def _hide(self, prim_path: str) -> bool:
