@@ -331,11 +331,15 @@ def pick_waiting_box(cell: dict) -> dict:
         return {"picked": False,
                 "reason": f"cup did not seal after 10 descents (status {cup.status})"}
 
-    arm.pose_to([float(here[0]), float(here[1]), box_top + cup.tip_offset + 0.30], DOWN)
+    # The lift carries the same two corrections the descent needed, for the same
+    # reasons, and it took a third debugging pass to notice they were missing
+    # here. With the default budget of four this raised mid-lift; with three
+    # trailing refines it shook the carton off the cup, and the box came back
+    # down to 0.525 — belt height — so the pick reported `rise: -0.0000` and
+    # looked like a grasp that never happened rather than one that let go.
+    arm.pose_to([float(here[0]), float(here[1]), box_top + cup.tip_offset + 0.30],
+                DOWN, corrections=8, raise_on_fail=False)
     arm.scene.settle(1.2)
-    for _ in range(3):
-        arm.refine_pose()
-        arm.scene.settle(0.3)
 
     end = np.asarray(box.position, dtype=float)
     ee = arm.ee_position
