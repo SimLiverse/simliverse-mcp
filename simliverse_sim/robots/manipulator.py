@@ -614,16 +614,21 @@ class SuctionGripper:
     def _link_reach(scene, link_path: str, direction) -> float:
         """How far the mounting body extends along `direction`, in local metres.
 
-        Walks up to the nearest ancestor that actually has geometry. A tool
-        frame usually has none - on a UR10, `ee_link` is an empty frame and the
-        visible wrist is `wrist_3_link`, its parent - so measuring the named
-        mount link alone returns zero and the cup is authored inside the arm.
-        That was the original bug, and measuring the wrong prim reproduced it
-        exactly once already.
+        Two traps, both hit while getting this right:
 
-        The cup itself is excluded. It is a child of the mount link, so on a
-        rebuild it would otherwise be measured as the very geometry it is
-        supposed to clear, and each build would push it further out.
+        The bound has to be computed on the *link*, not on each child in turn.
+        `ComputeLocalBound(child)` is expressed in that child's own space, so
+        summing children measures several different frames and returns nonsense
+        - in practice zero, which silently restores the original bug.
+
+        And a tool frame usually has no geometry of its own. On a UR10 `ee_link`
+        is empty and the visible wrist is `wrist_3_link`, its parent, so
+        measuring only the named mount link returns zero for the same reason.
+        Walk up until something has a bound.
+
+        Callers must clear any previously authored cup first, or a rebuild
+        measures the cup as the geometry it is meant to clear and walks it
+        further out on every build.
         """
         try:
             from pxr import Usd, UsdGeom
@@ -634,22 +639,15 @@ class SuctionGripper:
                 Usd.TimeCode.Default(), [UsdGeom.Tokens.default_]
             )
             prim = scene.stage.GetPrimAtPath(link_path)
-            for _ in range(3):  # link, its parent, its grandparent
+            for _ in range(3):
                 if not prim or not prim.IsValid():
                     return 0.0
-                reach = 0.0
-                for child in Usd.PrimRange(prim):
-                    if child.GetName() in ("SuctionCup", "SuctionCup_AttachPoint"):
-                        continue
-                    if not child.IsA(UsdGeom.Gprim):
-                        continue
-                    box = cache.ComputeLocalBound(child).ComputeAlignedRange()
-                    if box.IsEmpty():
-                        continue
+                box = cache.ComputeLocalBound(prim).ComputeAlignedRange()
+                if not box.IsEmpty():
                     lo, hi = np.array(box.GetMin()), np.array(box.GetMax())
-                    reach = max(reach, hi[axis] if sign > 0 else -lo[axis])
-                if reach > 0.0:
-                    return float(reach)
+                    reach = hi[axis] if sign > 0 else -lo[axis]
+                    if reach > 0.0:
+                        return float(reach)
                 prim = prim.GetParent()
             return 0.0
         except Exception:  # pragma: no cover - authoring must not die on this
@@ -682,9 +680,18 @@ class SuctionGripper:
         # the approach direction and start the cup there. An explicit `offset`
         # still wins, and a link with no geometry to measure falls back to the
         # old behaviour rather than failing.
+        # Clear a previous cup before measuring, never after: on a rebuild the
+        # old cup is still a child of the mount link, and measuring it as the
+        # geometry to clear walks the new one further out every single build.
+        for stale in (f"{parent_prim_path}/SuctionCup",
+                      f"{parent_prim_path}/SuctionCup_AttachPoint"):
+            if scene.stage.GetPrimAtPath(stale):
+                scene.stage.RemovePrim(stale)
+
         stand_off = float(offset)
         if not stand_off:
             stand_off = cls._link_reach(scene, parent_prim_path, direction)
+        logger.info("Cup standoff on %s: %.4f m", parent_prim_path, stand_off)
         mount = direction * (stand_off + float(cup_length) / 2.0)
 
         # Under the end-effector link, not beside the robot. Isaac's own surface
