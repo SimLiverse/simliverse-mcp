@@ -194,6 +194,14 @@ def cell_geometry(box: float) -> dict:
         "spacing": max(0.25, box + 0.10),
         # A cup wider than the top face grips the corner it hangs over.
         "cup_radius": min(0.045, box * 0.30),
+        # How far the cup may reach for something to seal against. A queue
+        # accumulates against the stop, so the next carton is *touching* the
+        # one being picked - and a reach comparable to the carton itself then
+        # latches onto the neighbour. At 0.10 m, which is what this was for
+        # every carton size, a 10 cm box was picked by grabbing the box behind
+        # it and knocking the intended one off the belt. The cup only ever has
+        # to cross the standoff, so this wants to be small.
+        "max_grip_distance": max(0.02, min(0.06, box * 0.40)),
     }
 
 
@@ -253,7 +261,10 @@ def build(
         BELT, length=LENGTH, width=width,
         position=[stop_x - LENGTH / 2.0, offset_y, deck],
         direction=(1, 0, 0), speed=speed,
-        gate=True, gate_height=gate_height, scene=scene,
+        gate=True, gate_height=gate_height,
+        # A queue pressing on a stop needs somewhere for that force to go.
+        guides=True, guide_height=max(0.10, box * 0.8),
+        scene=scene,
     )
     belt.load(boxes, box=(box, box, box), mass=box_mass,
               spacing=spacing, start_offset=0.20)
@@ -267,7 +278,8 @@ def build(
 
     cup = arm.attach_suction_gripper(
         approach_axis="Z",
-        max_grip_distance=0.10, cup_radius=cup_radius, cup_length=0.04,
+        max_grip_distance=shape["max_grip_distance"],
+        cup_radius=cup_radius, cup_length=0.04,
         # 1e6, not the 500 taken from Isaac's tutorial. At 500 the seal forms
         # and breaks within 2 mm of the first commanded motion, whatever that
         # motion is. Whatever these units are, they are not newtons holding a
@@ -453,6 +465,15 @@ def pick_waiting_box(cell: dict) -> dict:
     # already risks.
     sealed = False
     for attempt in range(10):
+        # Re-read every attempt. `here` was measured once, before the first
+        # descent, and a carton that moves between attempts then gets the cup
+        # driven at where it used to be - which shoves it further, so the next
+        # attempt is aimed further out still. At 1.0 kg the carton does not
+        # move and this never showed. At 1.5 kg ten descents walked it off the
+        # side of the belt and onto the floor, and the pick reported "cup did
+        # not seal", which is true and says nothing about why.
+        here = np.asarray(box.position, dtype=float)
+        box_top = float(here[2]) + size / 2.0
         arm.pose_to([float(here[0]), float(here[1]),
                      box_top + cup.tip_offset + STANDOFF - attempt * 0.002],
                     DOWN, corrections=8, raise_on_fail=False)

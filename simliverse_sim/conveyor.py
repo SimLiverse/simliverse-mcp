@@ -310,6 +310,8 @@ class Conveyor:
         gate: bool = True,
         gate_height: float = 0.25,
         gate_thickness: float = 0.04,
+        guides: bool = False,
+        guide_height: float = 0.10,
         color: Any = (0.15, 0.16, 0.18),
         scene: Any = None,
     ) -> "Conveyor":
@@ -320,6 +322,14 @@ class Conveyor:
         arithmetic. That is deliberately unlike `spawn_rigid`, which places a
         body by its centre — the number anyone actually has to hand for a
         conveyor is the height of its surface.
+
+        `guides` adds side rails, and a belt that feeds a stop wants them.
+        A queue accumulating against a hard stop has nowhere to put the force
+        it is storing, so it squirts cartons sideways: measured on a 0.40 m
+        belt, cartons wandered 117 mm off the centre-line at 1 kg and 609 mm -
+        clean off the deck - at 1.5 kg. The picks then failed in a way that
+        pointed at the gripper, because "cup did not seal" is what you observe
+        when the carton is no longer where anything expected it to be.
         """
         from .scene import Scene as _Scene
 
@@ -351,6 +361,26 @@ class Conveyor:
             static=True,
             color=color,
         )
+
+        if guides:
+            # Rails down both edges, static like the deck. Set just outside the
+            # carton lane so a box can still travel, but cannot leave sideways.
+            for side, sign in (("L", 1.0), ("R", -1.0)):
+                offset = across * (width / 2.0 + 0.015)
+                scene.spawn_rigid(
+                    f"{prim_path}_Guide{side}",
+                    shape="cube",
+                    scale=[length / 2.0, 0.015, guide_height / 2.0],
+                    position=[centre[0] + sign * offset[0],
+                              centre[1] + sign * offset[1],
+                              centre[2] + guide_height / 2.0],
+                    orientation=[0.0, 0.0, yaw],
+                    mass=0.0,
+                    friction=0.2,   # rails guide; they must not also brake
+                    restitution=0.0,
+                    static=True,
+                    color=color,
+                )
 
         gate_path = None
         if gate:
