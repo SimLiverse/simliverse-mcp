@@ -20,14 +20,24 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-"""A UR10 palletising cell that picks a box off a moving conveyor. MEASURED.
+"""A UR10 palletising cell, run end to end on live hardware. MEASURED.
 
-Unlike its KR210 neighbour this one has been run end to end on a live Isaac Sim
-6.0 worker: boxes ride a driven belt, queue against the stop, and the arm seals
-a suction cup on the waiting box and lifts it clear.
+Four cartons ride a driven belt, queue against a stop, and are picked one at a
+time and stacked into a 2x2 layer on a pallet. Measured on an Isaac Sim 6.0
+worker, four cycles, no failures:
 
-    box z 0.5248 -> 0.7695, a rise of 0.2447 m
-    gripped ['/World/Box0'], holding True
+    slot 0   rise 0.2835   placed 7.5 mm from target   59.30 s
+    slot 1   rise 0.2773   placed 6.3 mm from target   58.08 s
+    slot 2   rise 0.2818   placed 4.5 mm from target   58.42 s
+    slot 3   rise 0.3662   placed 3.7 mm from target   58.65 s
+
+    58.61 s per carton  ->  61.4 cartons/hour
+
+The cycle time is on the *simulation* clock, so it describes the cell rather
+than the GPU. It is also the number an integrator quotes and is held to, and
+the reason this file exists: offline-programming tools interpolate geometry and
+publish no accuracy figure, while a measured cycle here comes out of contact,
+friction and payload dynamics.
 
 Everything below is the residue of getting that to happen. Five of the six
 settings look like tuning and are not: with any of them wrong the cell fails in
