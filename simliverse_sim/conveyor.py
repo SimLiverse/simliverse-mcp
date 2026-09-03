@@ -110,6 +110,9 @@ from ._compat import as_vec3, get_stage
 logger = logging.getLogger(__name__)
 
 #: Belt speeds outside this range are almost always a units mistake.
+# Slow enough not to fling a carton, fast enough that PhysX does not put it
+# straight back to sleep before the belt surface takes over.
+_WAKE_SPEED = 0.05
 _SANE_SPEED = (0.0, 5.0)
 
 #: Measured from the shipped USD, not read off a datasheet. `ConveyorBelt_A01`
@@ -531,10 +534,39 @@ class Conveyor:
     # ── Driving ──────────────────────────────────────────────────────────────
 
     def start(self) -> dict[str, Any]:
-        """Switch the belt on. Idempotent."""
+        """Switch the belt on, and wake whatever fell asleep on it. Idempotent.
+
+        PhysX will not wake a body just because the surface under it starts
+        moving — the docs say so outright, and NVIDIA's own conveyor node
+        cycles its enable flag for exactly this reason. It matters here
+        because a palletising cell halts the belt for a whole pick-and-place
+        cycle, which is long enough for every carton to go to sleep. Restore
+        the surface velocity alone and they sit motionless on a running belt
+        forever, which reads in a trace as "no carton ever arrived".
+        """
         result = drive_surface(self.body_path, self.direction * self.speed, enabled=True)
         self._driven = True
+        self.wake_load()
         return result
+
+    def wake_load(self) -> int:
+        """Nudge every tracked body so PhysX takes it off the sleep list.
+
+        A velocity write wakes the actor, and leaving it non-zero stops it
+        settling straight back down before the surface takes over. Returns
+        how many bodies were nudged, so a caller can tell "nothing to wake"
+        apart from "waking silently failed".
+        """
+        nudge = self.direction * min(self.speed, _WAKE_SPEED)
+        woken = 0
+        for box in self.boxes:
+            try:
+                box.set_velocity(linear=nudge)
+            except Exception:  # a body mid-teleport is not worth failing over
+                logger.debug("could not wake %s", box.prim_path, exc_info=True)
+            else:
+                woken += 1
+        return woken
 
     def halt(self) -> dict[str, Any]:
         """Switch the belt off. The boxes stay exactly where they are."""

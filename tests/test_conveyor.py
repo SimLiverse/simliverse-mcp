@@ -45,6 +45,12 @@ class _FakeBody:
         self.prim_path = prim_path
         self.position = np.asarray(position, dtype=float)
         self.speed = speed
+        self.velocity_writes = []
+
+    def set_velocity(self, linear=None, angular=None):
+        self.velocity_writes.append(
+            (None if linear is None else np.asarray(linear, dtype=float),
+             None if angular is None else np.asarray(angular, dtype=float)))
 
 
 class _FakeScene:
@@ -348,3 +354,65 @@ def test_a_box_still_short_of_the_stop_is_not_reported_as_arrived(belt) -> None:
     # Still 6.5 cm out, which the old fixed tolerance accepted.
     belt._boxes = [_FakeBody("/World/Box0", [far - 0.14, 0, 1.15], speed=0.0)]
     assert belt.box_at_gate() is None
+
+
+# ── Waking a sleeping load ───────────────────────────────────────────────────
+
+
+def test_starting_a_belt_wakes_the_cartons_asleep_on_it(belt) -> None:
+    """The failure this exists for cost a run, and looked like nothing at all.
+
+    PhysX does not wake a body because the surface beneath it started moving;
+    the docs say so, and NVIDIA's own conveyor node cycles its enable flag to
+    work around it. A palletising cell halts the belt for a whole pick-and-
+    place cycle - long enough for every carton to sleep - so on restart the
+    belt reported `surfaceVelocityEnabled True` and `(0.2, 0, 0)` while three
+    cartons sat at v=0.0 and the controller timed out waiting for one to
+    arrive. Every observable said the belt was running.
+    """
+    cartons = [_FakeBody("/World/Box%d" % i, (i * 0.2, 0.0, 1.075))
+               for i in range(3)]
+    belt.track(cartons)
+
+    belt.start()
+
+    for carton in cartons:
+        assert carton.velocity_writes, (
+            "%s was never nudged, so PhysX will leave it asleep on a "
+            "running belt" % carton.prim_path)
+        linear, _ = carton.velocity_writes[-1]
+        assert linear[0] > 0.0, "the nudge must push along the belt"
+        assert linear[1] == pytest.approx(0.0)
+        assert linear[2] == pytest.approx(0.0)
+
+
+def test_the_wake_nudge_is_gentler_than_a_fast_belt(monkeypatch) -> None:
+    """A 2 m/s belt must not launch its load to wake it."""
+    monkeypatch.setattr(C, "_body_of", lambda path: path)
+    monkeypatch.setattr(C, "drive_surface", lambda *a, **k: {"enabled": True})
+    fast = Conveyor(
+        "/World/Fast", direction=(1, 0, 0), speed=2.0, top_z=1.0,
+        length=4.0, width=0.9, scene=_FakeScene(),
+    )
+    carton = _FakeBody("/World/Box0", (0.0, 0.0, 1.075))
+    fast.track([carton])
+
+    fast.start()
+
+    linear, _ = carton.velocity_writes[-1]
+    assert float(np.linalg.norm(linear)) <= C._WAKE_SPEED
+
+
+def test_waking_survives_a_body_that_cannot_take_a_velocity(belt) -> None:
+    """One unwritable carton must not stop the rest of the belt restarting."""
+
+    class _Deaf(_FakeBody):
+        def set_velocity(self, linear=None, angular=None):
+            raise RuntimeError("mid-teleport")
+
+    deaf = _Deaf("/World/Box0", (0.0, 0.0, 1.075))
+    good = _FakeBody("/World/Box1", (0.2, 0.0, 1.075))
+    belt.track([deaf, good])
+
+    assert belt.wake_load() == 1
+    assert good.velocity_writes

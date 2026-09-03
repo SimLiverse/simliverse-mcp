@@ -176,14 +176,52 @@ _NAMES = {
 }
 
 
-def _note(tag):
-    """Record where the machine is, so a stalled run can be asked about."""
+def _where():
+    """Tool and carton, in world metres, or "-" when they cannot be read.
+
+    Positions are the whole diagnosis for this machine: every failure so far
+    has been a state that reported success while the hardware was somewhere
+    else. A state name alone cannot tell those apart.
+    """
+    tool = carton = "-"
     try:
-        if False:
-            pass
+        if _arm is not None:
+            p = _arm.ee_position
+            tool = "%.3f,%.3f,%.3f" % (p[0], p[1], p[2])
+    except Exception:  # noqa: BLE001 - a trace must never break the run
+        tool = "?"
+    try:
+        if _carton is not None:
+            p = _carton.position
+            carton = "%.3f,%.3f,%.3f" % (p[0], p[1], p[2])
+    except Exception:  # noqa: BLE001
+        carton = "?"
+    return tool, carton
+
+
+def _note(tag, spent=None):
+    """Record where the machine is, so a stalled run can be asked about.
+
+    `spent` is the frame count of the state being *left*. Logging `_frame`
+    here instead reads zero on every line, because a transition resets the
+    clock before it reports - which is how a state that hung for its whole
+    budget and one that passed in a single tick looked identical for a
+    whole session's worth of traces.
+    """
+    try:
+        tool, carton = _where()
+        held = ""
+        try:
+            if _cup is not None:
+                held = "held" if (_cup.holding and _cup.gripped_objects) else "empty"
+        except Exception:  # noqa: BLE001
+            held = "?"
         with open(STATUS_PATH, "a", encoding="utf-8") as handle:
-            line = "%-9s state=%-10s frame=%-5d slot=%d tries=%d why=%s" % (
-                tag, _NAMES.get(_state, _state), _frame, _slot, _tries, _why)
+            line = ("%-9s state=%-10s spent=%-5s slot=%d tries=%d %s "
+                    "tool=[%s] carton=[%s] why=%s") % (
+                tag, _NAMES.get(_state, _state),
+                "-" if spent is None else spent,
+                _slot, _tries, held, tool, carton, _why)
             handle.write(line + chr(10))
     except Exception:  # noqa: BLE001 - reporting must never break the run
         pass
@@ -191,8 +229,8 @@ def _note(tag):
 
 def _go(state):
     global _state, _frame
-    _state, _frame = state, 0
-    _note("enter")
+    spent, _state, _frame = _frame, state, 0
+    _note("enter", spent)
 
 
 def _fail(reason):
