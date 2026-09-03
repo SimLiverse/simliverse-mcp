@@ -92,6 +92,7 @@ import numpy as np
 from simliverse_sim import (
     Conveyor,
     DeadPlate,
+    Escapement,
     RigidObject,
     Robot,
     Scene,
@@ -105,6 +106,7 @@ ARM = "/World/UR"
 BELT = "/World/Belt"
 PLATE = "/World/Plate"
 PALLET = "/World/Pallet"
+BLADE = "/World/Escapement"
 
 BOX = 0.15
 BOX_MASS = 1.0
@@ -126,7 +128,8 @@ PICK_Z = PLATE_DECK + BOX / 2.0
 
 _STALE = (
     "Belt", "BeltGate", "Plate", "Plate_Stop", "Plate_GuideL", "Plate_GuideR",
-    "UR", "Pallet", "Box0", "Box1", "Box2", "Box3", "Box4", "Box5",
+    "UR", "Pallet", "Escapement",
+    "Box0", "Box1", "Box2", "Box3", "Box4", "Box5",
 )
 
 
@@ -160,6 +163,13 @@ def build(scene: Scene | None = None, *, boxes: int = 4) -> dict:
     cartons = belt.load(boxes, box=(BOX, BOX, BOX), mass=BOX_MASS,
                         spacing=0.30, start_offset=0.20)
 
+    # Upstream of the discharge by a carton and a half, so a released carton
+    # is clear of the blade before it comes back up behind the next one.
+    blade = Escapement.build(
+        BLADE, at_x=BELT_END - BOX * 1.5, centre_y=OFFSET_Y,
+        deck_z=BELT_DECK, width=BELT_WIDTH + 0.04, scene=scene,
+    )
+
     plate = DeadPlate.build(
         PLATE, deck_z=PLATE_DECK, stop_x=PLATE_STOP,
         length=PLATE_STOP - BELT_END, width=0.42,
@@ -179,6 +189,7 @@ def build(scene: Scene | None = None, *, boxes: int = 4) -> dict:
     )
     described_belt = belt.describe()
     described_plate = plate.describe()
+    described_blade = blade.describe()
 
     scene.play()
     scene.step(10)
@@ -193,11 +204,19 @@ def build(scene: Scene | None = None, *, boxes: int = 4) -> dict:
     belt.track([RigidObject(p, scene=scene) for p in described_belt["boxes"]])
     plate = DeadPlate.from_description(described_plate, scene=scene)
     plate.track([RigidObject(p, scene=scene) for p in described_plate["boxes"]])
+    blade = Escapement.from_description(described_blade, scene=scene)
+
+    # Let the first carton through immediately; the rest wait for their cycle.
+    blade.release()
+    scene.settle(3.0)
+    blade.hold()
 
     return {
-        "arm": arm, "cup": cup, "belt": belt, "plate": plate, "slots": slots,
+        "arm": arm, "cup": cup, "belt": belt, "plate": plate,
+        "blade": blade, "slots": slots,
         "gains": gains, "box_size": BOX,
-        "described": {"belt": described_belt, "plate": described_plate},
+        "described": {"belt": described_belt, "plate": described_plate,
+                      "blade": described_blade},
     }
 
 
@@ -295,9 +314,16 @@ def palletise(cell: dict, *, count: int | None = None) -> dict:
     plate, slots = cell["plate"], cell["slots"]
     count = len(slots) if count is None else min(int(count), len(slots))
 
+    blade = cell.get("blade")
     cycles, placed = [], 0
     for index in range(count):
         started = float(SimulationManager.get_simulation_time())
+        # Release exactly one carton for this cycle, then close behind it. The
+        # blade is what makes the arm's rate and the belt's rate independent.
+        if blade is not None and index > 0:
+            blade.release()
+            plate.scene.settle(2.5)
+            blade.hold()
         carton = wait_at_stop(plate)
         if carton is None:
             cycles.append({"slot": index, "ok": False,

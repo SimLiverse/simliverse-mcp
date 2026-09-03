@@ -82,6 +82,130 @@ DEFAULT_DROP = 0.06
 DEFAULT_FRICTION = 0.15
 
 
+class Escapement:
+    """A blade that holds the queue back and lets cartons through one at a time.
+
+    An arm needs the better part of a minute per carton. A belt delivers one
+    every few seconds. Without something in between, the whole queue arrives
+    while the arm is still placing the first one, and every carton after that is
+    picked out of a pile rather than off a stop.
+
+    The obvious fix - spawn cartons at intervals - is the one thing that must
+    not happen. `Conveyor.load` places them at authoring time precisely because
+    creating prims while PhysX is stepping desynchronises the run, and a
+    controller that does it replays differently on every Play. Spacing them
+    further does not work either: at 0.3 m/s and a 60 s cycle, one carton per
+    cycle needs 18 m of belt.
+
+    So this is what a real cell uses. A blade sits across the belt upstream of
+    the plate. Raised, it stops the queue; dropped for a moment, exactly one
+    carton passes and the blade comes back up behind it. The controller drives
+    it on the physics tick, which is why it replays: nothing is spawned, nothing
+    is teleported, and the blade is a kinematic body being posed like any other
+    part of the machine.
+    """
+
+    def __init__(self, prim_path: str, *, hold_z: float, clear_z: float,
+                 scene: Any = None) -> None:
+        from .scene import Scene
+
+        self.prim_path = prim_path
+        self.scene = scene or Scene.get()
+        self.hold_z = float(hold_z)
+        self.clear_z = float(clear_z)
+        self._holding = True
+
+    @classmethod
+    def build(
+        cls,
+        prim_path: str = "/World/Escapement",
+        *,
+        at_x: float,
+        centre_y: float,
+        deck_z: float,
+        width: float = 0.44,
+        height: float = 0.16,
+        thickness: float = 0.02,
+        scene: Any = None,
+    ) -> "Escapement":
+        """A blade across the belt at `at_x`, standing on the deck when held.
+
+        `clear_z` drops it a full height below the deck rather than just to it:
+        a blade whose top is flush with the belt still catches a carton's
+        leading edge, and the carton stalls on it with nothing visibly in the
+        way.
+        """
+        from .scene import Scene
+
+        scene = scene or Scene.get()
+        hold_z = float(deck_z) + height / 2.0
+        clear_z = float(deck_z) - height / 2.0 - 0.01
+
+        blade = cls(prim_path, hold_z=hold_z, clear_z=clear_z, scene=scene)
+        blade._at_x = float(at_x)
+        blade._centre_y = float(centre_y)
+        scene.spawn_rigid(
+            prim_path,
+            shape="cube",
+            scale=[thickness / 2.0, width / 2.0, height / 2.0],
+            position=[float(at_x), float(centre_y), hold_z],
+            static=True,                    # kinematic: takes contact, is posed
+            friction=0.3,
+            restitution=0.0,
+            color=(0.85, 0.62, 0.15),
+        )
+        return blade
+
+    # ── Driving it ──────────────────────────────────────────────────────────
+
+    def _move_to(self, z: float) -> None:
+        from pxr import Gf, UsdGeom
+
+        prim = self.scene.stage.GetPrimAtPath(self.prim_path)
+        if not prim:
+            raise DeadPlateError(f"No escapement at {self.prim_path}.")
+        xform = UsdGeom.Xformable(prim)
+        for op in xform.GetOrderedXformOps():
+            if op.GetOpName() == "xformOp:translate":
+                current = op.Get()
+                op.Set(Gf.Vec3d(float(current[0]), float(current[1]), float(z)))
+                return
+        raise DeadPlateError(
+            f"{self.prim_path} has no translate op to drive. It was not built "
+            f"by Escapement.build."
+        )
+
+    def hold(self) -> "Escapement":
+        """Raise the blade. The queue stops here."""
+        if not self._holding:
+            self._move_to(self.hold_z)
+            self._holding = True
+        return self
+
+    def release(self) -> "Escapement":
+        """Drop the blade. Whatever is against it starts moving."""
+        if self._holding:
+            self._move_to(self.clear_z)
+            self._holding = False
+        return self
+
+    @property
+    def holding(self) -> bool:
+        return self._holding
+
+    def describe(self) -> dict:
+        return {
+            "prim_path": self.prim_path,
+            "hold_z": self.hold_z,
+            "clear_z": self.clear_z,
+        }
+
+    @classmethod
+    def from_description(cls, described: dict, *, scene: Any = None) -> "Escapement":
+        return cls(described["prim_path"], hold_z=described["hold_z"],
+                   clear_z=described["clear_z"], scene=scene)
+
+
 class DeadPlateError(RuntimeError):
     """A plate could not be built."""
 
