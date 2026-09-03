@@ -542,8 +542,23 @@ class Scene:
 
         if radius is not None and hasattr(geom, "CreateRadiusAttr"):
             geom.CreateRadiusAttr().Set(float(radius))
-        if size is not None and hasattr(geom, "CreateSizeAttr"):
-            geom.CreateSizeAttr().Set(float(size))
+        if size is not None:
+            # `size` means height on everything that has one. Only `Cube` has a
+            # `size` attribute, so guarding this on `CreateSizeAttr` alone
+            # dropped the argument for every other shape without a word: a
+            # cylinder asked for 0.82 m came out at its default 2.0, and the
+            # figure it was a leg of stood through the floor. The render was
+            # the only thing that said so.
+            if hasattr(geom, "CreateSizeAttr"):
+                geom.CreateSizeAttr().Set(float(size))
+            elif hasattr(geom, "CreateHeightAttr"):
+                geom.CreateHeightAttr().Set(float(size))
+            else:
+                raise ValueError(
+                    f"{shape!r} has neither a size nor a height, so `size="
+                    f"{size}` cannot be applied. Use `radius`, or `scale` for "
+                    f"a non-uniform extent."
+                )
 
         xform = UsdGeom.Xformable(prim)
         xform.ClearXformOpOrder()
