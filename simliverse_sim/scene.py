@@ -223,6 +223,39 @@ class Scene:
             removed.append(path)
         return removed
 
+    #: Everything a cell rebuilds on top of rather than re-authoring. The
+    #: physics scene and its materials are configuration, the ground plane is
+    #: the floor, and re-making any of them mid-session invalidates handles
+    #: that are still live.
+    WORLD_KEEP = ("PhysicsScene", "PhysicsMaterials", "GroundPlane")
+
+    def clear_world(self, keep: "tuple[str, ...] | None" = None) -> list[str]:
+        """Remove the last cell before authoring the next one on the same stage.
+
+        `stop()` ends the simulation; it does not empty the stage. Two cells
+        built in one session therefore coexist, and the older one is still
+        solid. That is not a cosmetic problem: an escapement blade left over
+        from an infeed experiment held the palletising cell's carton queue
+        with 26 N of contact force, and every belt observable - kinematic
+        body, surface velocity enabled, friction 0.9 - said the conveyor was
+        working perfectly. It was. Something else was holding the cargo.
+
+        Returns what it removed, so a caller can say so rather than guess.
+        """
+        keep_set = set(self.WORLD_KEEP if keep is None else keep)
+        stage = self.stage
+        world = stage.GetPrimAtPath("/World")
+        if not world or not world.IsValid():
+            return []
+        doomed = [child.GetPath().pathString
+                  for child in world.GetChildren()
+                  if child.GetName() not in keep_set]
+        for path in doomed:
+            stage.RemovePrim(path)
+        if doomed:
+            logger.info("cleared %d stale prims from /World", len(doomed))
+        return doomed
+
     def ensure_ground_plane(self, path: str = "/World/GroundPlane", z: float = 0.0) -> str:
         from pxr import UsdGeom, UsdPhysics
 

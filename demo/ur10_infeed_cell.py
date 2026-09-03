@@ -165,19 +165,14 @@ HOME = [0.0, -1.8, 1.5, -1.3, -1.57, 0.0]
 PICK_X = PLATE_STOP - BOX / 2.0
 PICK_Z = PLATE_DECK + BOX / 2.0
 
-_STALE = (
-    "Belt", "BeltGate", "Plate", "Plate_Stop", "Plate_GuideL", "Plate_GuideR",
-    "UR", "Pallet", "Escapement",
-    "Box0", "Box1", "Box2", "Box3", "Box4", "Box5",
-)
+def clear_cell(scene) -> list[str]:
+    """Remove a previous cell's prims. `scene.stop()` does not do this.
 
-
-def clear_cell(scene) -> None:
-    """Remove a previous cell's prims. `scene.stop()` does not do this."""
-    for name in _STALE:
-        path = f"/World/{name}"
-        if scene.stage.GetPrimAtPath(path):
-            scene.stage.RemovePrim(path)
+    Delegates to `Scene.clear_world`, which sweeps whatever is actually on
+    the stage rather than the names this module happened to know about. The
+    hand-kept list is why an escapement outlived the cell that made it.
+    """
+    return scene.clear_world()
 
 
 def build(scene: Scene | None = None, *, boxes: int = 4) -> dict:

@@ -183,6 +183,10 @@ def build(scene: Scene | None = None, *, boxes: int = 4) -> dict:
 
     scene = scene or Scene.get()
     scene.stop()
+    # Not housekeeping. A previous cell's prims survive `stop()`, and the
+    # infeed experiment's escapement blade once held this cell's carton queue
+    # while every belt observable insisted the conveyor was running.
+    scene.clear_world()
     scene.configure_physics()
     scene.ensure_ground_plane()
 
