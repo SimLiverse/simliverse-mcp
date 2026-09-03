@@ -55,6 +55,27 @@ that cell's gate still standing at x=0.75, and the cartons queued against a wall
 from a scene that no longer existed. Every reading said "stuck at 0.675" and
 none of them said why.
 
+## OPEN: a tilted carton needs a tilted cup
+
+Singulation and transfer both work. The escapement releases one carton per
+cycle and holds the rest on the belt; the released carton drops, slides, and
+now *stays* against the stop while the cup descends — 2 mm of movement, against
+44 mm before the plate was inclined.
+
+The seal still fails. The cause is the incline itself: the carton rests at 4
+degrees and the cup approaches straight down, so it meets the face 4 degrees
+off normal. A suction cup tolerates very little of that.
+
+The fix is to rotate the approach by the plate's own tilt rather than assume
+`DOWN` — the pick orientation is a property of the surface being picked from,
+which is exactly the assumption a flat belt let us avoid making. Reducing the
+tilt would trade the seal back for the sliding it was introduced to stop.
+
+Untried. The three failures before this one each named a different innocent
+component ("no carton reached the stop" was the plate length, "cup did not
+seal" was the guide width, then the friction), and this one names the gripper
+again while the cause is a number the gripper has never heard of.
+
 ## OPEN: the traverse scatters the queue
 
 One carton goes all the way through - belt, drop, plate, stop, pick, pallet,
