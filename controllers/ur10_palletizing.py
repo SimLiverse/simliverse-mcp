@@ -63,17 +63,27 @@ ARM_PATH = "/World/UR"
 
 #: Pasted, not re-derived. Re-deriving the belt inside the controller is what
 #: put its idea of the belt a metre from the real one when the cell moved.
+#: Pasted from `belt.describe()` verbatim, not written by hand.
+#:
+#: The first version of this dict was hand-typed from what the belt "obviously"
+#: needs, and INIT died on `KeyError: 'belt_path'` - a key the description
+#: carries and my transcription did not. Re-deriving it inside the controller is
+#: worse still: that is what put a controller's idea of the belt a metre from
+#: the real one when the cell moved.
 BELT = {
-    "prim_path": "/World/Belt",
-    "direction": [1.0, 0.0, 0.0],
-    "speed": 0.20,
-    "top_z": 0.45,
-    "length": 1.6,
-    "width": 0.40,
-    "gate_path": "/World/BeltGate",
-    "origin": [-0.05, -0.40, 0.45],
-    "box_size": [BOX, BOX, BOX],
+    "belt_path": "/World/Belt",
+    "body_path": "/World/Belt",
+    "box_size": [0.15, 0.15, 0.15],
     "boxes": ["/World/Box0", "/World/Box1", "/World/Box2", "/World/Box3"],
+    "centre": [-0.05, -0.4, 0.45],
+    "direction": [1.0, 0.0, 0.0],
+    "gate_path": "/World/BeltGate",
+    "length": 1.6,
+    "mechanism": "PhysxSurfaceVelocityAPI",
+    "running": True,
+    "speed": 0.2,
+    "top_z": 0.45,
+    "width": 0.4,
 }
 
 SLOTS = [
