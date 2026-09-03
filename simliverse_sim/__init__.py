@@ -75,6 +75,13 @@ from . import controller
 from .controller import ControllerError
 from .conveyor import Conveyor, ConveyorError, drive_surface
 from .deadplate import DeadPlate, DeadPlateError, Escapement
+from .guarding import (
+    GuardingError,
+    SafetyFence,
+    spawn_beacon,
+    spawn_cabinet,
+    spawn_operator_platform,
+)
 from .objects import RigidObject
 from .robots import (
     AerialRobot,
@@ -114,6 +121,11 @@ __all__ = [
     "ControllerError",
     "Conveyor",
     "DeadPlate",
+    "GuardingError",
+    "SafetyFence",
+    "spawn_beacon",
+    "spawn_cabinet",
+    "spawn_operator_platform",
     "Escapement",
     "DeadPlateError",
     "STANDARD_VIEWS",
