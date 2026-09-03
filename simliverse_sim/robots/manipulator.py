@@ -872,7 +872,14 @@ class SuctionGripper:
         )
         gripper.approach_axis = axis
         gripper.cup_path = cup_path
-        gripper.tip_offset = float(offset) + float(cup_length)
+        # NOTE: this is the mount offset plus the cup, which is right - but
+        # `rebind_suction` recomputes it by measuring the cup cylinder alone and
+        # gets just `cup_length`. Since the standoff became non-zero those two
+        # disagree by the standoff, and a controller that rebinds after Play
+        # descends that much too low. Measured after the flange-face fix: the
+        # pick still succeeds (+0.271 m) but the cup lands 65 mm off centre
+        # against 43 mm before, which is the disagreement showing.
+        gripper.tip_offset = float(stand_off) + float(cup_length)
         # Author the schema attributes as well as setting them through the view:
         # the view sets them per-instance, the prim carries them across stop/play.
         for attr, value in (
