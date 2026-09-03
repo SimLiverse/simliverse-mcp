@@ -528,6 +528,68 @@ class SuctionGripper:
         "-Z": (0.0, 1.0, 0.0, 0.0),
     }
 
+    @staticmethod
+    def _link_reach(scene, link_path: str, direction) -> float:
+        """How far the mounting body sticks out past its own origin, in metres.
+
+        Measured in **world** space and then projected onto the approach
+        direction, because the link hierarchy cannot be relied on. On a UR10 the
+        links are flat siblings under `/World/UR` rather than a chain, so
+        `ComputeLocalBound` on `ee_link` returns coordinates in the robot root's
+        frame - x around 1.1 for an arm nowhere near 1.1 m thick. Two earlier
+        attempts at this fix used local bounds and returned first zero and then
+        a number contaminated by the link's position in the arm; both looked
+        plausible and neither moved the cup.
+
+        World space has no such ambiguity: take the geometry's world bound, take
+        the link origin's world position, and ask how far the bound reaches
+        along the world-space approach vector.
+
+        Falls back to the parent when a link has no geometry - a tool frame
+        usually has none - and to zero when nothing can be measured, which
+        restores the previous behaviour rather than raising.
+        """
+        try:
+            from pxr import Gf, Usd, UsdGeom
+
+            cache = UsdGeom.BBoxCache(
+                Usd.TimeCode.Default(), [UsdGeom.Tokens.default_]
+            )
+            prim = scene.stage.GetPrimAtPath(link_path)
+            if not prim or not prim.IsValid():
+                return 0.0
+
+            xf = UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(
+                Usd.TimeCode.Default()
+            )
+            origin = np.array(xf.ExtractTranslation())
+            # The approach direction is expressed in the link's frame; the bound
+            # is in world, so carry the direction into world too.
+            world_dir = np.array(xf.TransformDir(Gf.Vec3d(*[float(v) for v in direction])))
+            norm = np.linalg.norm(world_dir)
+            if norm < 1e-9:
+                return 0.0
+            world_dir = world_dir / norm
+
+            for candidate in (prim, prim.GetParent()):
+                if not candidate or not candidate.IsValid():
+                    continue
+                box = cache.ComputeWorldBound(candidate).ComputeAlignedRange()
+                if box.IsEmpty():
+                    continue
+                lo, hi = np.array(box.GetMin()), np.array(box.GetMax())
+                # Project every corner and keep the furthest along the approach.
+                reach = max(
+                    float(np.dot(np.array(corner) - origin, world_dir))
+                    for corner in np.array(np.meshgrid(*zip(lo, hi))).T.reshape(-1, 3)
+                )
+                if reach > 1e-4:
+                    return float(reach)
+            return 0.0
+        except Exception:  # pragma: no cover - authoring must not die on this
+            logger.debug("Could not measure %s for a cup standoff", link_path)
+            return 0.0
+
     @classmethod
     def create(
         cls,
@@ -609,68 +671,6 @@ class SuctionGripper:
                 parent_prim_path,
             )
             scene.stop()
-
-    @staticmethod
-    def _link_reach(scene, link_path: str, direction) -> float:
-        """How far the mounting body sticks out past its own origin, in metres.
-
-        Measured in **world** space and then projected onto the approach
-        direction, because the link hierarchy cannot be relied on. On a UR10 the
-        links are flat siblings under `/World/UR` rather than a chain, so
-        `ComputeLocalBound` on `ee_link` returns coordinates in the robot root's
-        frame - x around 1.1 for an arm nowhere near 1.1 m thick. Two earlier
-        attempts at this fix used local bounds and returned first zero and then
-        a number contaminated by the link's position in the arm; both looked
-        plausible and neither moved the cup.
-
-        World space has no such ambiguity: take the geometry's world bound, take
-        the link origin's world position, and ask how far the bound reaches
-        along the world-space approach vector.
-
-        Falls back to the parent when a link has no geometry - a tool frame
-        usually has none - and to zero when nothing can be measured, which
-        restores the previous behaviour rather than raising.
-        """
-        try:
-            from pxr import Gf, Usd, UsdGeom
-
-            cache = UsdGeom.BBoxCache(
-                Usd.TimeCode.Default(), [UsdGeom.Tokens.default_]
-            )
-            prim = scene.stage.GetPrimAtPath(link_path)
-            if not prim or not prim.IsValid():
-                return 0.0
-
-            xf = UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(
-                Usd.TimeCode.Default()
-            )
-            origin = np.array(xf.ExtractTranslation())
-            # The approach direction is expressed in the link's frame; the bound
-            # is in world, so carry the direction into world too.
-            world_dir = np.array(xf.TransformDir(Gf.Vec3d(*[float(v) for v in direction])))
-            norm = np.linalg.norm(world_dir)
-            if norm < 1e-9:
-                return 0.0
-            world_dir = world_dir / norm
-
-            for candidate in (prim, prim.GetParent()):
-                if not candidate or not candidate.IsValid():
-                    continue
-                box = cache.ComputeWorldBound(candidate).ComputeAlignedRange()
-                if box.IsEmpty():
-                    continue
-                lo, hi = np.array(box.GetMin()), np.array(box.GetMax())
-                # Project every corner and keep the furthest along the approach.
-                reach = max(
-                    float(np.dot(np.array(corner) - origin, world_dir))
-                    for corner in np.array(np.meshgrid(*zip(lo, hi))).T.reshape(-1, 3)
-                )
-                if reach > 1e-4:
-                    return float(reach)
-            return 0.0
-        except Exception:  # pragma: no cover - authoring must not die on this
-            logger.debug("Could not measure %s for a cup standoff", link_path)
-            return 0.0
 
         axis = str(approach_axis).upper()
         if axis not in cls._Z_ONTO:
