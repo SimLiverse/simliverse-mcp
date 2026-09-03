@@ -28,48 +28,53 @@ mounted ninety degrees off, a carton grabbed by its corner, a stage so dark it
 reads as a crashed simulator. All three of those were found by a human looking
 at the screen, and each cost a working session.
 
-## Why the obvious call returns an empty frame
+## Four routes, measured on a live L4 rather than reasoned about
 
-The existing capture path fails on every call, and the message it produces
-("Renderer returned an empty frame") describes the symptom of two unrelated
-causes:
+The old path failed on every call and reported "Renderer returned an empty
+frame", which describes a symptom shared by several unrelated causes. Rather
+than guess, all four candidates were run against a booted simulator:
 
-**1. `capture_on_play` defaults to on.** A render product only fills while the
-timeline is playing. Build a scene, capture without pressing play, and the
-annotator returns `None` forever — not slowly, not intermittently, never.
+| route | result |
+| --- | --- |
+| `rgb` annotator, `capture_on_play(False)`, pump frames | `(0,)` — always empty |
+| `rgb` annotator, `capture_on_play(True)`, timeline **playing** | `(720, 1280, 4)` |
+| own `rep.create.render_product`, pump frames | `(0,)` — always empty |
+| `capture_viewport_to_file`, pump frames | a real PNG in 9 frames |
 
-**2. A synchronous `rep.orchestrator.step()` inside a Kit callback deadlocks.**
-`step()` is correct in a standalone script that owns its loop. Inside a running
-Kit extension — which is where `run_control` executes — the caller is already
-*on* the event loop, so blocking to wait for frames prevents the frames.
+The first row is the trap, and it is the opposite of what the documentation
+leads you to. `set_capture_on_play(False)` is advice for a *standalone* script
+that owns its loop and drives `rep.orchestrator.step()` itself. Inside a live
+Kit session nothing else is driving capture, so turning it off guarantees the
+render product never fills — permanently, silently, on every call.
 
-So the fix is not a different capture API. It is pumping the application
-directly and reading the annotator afterwards, which is what the shipped
-`Camera` sensor does internally.
+## Why this uses the file route rather than the annotator
 
-## What this does instead
+The annotator route works, but only with the timeline playing, and playing the
+timeline **steps physics**. "Show me the scene" must not move the scene: a
+capture that nudges a settled carton off a belt is worse than no capture.
 
-Attach an `rgb` annotator to the viewport's *existing* render product, pump the
-app for a fixed number of frames, read the buffer, detach. No second camera, no
-resolution mismatch, no coroutine, and nothing that needs the caller to be
-async.
+`capture_viewport_to_file` needs neither. Measured from cold with the timeline
+stopped, it produced a complete PNG after nine pumped frames and left
+`is_playing` false. So the file route is the default, and the annotator route
+stays as a fallback for a build where the utility is missing — restoring the
+timeline state it found.
 
-The warm-up is not superstition. A render product yields nothing on the frame
-it is attached, and an RTX image is still converging for several frames after
-that. `settle_frames` is the knob; the default is the smallest number that gave
-a stable image in NVIDIA's own tests, and it is cheap to raise.
+Both need the app pumped. Nothing here awaits, because `run_control` executes on
+the event loop and a coroutine that blocks it cannot be advanced by it.
 """
 
 from __future__ import annotations
 
 import base64
+import os
+import tempfile
 from typing import Any
 
 from ._compat import update_app
 
-#: Frames pumped after attaching before the buffer is read. Below about three
-#: the annotator returns an empty array; the extra frames buy RTX convergence.
-DEFAULT_SETTLE_FRAMES = 12
+#: Frames pumped while waiting for the capture to land. Measured at nine on an
+#: L4; the rest is headroom for a colder cache or a heavier stage.
+DEFAULT_SETTLE_FRAMES = 40
 
 #: Under this many bytes a PNG is a flat fill, not a scene. Isaac's own agent
 #: skills use file size as a blank-frame detector because it costs nothing and
@@ -96,99 +101,84 @@ def _viewport():
     return viewport
 
 
-def capture(
-    *,
-    settle_frames: int = DEFAULT_SETTLE_FRAMES,
-    annotator: str = "rgb",
-) -> Any:
-    """Render the active viewport and return it as a numpy array.
-
-    Returns `(H, W, 4)` uint8 RGBA. Raises `VisionUnavailable` with the reason
-    rather than returning an empty array, because an empty array is what the
-    old path returned and it is indistinguishable from a black scene.
-    """
-    try:
-        import omni.replicator.core as rep
-    except ImportError as exc:  # pragma: no cover - needs Kit
-        raise VisionUnavailable("omni.replicator.core is unavailable.") from exc
-
-    viewport = _viewport()
-    render_product = viewport.render_product_path
-    if not render_product:  # pragma: no cover - needs Kit
-        raise VisionUnavailable(
-            "The viewport has no render product, so there is nothing to read."
-        )
-
-    # Manual control. Left on the default, frames only arrive while the timeline
-    # plays, and a scene that has been built but not played captures nothing.
-    try:
-        rep.orchestrator.set_capture_on_play(False)
-    except Exception:  # pragma: no cover - older Kit
-        pass
-
-    annot = rep.AnnotatorRegistry.get_annotator(annotator)
-    annot.attach(render_product)
-    try:
-        # Pump the app rather than stepping the orchestrator. `update_app` runs a
-        # whole frame — render plus the SDG pipeline that fills the annotator —
-        # and returns, so it works from a synchronous caller on the event loop.
-        for _ in range(max(1, int(settle_frames))):
-            update_app()
-        data = annot.get_data(do_array_copy=True)
-    finally:
-        annot.detach()
-
-    if data is None or getattr(data, "size", 0) == 0:  # pragma: no cover
-        raise VisionUnavailable(
-            "The annotator returned no data after "
-            f"{settle_frames} frames. The usual cause is that nothing has been "
-            "rendered yet: check the stage has a light and the camera is "
-            "pointing at something."
-        )
-    return data
-
-
 def png(
     *,
     settle_frames: int = DEFAULT_SETTLE_FRAMES,
     path: str | None = None,
+    encode: bool = False,
 ) -> dict:
-    """Capture and encode a PNG. Returns a report, and writes a file if asked.
+    """Render the viewport to a PNG. Does not move the scene.
 
-    The report carries `bytes` and `looks_blank` so a caller that cannot see the
-    image still learns whether there was anything in it. That matters here more
-    than it sounds: the whole failure mode being fixed is an agent that believes
+    Returns a report carrying `bytes` and `looks_blank`, so a caller that cannot
+    see the image still learns whether there was anything in it. That matters
+    more than it sounds: the failure being fixed here is an agent that believes
     it has looked.
-    """
-    data = capture(settle_frames=settle_frames)
-    height, width = int(data.shape[0]), int(data.shape[1])
 
+    `encode=True` adds base64. Off by default — a 1280x720 frame is roughly a
+    megabyte of text, and pushing that through a tool result costs far more than
+    the verdict is worth when the answer is usually "yes, it rendered".
+    """
     try:
+        from omni.kit.viewport.utility import capture_viewport_to_file
+    except ImportError as exc:  # pragma: no cover - needs Kit
+        raise VisionUnavailable(
+            "omni.kit.viewport.utility.capture_viewport_to_file is unavailable."
+        ) from exc
+
+    viewport = _viewport()
+    target = path or os.path.join(tempfile.gettempdir(), "simliverse_view.png")
+    if os.path.exists(target):
+        os.remove(target)
+
+    capture_viewport_to_file(viewport, file_path=target)
+
+    # Poll while pumping rather than pumping a fixed count and hoping. The
+    # capture lands asynchronously several frames later, and the file appears
+    # empty before it appears complete.
+    landed = 0
+    for frame in range(max(1, int(settle_frames))):
+        update_app()
+        if os.path.exists(target) and os.path.getsize(target) > 0:
+            landed = frame + 1
+            break
+
+    if not landed:  # pragma: no cover - needs Kit
+        raise VisionUnavailable(
+            f"No frame was written after {settle_frames} pumped frames. The "
+            "renderer is not producing images; check the viewport exists and "
+            "the stage is not mid-load."
+        )
+
+    raw_size = os.path.getsize(target)
+    report = {
+        "width": int(viewport.resolution[0]),
+        "height": int(viewport.resolution[1]),
+        "bytes": raw_size,
+        "looks_blank": raw_size < BLANK_PNG_BYTES,
+        "path": target,
+        "frames": landed,
+    }
+    if encode:
+        with open(target, "rb") as handle:
+            report["base64"] = base64.b64encode(handle.read()).decode("ascii")
+    return report
+
+
+def capture(*, settle_frames: int = DEFAULT_SETTLE_FRAMES) -> Any:
+    """The rendered frame as a numpy array, `(H, W, 3)` uint8 RGB.
+
+    Decoded from the PNG rather than read off an annotator, because the
+    annotator route needs the timeline playing and this must not step physics.
+    """
+    report = png(settle_frames=settle_frames)
+    try:
+        import numpy as np
         from PIL import Image
     except ImportError as exc:  # pragma: no cover - needs Kit
         raise VisionUnavailable(
-            "Pillow is unavailable, so the frame cannot be encoded."
+            "Pillow/numpy unavailable, so the frame cannot be decoded."
         ) from exc
-
-    import io
-
-    image = Image.fromarray(data[:, :, :3])
-    buffer = io.BytesIO()
-    image.save(buffer, format="PNG")
-    raw = buffer.getvalue()
-
-    if path:
-        with open(path, "wb") as handle:
-            handle.write(raw)
-
-    return {
-        "width": width,
-        "height": height,
-        "bytes": len(raw),
-        "looks_blank": len(raw) < BLANK_PNG_BYTES,
-        "path": path,
-        "base64": base64.b64encode(raw).decode("ascii") if path is None else None,
-    }
+    return np.asarray(Image.open(report["path"]).convert("RGB"))
 
 
 def look(*, settle_frames: int = DEFAULT_SETTLE_FRAMES) -> dict:
