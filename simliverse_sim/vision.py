@@ -66,11 +66,14 @@ the event loop and a coroutine that blocks it cannot be advanced by it.
 from __future__ import annotations
 
 import base64
+import logging
 import os
 import tempfile
 from typing import Any
 
 from ._compat import update_app
+
+logger = logging.getLogger(__name__)
 
 #: Frames pumped while waiting for the capture to land. Measured at nine on an
 #: L4; the rest is headroom for a colder cache or a heavier stage.
@@ -179,6 +182,111 @@ def capture(*, settle_frames: int = DEFAULT_SETTLE_FRAMES) -> Any:
             "Pillow/numpy unavailable, so the frame cannot be decoded."
         ) from exc
     return np.asarray(Image.open(report["path"]).convert("RGB"))
+
+
+#: Named viewpoints for `views()`, as (eye, target) offsets from the subject.
+#:
+#: One camera is a keyhole. A cell that reads correctly from the front can have
+#: a carton floating a centimetre off the pallet, an arm reaching through a
+#: conveyor leg, or two boxes occupying the same space - none of which survive a
+#: second angle. The top-down view is the one that matters most for layout, and
+#: is the one NVIDIA's own spatial-reasoning guidance singles out, because
+#: overlap and clearance are two-dimensional questions and a perspective view
+#: answers them ambiguously.
+STANDARD_VIEWS: dict[str, tuple[tuple[float, float, float], tuple[float, float, float]]] = {
+    # Straight down: footprints, spacing, overlap, reach.
+    "top": ((0.0, 0.0, 3.2), (0.0, 0.0, 0.0)),
+    # Along -Y, level-ish: heights, whether things rest on what they should.
+    "front": ((0.0, -3.0, 1.1), (0.0, 0.0, 0.35)),
+    # Three-quarter, the view a person would choose.
+    "hero": ((2.2, -2.2, 1.7), (0.0, 0.0, 0.35)),
+    # From the far side, so occlusion in one view is not occlusion in all.
+    "back": ((-2.4, 2.0, 1.5), (0.0, 0.0, 0.35)),
+}
+
+
+def views(
+    *,
+    names: list[str] | None = None,
+    centre: Any = (0.0, 0.0, 0.0),
+    settle_frames: int = DEFAULT_SETTLE_FRAMES,
+    directory: str = "/tmp",
+    prefix: str = "view",
+) -> dict:
+    """Capture several viewpoints in one call, and restore the camera after.
+
+    Returns `{name: report}` plus an `ok` list, so a caller that cannot see the
+    images still learns which ones rendered and which came back blank.
+
+    `centre` moves the whole rig, so this works on a cell that is not at the
+    origin. The camera is put back where it started, because a capture that
+    silently re-aims the user's viewport is a capture that gets switched off.
+    """
+    import numpy as np
+
+    try:
+        from isaacsim.core.rendering_manager import ViewportManager
+    except ImportError as exc:  # pragma: no cover - needs Kit
+        raise VisionUnavailable(
+            "isaacsim.core.rendering_manager is unavailable."
+        ) from exc
+
+    origin = np.asarray(centre, dtype=float).reshape(3)
+    wanted = list(names) if names else list(STANDARD_VIEWS)
+    unknown = [n for n in wanted if n not in STANDARD_VIEWS]
+    if unknown:
+        raise ValueError(
+            f"Unknown view(s) {unknown}. Known: {sorted(STANDARD_VIEWS)}"
+        )
+
+    manager = ViewportManager()
+    viewport = _viewport()
+    camera = viewport.camera_path
+
+    # Remember where the camera was, so this is a look and not a move.
+    before = None
+    try:
+        from pxr import Usd, UsdGeom
+
+        from ._compat import get_stage
+
+        prim = get_stage().GetPrimAtPath(camera)
+        if prim:
+            before = UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(
+                Usd.TimeCode.Default()
+            )
+    except Exception:  # pragma: no cover - restoring is best effort
+        before = None
+
+    out: dict = {"ok": [], "blank": [], "views": {}}
+    try:
+        for name in wanted:
+            eye_offset, target_offset = STANDARD_VIEWS[name]
+            manager.set_camera_view(
+                camera,
+                eye=(origin + np.asarray(eye_offset, dtype=float)).tolist(),
+                target=(origin + np.asarray(target_offset, dtype=float)).tolist(),
+            )
+            report = png(
+                settle_frames=settle_frames,
+                path=f"{directory}/{prefix}_{name}.png",
+            )
+            out["views"][name] = report
+            (out["blank"] if report["looks_blank"] else out["ok"]).append(name)
+    finally:
+        if before is not None:
+            try:
+                eye = before.ExtractTranslation()
+                forward = before.TransformDir((0.0, 0.0, -1.0))
+                manager.set_camera_view(
+                    camera,
+                    eye=[float(v) for v in eye],
+                    target=[float(e) + float(f) for e, f in zip(eye, forward)],
+                )
+            except Exception:  # pragma: no cover
+                logger.debug("Could not restore the camera after capturing views")
+
+    return out
 
 
 def look(*, settle_frames: int = DEFAULT_SETTLE_FRAMES) -> dict:

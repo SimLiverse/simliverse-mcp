@@ -97,7 +97,7 @@ from .robots import (
     spawn_robot,
 )
 from .palletizing import PalletError, pallet_slots, verify_pallet
-from .vision import VisionUnavailable, capture, look, png
+from .vision import STANDARD_VIEWS, VisionUnavailable, capture, look, png, views
 from .props import (
     PropNotFound,
     find_prop,
@@ -112,7 +112,9 @@ __all__ = [
     "Check",
     "ControllerError",
     "Conveyor",
+    "STANDARD_VIEWS",
     "VisionUnavailable",
+    "views",
     "capture",
     "look",
     "png",
