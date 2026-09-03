@@ -278,10 +278,13 @@ def pick_waiting_box(cell: dict) -> dict:
     # overshoot and hand the seal a cup that is still moving.
     arm.pose_to([float(here[0]), float(here[1]),
                  box_top + cup.tip_offset + STANDOFF], DOWN, corrections=8)
-    arm.scene.settle(1.0)
-    for _ in range(5):
-        arm.refine_pose()
-        arm.scene.settle(0.3)
+    # Settle, then close. Do NOT refine again here. `pose_to` has already run
+    # its corrections and returned converged; refining from a converged pose
+    # re-enters the same overshoot that made the budget of eight necessary, and
+    # at a 6 mm standoff that means the cup is moving when it is asked to seal.
+    # Measured: identical approach with a trailing five-refine loop failed to
+    # seal (rise -0.0000), without it the same pose lifts.
+    arm.scene.settle(0.8)
 
     cup.close(settle_steps=0)
     for _ in range(12):
