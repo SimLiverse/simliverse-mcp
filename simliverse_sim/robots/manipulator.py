@@ -830,21 +830,38 @@ class SuctionGripper:
         # it is hovering over, not enough to wobble. Measured, sealing from a
         # 30 mm standoff: the box was not nudged at all (0.0000 m), and came off
         # the belt 0.2544 m with the cup centred on it to 0.3 mm.
-        reach = min(float(max_grip_distance), 0.035)
+        # Compliant, not rigid - this is what NVIDIA's own shipped UR10 suction
+        # joint does, and it is the cup's bellows.
+        #
+        #     transX / transY   locked
+        #     transZ            0 .. 0.02
+        #     rotX / rotY       +/- 5 degrees
+        #     rotZ              +/- 3 degrees
+        #
+        # We locked all six for a long time on the strength of the attachment
+        # point documentation, which is right for `gripper_grasp.py` - there the
+        # gripper is a bare cube with no bellows to model. On a suction cup it
+        # makes the grasp brittle: with nothing able to give, every acceleration
+        # of the arm goes straight into the constraint, and the whole PhysX
+        # constraint force is what the coaxial and shear limits are compared
+        # against on a single substep.
+        reach = min(float(max_grip_distance), 0.02)
         for name, low, high in (
             ("transX", 1.0, -1.0),
             ("transY", 1.0, -1.0),
             ("transZ", 0.0, reach),
-            ("rotX", 1.0, -1.0),
-            ("rotY", 1.0, -1.0),
-            ("rotZ", 1.0, -1.0),
+            ("rotX", -5.0, 5.0),
+            ("rotY", -5.0, 5.0),
+            ("rotZ", -3.0, 3.0),
         ):
             limit = UsdPhysics.LimitAPI.Apply(joint.GetPrim(), name)
             limit.CreateLowAttr().Set(low)
             limit.CreateHighAttr().Set(high)
+        # NVIDIA runs every axis at the same 1000 / 100. Ours were tuned by hand
+        # against the all-locked joint above and no longer describe anything.
         for name, stiffness, damping in (
-            ("rotX", 100.0, 0.0), ("rotY", 100.0, 0.0),
-            ("rotZ", 10000.0, 0.0), ("transZ", 5000.0, 100.0),
+            ("rotX", 1000.0, 100.0), ("rotY", 1000.0, 100.0),
+            ("rotZ", 1000.0, 100.0), ("transZ", 1000.0, 100.0),
         ):
             drive = UsdPhysics.DriveAPI.Apply(joint.GetPrim(), name)
             drive.CreateStiffnessAttr().Set(stiffness)
@@ -913,6 +930,31 @@ class SuctionGripper:
         if not self.scene.is_playing():
             self.scene.play()
             self.scene.step(2)
+
+        # Turn on write-to-USD BEFORE the view exists, or building the view
+        # releases whatever the gripper is holding.
+        #
+        # Any USD change to the gripper prim fires the extension's
+        # `onComponentChange`, which re-reads every `isaac:*` attribute -
+        # including `isaac:status`. When that attribute has no authored value the
+        # token comes back empty and the C++ falls through to `return
+        # GripperStatus::Open`, so the in-memory state is clobbered to Open and
+        # the next physics step releases every attachment. Writing *any*
+        # property is enough; the handler is not per-attribute.
+        #
+        # `GripperView.__init__` ends by calling `set_surface_gripper_properties`,
+        # which is nothing but `attr.Set(...)` calls - so merely constructing a
+        # view over a closed gripper drops the payload. With write-to-USD on, the
+        # runtime keeps `isaac:status` current and the re-read is a no-op.
+        # NVIDIA's own `gripper_grasp.py` sets this immediately before building
+        # its view, which is where the ordering comes from.
+        try:
+            from isaacsim.robot.surface_gripper.bindings import _surface_gripper
+
+            _surface_gripper.acquire_surface_gripper_interface().set_write_to_usd(True)
+        except Exception:  # pragma: no cover - older builds lack the toggle
+            logger.debug("Could not enable surface-gripper write-to-USD")
+
         self._view = GripperView(paths=self.prim_path)
         # The view must be told its properties explicitly. Passing them to the
         # constructor was not enough - the gripper acknowledged actions and then
