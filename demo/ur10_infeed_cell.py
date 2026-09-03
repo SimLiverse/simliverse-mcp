@@ -207,14 +207,21 @@ def pick_from_plate(cell: dict) -> dict:
 
     here = np.asarray(carton.position, dtype=float)
     top = float(here[2]) + BOX / 2.0
-    # IK for the approach, not RMPflow. The belt cell gets away with
-    # `move_ee_to` because its pick sits at x=0.675; the plate's stop is at
-    # 0.88, and reaching out that far the reactive policy plateaus 41.9 mm
-    # short of a 15 mm tolerance and reports the target as outside the
-    # workspace. It is not - `pose_to` lands on it. This is the same repulsion
-    # term the descent already avoids, showing up one step earlier.
-    arm.pose_to([float(here[0]), float(here[1]), top + cup.tip_offset + 0.18],
-                DOWN, corrections=8, raise_on_fail=False)
+    # Coarse with RMPflow, then precise with IK - and `move_ee_to` has to come
+    # first for a second reason.
+    #
+    # Reaching out to the plate's stop at x=0.88 the reactive policy plateaus
+    # 41.9 mm short of a 15 mm tolerance, so the tolerance here is 60 mm: this
+    # move only has to get the arm into the neighbourhood.
+    #
+    # Replacing it with `pose_to` outright - the obvious fix - fails with "no
+    # inverse-kinematics solver. The end-effector frame did not resolve." The
+    # solver is initialised lazily by the first motion-generation call, and in
+    # the belt cell that is always `move_ee_to`. Removing it removed the thing
+    # that resolves the frame `pose_to` then needs.
+    approach = [float(here[0]), float(here[1]), top + cup.tip_offset + 0.18]
+    arm.move_ee_to(approach, DOWN, tolerance=0.06)
+    arm.pose_to(approach, DOWN, corrections=8, raise_on_fail=False)
     arm.scene.settle(0.5)
 
     here = np.asarray(carton.position, dtype=float)
