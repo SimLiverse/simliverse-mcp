@@ -75,6 +75,12 @@ from . import controller
 from .controller import ControllerError
 from .conveyor import Conveyor, ConveyorError, drive_surface
 from .deadplate import DeadPlate, DeadPlateError, Escapement
+from .sketch import (
+    SketchError,
+    fence_from_sketch,
+    parse_sketch,
+    zones_from_sketch,
+)
 from .guarding import (
     GuardingError,
     SafetyFence,
@@ -124,6 +130,10 @@ __all__ = [
     "Conveyor",
     "DeadPlate",
     "GuardingError",
+    "SketchError",
+    "fence_from_sketch",
+    "parse_sketch",
+    "zones_from_sketch",
     "SafetyFence",
     "spawn_beacon",
     "spawn_cabinet",

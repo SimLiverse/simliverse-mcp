@@ -87,6 +87,19 @@ def register_tools(mcp: FastMCP, get_connection: "Callable[[], IsaacConnection]"
           Conveyor.build(...) / belt.dress("conveyorbelt_a05") / belt.start()
           SafetyFence.build(centre=, size=, gate=, crossings=)
           spawn_pedestal(...) / spawn_operator(...) / vision.look(scale=)
+          fence_from_sketch(text) / zones_from_sketch(text)
+
+        IF THE USER DREW A LAYOUT, BUILD WHAT THEY DREW. A message carrying a
+        `[LAYOUT SKETCH ...]` block holds plan-view shapes in metres, taken off
+        a grid by hand. Those are the requested layout, not an approximation to
+        re-derive: pass the block to `fence_from_sketch(text)` and it returns
+        the guarding, or to `zones_from_sketch(text)` for the pallet spots and
+        travel directions. Isaac is Z-up so the numbers transfer one-to-one; do
+        not rescale or re-project them. A rectangle is the cell, an arrow that
+        crosses it is a conveyor entering and becomes an opening, a circle is
+        where something goes. The result reports `chosen_by` — say so if it
+        reads "largest, unlabelled", because then nobody told you which
+        rectangle was the cell and it guessed.
 
         BUILD CELLS OUT OF REAL ASSETS. The library indexes 175 props,
         including 47 conveyor sections and 23 people. A cell authored from
