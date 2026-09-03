@@ -530,24 +530,26 @@ class SuctionGripper:
 
     @staticmethod
     def _link_reach(scene, link_path: str, direction) -> float:
-        """How far the mounting body sticks out past its own origin, in metres.
+        """How far the body the cup is bolted to sticks out past the tool origin.
 
-        Measured in **world** space and then projected onto the approach
-        direction, because the link hierarchy cannot be relied on. On a UR10 the
-        links are flat siblings under `/World/UR` rather than a chain, so
-        `ComputeLocalBound` on `ee_link` returns coordinates in the robot root's
-        frame - x around 1.1 for an arm nowhere near 1.1 m thick. Two earlier
-        attempts at this fix used local bounds and returned first zero and then
-        a number contaminated by the link's position in the arm; both looked
-        plausible and neither moved the cup.
+        Measured in world space and projected onto the approach direction, then
+        sanity-capped. Everything about this was fiddly and each shortcut failed
+        in its own way:
 
-        World space has no such ambiguity: take the geometry's world bound, take
-        the link origin's world position, and ask how far the bound reaches
-        along the world-space approach vector.
+        - Local bounds are useless here. On a UR10 the links are flat siblings
+          under `/World/UR`, not a chain, so `ComputeLocalBound` on `ee_link`
+          answers in the robot root's frame - x around 1.1 for an arm nowhere
+          near that thick.
+        - A tool frame has no geometry of its own, so measuring only the named
+          mount link returns zero and the cup stays buried.
+        - Falling back to `GetParent()` therefore lands on the robot root and
+          measures the *entire arm* - which authored a 1.296 m standoff and put
+          the cup in the next room.
 
-        Falls back to the parent when a link has no geometry - a tool frame
-        usually has none - and to zero when nothing can be measured, which
-        restores the previous behaviour rather than raising.
+        So find the link that actually encloses the tool origin: among the
+        robot's links, the one whose world bound contains that point is the body
+        the cup is mounted on. That is a geometric question with a geometric
+        answer, and it does not care how the hierarchy is arranged.
         """
         try:
             from pxr import Gf, Usd, UsdGeom
@@ -563,29 +565,39 @@ class SuctionGripper:
                 Usd.TimeCode.Default()
             )
             origin = np.array(xf.ExtractTranslation())
-            # The approach direction is expressed in the link's frame; the bound
-            # is in world, so carry the direction into world too.
-            world_dir = np.array(xf.TransformDir(Gf.Vec3d(*[float(v) for v in direction])))
-            norm = np.linalg.norm(world_dir)
+            world_dir = np.array(
+                xf.TransformDir(Gf.Vec3d(*[float(v) for v in direction]))
+            )
+            norm = float(np.linalg.norm(world_dir))
             if norm < 1e-9:
                 return 0.0
             world_dir = world_dir / norm
 
-            for candidate in (prim, prim.GetParent()):
-                if not candidate or not candidate.IsValid():
-                    continue
+            def reach_of(candidate) -> float:
                 box = cache.ComputeWorldBound(candidate).ComputeAlignedRange()
                 if box.IsEmpty():
-                    continue
+                    return 0.0
                 lo, hi = np.array(box.GetMin()), np.array(box.GetMax())
-                # Project every corner and keep the furthest along the approach.
-                reach = max(
-                    float(np.dot(np.array(corner) - origin, world_dir))
-                    for corner in np.array(np.meshgrid(*zip(lo, hi))).T.reshape(-1, 3)
-                )
-                if reach > 1e-4:
-                    return float(reach)
-            return 0.0
+                # The tool origin must lie inside this body, or it is not what
+                # the cup is bolted to. A 1 cm tolerance covers a flange face.
+                if np.any(origin < lo - 0.01) or np.any(origin > hi + 0.01):
+                    return 0.0
+                corners = np.array(np.meshgrid(*zip(lo, hi))).T.reshape(-1, 3)
+                return max(float(np.dot(c - origin, world_dir)) for c in corners)
+
+            best = reach_of(prim)
+            if best <= 1e-4:
+                root = prim.GetParent()
+                if root and root.IsValid():
+                    for sibling in root.GetChildren():
+                        if sibling == prim:
+                            continue
+                        best = max(best, reach_of(sibling))
+
+            # A cup standoff is centimetres. Anything larger means the wrong
+            # body was measured, and silently mounting the tool a metre away is
+            # worse than not moving it at all.
+            return float(best) if 1e-4 < best <= 0.25 else 0.0
         except Exception:  # pragma: no cover - authoring must not die on this
             logger.debug("Could not measure %s for a cup standoff", link_path)
             return 0.0
