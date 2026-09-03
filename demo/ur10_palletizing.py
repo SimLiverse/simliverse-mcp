@@ -220,7 +220,7 @@ def build(
     cols: int = 2,
     layers: int = 1,
     robot: str = "ur10",
-    guides: bool = True,
+    guides: bool = False,
     grip_distance: float | None = None,
 ) -> dict:
     """Author the cell and leave it playing with a box waiting at the stop.
@@ -264,7 +264,18 @@ def build(
         position=[stop_x - LENGTH / 2.0, offset_y, deck],
         direction=(1, 0, 0), speed=speed,
         gate=True, gate_height=gate_height,
-        # A queue pressing on a stop needs somewhere for that force to go.
+        # Off by default, and that is a known limitation rather than a
+        # preference. Rails stop a queue squirting cartons off a 400 mm belt,
+        # which is what fails every carton at 1.5 kg and above. They also cost
+        # placement accuracy - 208 mm out, deterministically - because the pick
+        # has never been centred and nobody could tell: a carton sealed
+        # off-centre slides into line under the cup while it is lifted, and the
+        # rails stop it sliding. The 3-5 mm this cell reports is partly the
+        # carton correcting the approach on its way up.
+        #
+        # Turning them on without fixing the approach trades a failure at 1.5 kg
+        # for a failure at every mass, so the default stays off until the pick
+        # lands centred on its own.
         guides=guides, guide_height=max(0.10, box * 0.8),
         scene=scene,
     )

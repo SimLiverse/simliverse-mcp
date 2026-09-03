@@ -28,7 +28,12 @@ SCENARIOS: list[tuple[str, dict[str, Any]]] = [
     ("baseline", {}),
     ("small carton", {"box": 0.10}),
     ("large carton", {"box": 0.22}),
+    # Fails without side guides, and guides currently cost placement accuracy.
+    # Kept in the sweep as a standing red result rather than dropped: the cell's
+    # working envelope is about 1 kg, and a sweep that only lists what passes
+    # is a sweep that stops being worth running.
     ("heavy carton", {"box_mass": 3.0}),
+    ("guided belt", {"guides": True}),
     ("light carton", {"box_mass": 0.25}),
     ("slow belt", {"speed": 0.10}),
     ("fast belt", {"speed": 0.40}),
