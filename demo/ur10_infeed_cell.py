@@ -207,8 +207,15 @@ def pick_from_plate(cell: dict) -> dict:
 
     here = np.asarray(carton.position, dtype=float)
     top = float(here[2]) + BOX / 2.0
-    arm.move_ee_to([float(here[0]), float(here[1]), top + cup.tip_offset + 0.18],
-                   DOWN, tolerance=0.015)
+    # IK for the approach, not RMPflow. The belt cell gets away with
+    # `move_ee_to` because its pick sits at x=0.675; the plate's stop is at
+    # 0.88, and reaching out that far the reactive policy plateaus 41.9 mm
+    # short of a 15 mm tolerance and reports the target as outside the
+    # workspace. It is not - `pose_to` lands on it. This is the same repulsion
+    # term the descent already avoids, showing up one step earlier.
+    arm.pose_to([float(here[0]), float(here[1]), top + cup.tip_offset + 0.18],
+                DOWN, corrections=8, raise_on_fail=False)
+    arm.scene.settle(0.5)
 
     here = np.asarray(carton.position, dtype=float)
     top = float(here[2]) + BOX / 2.0
