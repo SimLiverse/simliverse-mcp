@@ -38,10 +38,16 @@ import numpy as np
 
 WARMUP_FRAMES = 30
 
-#: Frames a single servo state may spend before it is called stuck. At 60 Hz
-#: this is ten seconds, which is far longer than any move here takes and short
-#: enough that a wedged run ends rather than hanging on Play forever.
+#: Frames a servo state may spend before it is called stuck. At 60 Hz this is
+#: ten seconds - ample for a 30 cm lift or a descent.
 STATE_LIMIT = 600
+
+#: The traverse gets its own, much larger budget. It carries a carton right
+#: across the cell - about 1.07 m from the belt to the far pallet slot - and
+#: `servo_to` is a reactive policy taking one step per tick, not a plan. On the
+#: shared budget it timed out mid-swing and reported "could not traverse to slot
+#: 0", which reads as unreachable and was only slow.
+TRAVERSE_LIMIT = 2400
 
 #: Frames to hold still after arriving, before the cup is asked to seal. The
 #: descent overshoots and settles; sealing mid-oscillation is what made the
@@ -289,7 +295,7 @@ def compute(db=None):
             return True
         if _arm.servo_to(target, DOWN, tolerance=0.03):
             _go(OVER_SLOT)
-        elif _frame > STATE_LIMIT:
+        elif _frame > TRAVERSE_LIMIT:
             _fail("could not traverse to slot %d" % _slot)
         return True
 
