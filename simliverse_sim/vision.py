@@ -307,24 +307,59 @@ def views(
     return out
 
 
-def look(*, settle_frames: int = DEFAULT_SETTLE_FRAMES) -> dict:
-    """One call an agent can make to find out whether the scene looks right.
+def look(
+    *,
+    settle_frames: int = DEFAULT_SETTLE_FRAMES,
+    centre: Any = (0.0, 0.0, 0.0),
+    single: bool = False,
+) -> dict:
+    """One call an agent makes to find out whether the scene looks right.
 
-    Deliberately returns a verdict and not just pixels. `looks_blank` is the
-    cheap check that catches an unlit stage, a camera pointing at nothing, and a
-    renderer that has not produced a frame — three failures that each report
+    **Four viewpoints by default, not one.** One camera is a keyhole, and every
+    visual defect found in this cell was visible from one direction and
+    invisible from the others: a suction cup buried in the wrist reads as wrong
+    only in close-up; a carton floating above a pallet only from the side; two
+    boxes in the same place only from above. An agent given a single frame will
+    confidently describe a scene it has seen an eighth of.
+
+    Returns a verdict rather than only pixels. `looks_blank` per view is the
+    cheap check that catches an unlit stage, a camera aimed at nothing, and a
+    renderer that has produced no frame — three failures that each report
     themselves as something else.
+
+    `single=True` falls back to the active viewport alone, for the case where
+    the camera is already framed on something specific and moving it would lose
+    the very thing being looked at.
     """
+    if single:
+        try:
+            report = png(settle_frames=settle_frames)
+        except VisionUnavailable as exc:
+            return {"ok": False, "reason": str(exc)}
+        report["ok"] = True
+        if report["looks_blank"]:
+            report["hint"] = _BLANK_HINT
+        return report
+
     try:
-        report = png(settle_frames=settle_frames)
+        out = views(centre=centre, settle_frames=settle_frames)
     except VisionUnavailable as exc:
         return {"ok": False, "reason": str(exc)}
 
-    report["ok"] = True
-    if report["looks_blank"]:
-        report["hint"] = (
-            "The frame encoded to very few bytes, which means a flat fill "
-            "rather than a scene. Isaac's default stage is almost unlit: add a "
-            "dome light before concluding the geometry is missing."
+    out["ok"] = bool(out["ok"])
+    if not out["ok"]:
+        out["hint"] = _BLANK_HINT
+    elif out["blank"]:
+        out["hint"] = (
+            "These views rendered but came back nearly empty: "
+            f"{out['blank']}. Either nothing is in shot from those angles or "
+            "the cell is not where `centre` says it is."
         )
-    return report
+    return out
+
+
+_BLANK_HINT = (
+    "Every frame encoded to very few bytes, which means a flat fill rather "
+    "than a scene. Isaac's default stage is almost unlit: add a dome light "
+    "before concluding the geometry is missing."
+)
