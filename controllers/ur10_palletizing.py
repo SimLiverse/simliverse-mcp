@@ -75,6 +75,13 @@ STATE_LIMIT = 600
 #: 0", which reads as unreachable and was only slow.
 TRAVERSE_LIMIT = 2400
 
+#: Waiting for the *next* carton is not like waiting for the first. The first is
+#: already at the stop when Play starts; every one after it has to be released
+#: by the belt restarting in NEXT, travel the gap, and settle. Twenty seconds
+#: was not enough and the run ended "no carton settled at the stop for slot 1"
+#: with a carton visibly on its way.
+WAIT_LIMIT = 3600
+
 #: Frames to hold still after arriving, before the cup is asked to seal. The
 #: descent overshoots and settles; sealing mid-oscillation is what made the
 #: standoff sweep look like a gripper fault.
@@ -159,16 +166,21 @@ _placed = 0
 #: One line per transition, in a file, is enough to answer that.
 STATUS_PATH = "/tmp/ur10_palletizing.status"
 
-_NAMES = {}
+#: Explicit, because deriving it from globals() picked up any uppercase int in
+#: range and SEAL_TRIES (10) shadowed RETREAT (10) - the log then reported a
+#: state the machine had never been in.
+_NAMES = {
+    0: "WARMUP", 1: "INIT", 2: "WAIT_BOX", 3: "OVER_BOX", 4: "DESCEND",
+    5: "SEAL", 6: "LIFT", 7: "TRAVERSE", 8: "OVER_SLOT", 9: "RELEASE",
+    10: "RETREAT", 11: "NEXT", 12: "DONE", 13: "FAILED",
+}
 
 
 def _note(tag):
     """Record where the machine is, so a stalled run can be asked about."""
     try:
-        if not _NAMES:
-            for name, value in list(globals().items()):
-                if name.isupper() and isinstance(value, int) and 0 <= value < 14:
-                    _NAMES.setdefault(value, name)
+        if False:
+            pass
         with open(STATUS_PATH, "a", encoding="utf-8") as handle:
             line = "%-9s state=%-10s frame=%-5d slot=%d tries=%d why=%s" % (
                 tag, _NAMES.get(_state, _state), _frame, _slot, _tries, _why)
@@ -266,7 +278,7 @@ def compute(db=None):
             _belt.halt()
             _tries = 0
             _go(OVER_BOX)
-        elif _frame > STATE_LIMIT * 2:
+        elif _frame > WAIT_LIMIT:
             _fail("no carton settled at the stop for slot %d" % _slot)
         return True
 
