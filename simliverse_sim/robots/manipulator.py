@@ -612,43 +612,61 @@ class SuctionGripper:
 
     @staticmethod
     def _link_reach(scene, link_path: str, direction) -> float:
-        """How far the mounting body extends along `direction`, in local metres.
+        """How far the mounting body sticks out past its own origin, in metres.
 
-        Two traps, both hit while getting this right:
+        Measured in **world** space and then projected onto the approach
+        direction, because the link hierarchy cannot be relied on. On a UR10 the
+        links are flat siblings under `/World/UR` rather than a chain, so
+        `ComputeLocalBound` on `ee_link` returns coordinates in the robot root's
+        frame - x around 1.1 for an arm nowhere near 1.1 m thick. Two earlier
+        attempts at this fix used local bounds and returned first zero and then
+        a number contaminated by the link's position in the arm; both looked
+        plausible and neither moved the cup.
 
-        The bound has to be computed on the *link*, not on each child in turn.
-        `ComputeLocalBound(child)` is expressed in that child's own space, so
-        summing children measures several different frames and returns nonsense
-        - in practice zero, which silently restores the original bug.
+        World space has no such ambiguity: take the geometry's world bound, take
+        the link origin's world position, and ask how far the bound reaches
+        along the world-space approach vector.
 
-        And a tool frame usually has no geometry of its own. On a UR10 `ee_link`
-        is empty and the visible wrist is `wrist_3_link`, its parent, so
-        measuring only the named mount link returns zero for the same reason.
-        Walk up until something has a bound.
-
-        Callers must clear any previously authored cup first, or a rebuild
-        measures the cup as the geometry it is meant to clear and walks it
-        further out on every build.
+        Falls back to the parent when a link has no geometry - a tool frame
+        usually has none - and to zero when nothing can be measured, which
+        restores the previous behaviour rather than raising.
         """
         try:
-            from pxr import Usd, UsdGeom
+            from pxr import Gf, Usd, UsdGeom
 
-            axis = int(np.argmax(np.abs(direction)))
-            sign = 1.0 if direction[axis] > 0 else -1.0
             cache = UsdGeom.BBoxCache(
                 Usd.TimeCode.Default(), [UsdGeom.Tokens.default_]
             )
             prim = scene.stage.GetPrimAtPath(link_path)
-            for _ in range(3):
-                if not prim or not prim.IsValid():
-                    return 0.0
-                box = cache.ComputeLocalBound(prim).ComputeAlignedRange()
-                if not box.IsEmpty():
-                    lo, hi = np.array(box.GetMin()), np.array(box.GetMax())
-                    reach = hi[axis] if sign > 0 else -lo[axis]
-                    if reach > 0.0:
-                        return float(reach)
-                prim = prim.GetParent()
+            if not prim or not prim.IsValid():
+                return 0.0
+
+            xf = UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(
+                Usd.TimeCode.Default()
+            )
+            origin = np.array(xf.ExtractTranslation())
+            # The approach direction is expressed in the link's frame; the bound
+            # is in world, so carry the direction into world too.
+            world_dir = np.array(xf.TransformDir(Gf.Vec3d(*[float(v) for v in direction])))
+            norm = np.linalg.norm(world_dir)
+            if norm < 1e-9:
+                return 0.0
+            world_dir = world_dir / norm
+
+            for candidate in (prim, prim.GetParent()):
+                if not candidate or not candidate.IsValid():
+                    continue
+                box = cache.ComputeWorldBound(candidate).ComputeAlignedRange()
+                if box.IsEmpty():
+                    continue
+                lo, hi = np.array(box.GetMin()), np.array(box.GetMax())
+                # Project every corner and keep the furthest along the approach.
+                reach = max(
+                    float(np.dot(np.array(corner) - origin, world_dir))
+                    for corner in np.array(np.meshgrid(*zip(lo, hi))).T.reshape(-1, 3)
+                )
+                if reach > 1e-4:
+                    return float(reach)
             return 0.0
         except Exception:  # pragma: no cover - authoring must not die on this
             logger.debug("Could not measure %s for a cup standoff", link_path)
