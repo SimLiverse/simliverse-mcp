@@ -252,6 +252,7 @@ class DeadPlate:
         stop_height: float = 0.18,
         guide_height: float = 0.10,
         friction: float = DEFAULT_FRICTION,
+        tilt_deg: float = 0.0,
         colour: Any = (0.62, 0.64, 0.67),
         scene: Any = None,
     ) -> "DeadPlate":
@@ -277,11 +278,22 @@ class DeadPlate:
         # Static, so it never sags under a stack and never drifts. `spawn_rigid`
         # with static=True gives a kinematic body, which is what a collider
         # needs to be to take contact without moving.
+        # Inclined toward the stop, which is what resolves the plate's central
+        # tension. Slick enough for a singulated carton to coast to the stop is
+        # also slick enough for the cup's descent to push it back off: measured,
+        # the pick shoved a settled carton 44 mm away from the stop and then
+        # failed to seal. Friction cannot be both low enough to arrive and high
+        # enough to stay.
+        #
+        # A few degrees of fall does both. Gravity carries the carton the last
+        # stretch and then keeps holding it against the stop while the cup works
+        # on it. Real dead plates are inclined for exactly this reason.
         scene.spawn_rigid(
             prim_path,
             shape="cube",
             scale=[length / 2.0, width / 2.0, thickness / 2.0],
             position=[centre_x, float(centre_y), float(deck_z) - thickness / 2.0],
+            orientation=[0.0, -float(tilt_deg), 0.0],
             static=True,
             friction=float(friction),
             restitution=0.0,

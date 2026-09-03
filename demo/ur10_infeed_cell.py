@@ -126,7 +126,12 @@ PLATE_STOP = 0.78              #: inner face of the mechanical stop
 #: friction alone would need a value low enough to make a carton skate off the
 #: guides, and distance alone pushes the stop back toward the belt until there
 #: is no plate left to land on.
-PLATE_FRICTION = 0.08
+#: Higher than a flat plate could use, because the plate is inclined.
+PLATE_FRICTION = 0.30
+#: Degrees of fall toward the stop. Gravity carries the carton the last stretch
+#: and then holds it there while the cup descends - which friction alone cannot
+#: do, being either too low to hold or too high to arrive.
+PLATE_TILT_DEG = 4.0
 OFFSET_Y = -0.40
 BELT_LENGTH, BELT_WIDTH = 1.5, 0.40
 SPEED = 0.30
@@ -192,7 +197,7 @@ def build(scene: Scene | None = None, *, boxes: int = 4) -> dict:
         # Low friction and loose guides are the same mistake twice.
         length=PLATE_STOP - BELT_END, width=BOX + 0.05,
         centre_y=OFFSET_Y, guide_height=0.10,
-        friction=PLATE_FRICTION, scene=scene,
+        friction=PLATE_FRICTION, tilt_deg=PLATE_TILT_DEG, scene=scene,
     )
     plate.set_box_size((BOX, BOX, BOX)).track(cartons)
 
