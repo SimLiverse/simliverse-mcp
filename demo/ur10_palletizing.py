@@ -175,6 +175,28 @@ DOWN = [0.0, 1.0, 0.0, 0.0]
 STANDOFF = 0.006
 
 
+def cell_geometry(box: float) -> dict:
+    """The dimensions that follow from the carton, in one place.
+
+    Kept as a function rather than four expressions inside `build` so a test
+    can ask what a 22 cm carton implies without a GPU and a running stage.
+    Inlined, these are exactly the kind of number that stays at its measured
+    value while everything around it changes.
+    """
+    if box <= 0:
+        raise ValueError("box=%r: a carton has a positive size." % (box,))
+    return {
+        # A gate is a stop, so it must be taller than what it stops.
+        "gate_height": box + 0.03,
+        # Room for a carton to sit askew without fouling the side rails.
+        "width": max(WIDTH, box + 0.10),
+        # Cartons spaced tighter than they are wide arrive as one block.
+        "spacing": max(0.25, box + 0.10),
+        # A cup wider than the top face grips the corner it hangs over.
+        "cup_radius": min(0.045, box * 0.30),
+    }
+
+
 def build(
     scene: Scene | None = None,
     *,
@@ -223,13 +245,9 @@ def build(
     arm = Robot.spawn(robot, position=[0.0, 0.0, 0.0], prim_path=ARM)
     gains = arm.tune_drives(stiffness=1.0e5, damping=1.0e4, max_force=1.0e4)
 
-    # A gate is a stop, so it has to be taller than what it stops. Belt width
-    # has to clear the carton with room for it to sit askew, and the queue has
-    # to be spaced further apart than the cartons are wide or they arrive as
-    # one block.
-    gate_height = box + 0.03
-    width = max(WIDTH, box + 0.10)
-    spacing = max(0.25, box + 0.10)
+    shape = cell_geometry(box)
+    gate_height, width, spacing = (
+        shape["gate_height"], shape["width"], shape["spacing"])
 
     belt = Conveyor.build(
         BELT, length=LENGTH, width=width,
@@ -245,9 +263,7 @@ def build(
     slots = pallet_slots(origin=[0.0, pallet_y, 0.1425], box=(box, box, box),
                          rows=rows, cols=cols, layers=layers, gap=0.01)
 
-    # A cup wider than the face it seals against grips the corner it hangs
-    # over. Keep it inside the carton's top with a margin.
-    cup_radius = min(0.045, box * 0.30)
+    cup_radius = shape["cup_radius"]
 
     cup = arm.attach_suction_gripper(
         approach_axis="Z",
