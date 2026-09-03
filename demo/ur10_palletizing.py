@@ -395,7 +395,125 @@ def pick_waiting_box(cell: dict) -> dict:
     }
 
 
+def place_on_slot(cell: dict, slot: dict, *, box=None) -> dict:
+    """Put the held carton on `slot`. Returns what was measured, not a promise.
+
+    Traverses high before descending. The carton is 15 cm tall and the gate is
+    18 cm, so a traverse at picking height drags it through the stop; the
+    clearance below is measured from the pallet deck rather than assumed.
+    """
+    arm, cup = cell["arm"], cell["cup"]
+    scene = arm.scene
+    if not (cup.holding and cup.gripped_objects):
+        return {"placed": False, "reason": "nothing held"}
+    if box is None:
+        box = cell["belt"].boxes[0]
+
+    place = slot["place"]
+    # Release height: `place` is where the carton's centre goes, so the tool
+    # sits half a box plus the cup above it.
+    place_z = float(place[2]) + BOX / 2.0 + cup.tip_offset
+    travel_z = max(float(slot["approach"][2]), 0.55) + cup.tip_offset + BOX / 2.0
+
+    arm.pose_to([float(place[0]), float(place[1]), travel_z], DOWN,
+                corrections=8, raise_on_fail=False)
+    scene.settle(1.0)
+    if not (cup.holding and cup.gripped_objects):
+        return {"placed": False, "reason": "dropped during traverse"}
+
+    arm.pose_to([float(place[0]), float(place[1]), place_z], DOWN,
+                corrections=8, raise_on_fail=False)
+    scene.settle(1.0)
+
+    cup.open(settle_steps=0)
+    for _ in range(12):
+        scene.settle(0.3)
+        if not cup.holding:
+            break
+
+    arm.pose_to([float(place[0]), float(place[1]), place_z + 0.25], DOWN,
+                corrections=8, raise_on_fail=False)
+    scene.settle(1.2)
+
+    final = np.asarray(box.position, dtype=float)
+    rest = np.asarray(slot["rest"], dtype=float)
+    error = float(np.linalg.norm(final - rest))
+    return {
+        "placed": error <= 0.04 and float(box.speed) <= 0.02,
+        "slot": slot["index"],
+        "box": box.prim_path,
+        "error": round(error, 4),
+        "at": final.round(4).tolist(),
+        "want": rest.round(4).tolist(),
+        "speed": round(float(box.speed), 4),
+    }
+
+
+def palletise(cell: dict, *, count: int | None = None) -> dict:
+    """Pick and place `count` cartons, timing each cycle.
+
+    The cycle time is the deliverable, not a diagnostic. An integrator quotes a
+    rate and is held to it, and no offline-programming tool measures one against
+    simulated physics — they interpolate geometry and are, on published
+    measurements, wrong by up to a factor of two.
+
+    Timed on the *simulation* clock, not the wall clock, so the number means
+    "how long this cell takes" rather than "how fast this GPU is".
+    """
+    from isaacsim.core.simulation_manager import SimulationManager
+
+    arm, belt, slots = cell["arm"], cell["belt"], cell["slots"]
+    scene = arm.scene
+    count = len(slots) if count is None else min(int(count), len(slots))
+
+    cycles, placed = [], 0
+    run_started = float(SimulationManager.get_simulation_time())
+
+    for index in range(count):
+        started = float(SimulationManager.get_simulation_time())
+        # Let the next carton come forward before reaching for it.
+        waiting = belt.box_at_gate()
+        if waiting is None:
+            belt.start()
+            waiting = wait_for_box(belt)
+        if waiting is None:
+            cycles.append({"slot": index, "ok": False, "reason": "no carton arrived"})
+            break
+
+        picked = pick_waiting_box(cell)
+        if not picked.get("picked"):
+            cycles.append({"slot": index, "ok": False,
+                           "reason": picked.get("reason", "pick failed")})
+            break
+
+        result = place_on_slot(cell, slots[index], box=waiting)
+        finished = float(SimulationManager.get_simulation_time())
+        ok = bool(result.get("placed"))
+        placed += int(ok)
+        cycles.append({
+            "slot": index,
+            "ok": ok,
+            "seconds": round(finished - started, 2),
+            "error": result.get("error"),
+            "reason": result.get("reason"),
+        })
+        if not ok:
+            break
+
+    total = float(SimulationManager.get_simulation_time()) - run_started
+    times = [c["seconds"] for c in cycles if c.get("ok")]
+    return {
+        "placed": placed,
+        "of": count,
+        "complete": placed == count,
+        "seconds_total": round(total, 2),
+        "seconds_per_carton": round(sum(times) / len(times), 2) if times else None,
+        "cartons_per_hour": round(3600.0 / (sum(times) / len(times)), 1) if times else None,
+        "cycles": cycles,
+    }
+
+
 if __name__ == "__main__":
     cell = build()
     print("gains:", cell["gains"]["joints"])
-    print(pick_waiting_box(cell))
+    print(palletise(cell))

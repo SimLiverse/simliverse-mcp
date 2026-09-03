@@ -610,6 +610,37 @@ class SuctionGripper:
             )
             scene.stop()
 
+    @staticmethod
+    def _link_reach(scene, link_path: str, direction) -> float:
+        """How far the mounting link's own geometry extends along `direction`.
+
+        Returned in the link's local metres, so a cup started here sits on the
+        face of the link rather than inside it. Zero when the link has no
+        measurable geometry, which restores the previous behaviour instead of
+        raising - a tool frame with no mesh is a legitimate mounting point.
+        """
+        try:
+            from pxr import Usd, UsdGeom
+
+            prim = scene.stage.GetPrimAtPath(link_path)
+            if not prim:
+                return 0.0
+            cache = UsdGeom.BBoxCache(
+                Usd.TimeCode.Default(), [UsdGeom.Tokens.default_]
+            )
+            box = cache.ComputeLocalBound(prim).ComputeAlignedRange()
+            if box.IsEmpty():
+                return 0.0
+            lo, hi = np.array(box.GetMin()), np.array(box.GetMax())
+            axis = int(np.argmax(np.abs(direction)))
+            # The far corner along the approach direction, never negative: a
+            # link whose bound sits behind the origin needs no standoff at all.
+            reach = hi[axis] if direction[axis] > 0 else -lo[axis]
+            return float(max(reach, 0.0))
+        except Exception:  # pragma: no cover - authoring must not die on this
+            logger.debug("Could not measure %s for a cup standoff", link_path)
+            return 0.0
+
         axis = str(approach_axis).upper()
         if axis not in cls._Z_ONTO:
             raise ValueError(
@@ -618,7 +649,28 @@ class SuctionGripper:
         rot = Gf.Quatf(*cls._Z_ONTO[axis])
         direction = np.zeros(3)
         direction["XYZ".index(axis[-1])] = -1.0 if axis.startswith("-") else 1.0
-        mount = direction * (float(offset) + float(cup_length) / 2.0)
+        # Clear the mounting link's own body before the cup starts.
+        #
+        # `offset` used to default to 0, putting the cup's centre one half-length
+        # from the link's *origin*. On a UR10 that origin is not the flange face:
+        # `ee_link` and `wrist_3_link` share a world position, and wrist_3's
+        # geometry extends 45 mm past it along the approach axis. The cup was
+        # therefore authored inside the wrist, poking out of its side — which is
+        # exactly what "the suction gripper is mounted at 90 degrees" looks like,
+        # even though the cup's axis measured 0.05 degrees from straight down.
+        #
+        # No measurement caught this. The approach vector was right, the grip
+        # worked, the pick and place both succeeded. It was reported by a human
+        # looking at the screen, twice, before it was believed.
+        #
+        # So measure the link instead of assuming a number: take its bound along
+        # the approach direction and start the cup there. An explicit `offset`
+        # still wins, and a link with no geometry to measure falls back to the
+        # old behaviour rather than failing.
+        stand_off = float(offset)
+        if not stand_off:
+            stand_off = cls._link_reach(scene, parent_prim_path, direction)
+        mount = direction * (stand_off + float(cup_length) / 2.0)
 
         # Under the end-effector link, not beside the robot. Isaac's own surface
         # gripper documentation is explicit that the gripper "does not require a
