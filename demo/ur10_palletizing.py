@@ -92,15 +92,39 @@ Ruled out, each by measurement rather than reasoning:
   and the runtime view reports maxGripDistance 0.1, forces 500/500, retry 0.1
   against a prim whose type really is `IsaacSurfaceGripper`.
 
-What has *not* been tried: the attachment joint's transZ drive
-(stiffness 5000, damping 100, target 0) fighting the load as the joint extends,
-and whether the gripper re-validates its grip by raycast each tick and drops it
-once the carton leaves the belt surface. Those are the two candidates left.
+The decisive measurement, and the one that should drive whoever picks this up:
+
+**The grip is indefinitely stable while the arm is still, and dies on the first
+commanded motion of any kind.** Held through ten consecutive settles — three
+simulated seconds — with `gripped 1` and the carton's z unchanged to four
+decimals. Then one move, and it is gone within 2 mm of travel.
+
+Also ruled out since:
+
+- **Joint slack.** Clamping the attachment joint's transZ travel from 35 mm to
+  1 mm immediately after the seal, so the carton cannot dangle, changes nothing.
+- **The transZ drive.** Stiffness 5000 → 0, damping 100 → 0, travel widened to
+  100 mm. Identical detach.
+- **The motion path.** It is not something `pose_to` does. Nudging a single
+  joint by 0.01 rad through `set_joint_positions` drops it just as fast, and
+  that path applies an `ArticulationAction` — a drive target, not a teleport —
+  so the articulation is never being re-posed underneath the constraint.
+
+So it is not force, not slack, not the drive, not the collider, not the
+approach axis, not the grip distance, not the gate, not the lift profile, and
+not the motion API. What remains is inside the surface-gripper extension: some
+condition on relative motion between cup and carton that is not the coaxial or
+shear limit, since those are set to unlimited.
+
+The next step is to read the extension's own source rather than probe it from
+outside — `SurfaceGripperComponent.cpp`, specifically whatever runs per physics
+step after `updateClosedGripper`. Probing has now cost more than reading would
+have.
 
 One configuration has lifted a carton off the stop — +0.2854 m — and it did so
-after three failed descents had already shoved the box 31.5 mm clear. Whether
-that mattered because of the gate, the belt contact, or the carton's settled
-orientation is exactly what is unresolved.
+after three failed descents had already shoved the box 31.5 mm clear. That
+remains the only successful lift, and reproducing it deliberately rather than
+accidentally is the open question.
 """
 
 import numpy as np
