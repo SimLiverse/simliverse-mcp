@@ -198,3 +198,116 @@ def test_listing_labels_how_well_each_result_matched() -> None:
     hits = props.list_props("glass jar")
     assert hits and all("match" in h and "unmatched" in h for h in hits)
     assert hits[0]["match"] == "partial"
+
+
+# ── _place: the transform, against a real USD stage ─────────────────────────
+#
+# The rest of `spawn_prop` needs a live asset server and cannot run outside
+# Kit. These lines can, and their bug was invisible to every mocked test that
+# existed until Isaac itself raised on them: `AddRotateXYZOp` authors a
+# double3 attribute, and setting it from a Gf.Vec3f is a precision mismatch,
+# not a silent coercion.
+
+
+@pytest.fixture
+def xformable():
+    """A real Xformable on a real stage, kept alive for the test's duration.
+
+    `Usd.Prim` does not itself keep the `Usd.Stage` it came from alive; a
+    stage created and dropped inside a helper is destroyed the moment that
+    helper returns, and every op read back off the "live" prim then raises
+    'Accessed schema on invalid prim'. The stage has to outlive the prim
+    reference, which means it has to be the fixture, not a local variable.
+    """
+    from pxr import Usd, UsdGeom
+
+    stage = Usd.Stage.CreateInMemory()
+    prim = stage.DefinePrim("/Prop", "Xform")
+    # `yield`, not `return`: a fixture that returns still just returns from a
+    # function, and `stage` is freed the moment it does, same as the helper
+    # this replaced. `yield` keeps the generator frame - and `stage` with it -
+    # alive for the rest of the test.
+    yield UsdGeom.Xformable(prim)
+
+
+def test_position_alone_authors_a_translate_op(xformable) -> None:
+    from simliverse_sim.props import _place
+
+    xform = xformable
+    _place(xform, [1.0, 2.0, 3.0])
+
+    ops = xform.GetOrderedXformOps()
+    assert len(ops) == 1
+    assert tuple(ops[0].Get()) == pytest.approx((1.0, 2.0, 3.0))
+
+
+def test_an_orientation_does_not_raise_on_a_real_stage(xformable) -> None:
+    """The actual failure: `AddRotateXYZOp().Set(Gf.Vec3f(...))` raised
+    'has typeName double3 which does not match the requested precision
+    PrecisionFloat' the first time this ran against Kit's USD, on the very
+    scene a from-scratch sketch build produced."""
+    from simliverse_sim.props import _place
+
+    xform = xformable
+    _place(xform, [0.0, 0.0, 0.0], orientation=[0.0, 0.0, 180.0])
+
+    ops = xform.GetOrderedXformOps()
+    assert len(ops) == 2
+    assert tuple(ops[1].Get()) == pytest.approx((0.0, 0.0, 180.0))
+
+
+def test_both_ops_request_double_precision_explicitly(xformable) -> None:
+    """Pin the fix, not a default: `AddRotateXYZOp()` with no argument
+    defaults to float precision in a standalone `pxr` package and to double
+    in Kit's bundled USD, so this has to hold regardless of which one is
+    running the test - which is exactly why `_place` asks for the precision
+    outright instead of trusting either build's default."""
+    from simliverse_sim.props import _place
+
+    xform = xformable
+    _place(xform, [0.0, 0.0, 0.0], orientation=[0.0, 0.0, 90.0])
+
+    translate_op, rotate_op = xform.GetOrderedXformOps()
+    assert str(translate_op.GetAttr().GetTypeName()) == "double3"
+    assert str(rotate_op.GetAttr().GetTypeName()) == "double3"
+
+
+@pytest.mark.parametrize("orientation", [
+    [12.5, -4.0, 90.0],
+    [0.0, 0.0, -90.0],
+    [0.0, 0.0, 0.0],
+])
+def test_orientation_values_survive_the_round_trip(orientation, xformable) -> None:
+    from simliverse_sim.props import _place
+
+    xform = xformable
+    _place(xform, [0.0, 0.0, 0.0], orientation=orientation)
+
+    got = xform.GetOrderedXformOps()[1].Get()
+    assert tuple(got) == pytest.approx(tuple(orientation))
+
+
+def test_no_orientation_means_no_rotate_op_at_all(xformable) -> None:
+    """Unset, not zeroed - a caller that never asked for a rotation should
+    not pay for one, and a stray identity op is still an op to reason about."""
+    from simliverse_sim.props import _place
+
+    xform = xformable
+    _place(xform, [0.0, 0.0, 0.0])
+
+    assert len(xform.GetOrderedXformOps()) == 1
+
+
+def test_a_second_placement_replaces_the_first_rather_than_stacking(xformable) -> None:
+    """`ClearXformOpOrder` matters: a prim placed twice - once without a
+    rotation, once with - must not end up with a stale translate plus a new
+    rotate stacked on top of it."""
+    from simliverse_sim.props import _place
+
+    xform = xformable
+    _place(xform, [1.0, 1.0, 1.0])
+    _place(xform, [2.0, 2.0, 2.0], orientation=[0.0, 0.0, 45.0])
+
+    ops = xform.GetOrderedXformOps()
+    assert len(ops) == 2
+    assert tuple(ops[0].Get()) == pytest.approx((2.0, 2.0, 2.0))

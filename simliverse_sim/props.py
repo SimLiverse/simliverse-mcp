@@ -164,6 +164,35 @@ def find_prop(query: str, *, allow_partial: bool = False) -> dict[str, Any]:
     return best
 
 
+def _place(xform, position: Any, orientation: Any = None) -> None:
+    """Set a prop's transform: translate, and rotate if asked.
+
+    A function of its own so a test can exercise the exact xformOp calls
+    against a real, if empty, USD stage - `add_reference` and `assets_root()`
+    need a live asset server and cannot run outside Kit, but a precision
+    mismatch on the ops themselves has nothing to do with either and was
+    invisible to every test until one actually authored the attribute.
+
+    Precision is requested explicitly at both ops, rather than left to
+    `AddRotateXYZOp()`'s default - which is not one thing. A standalone `pxr`
+    package defaults the bare call to float and lets `Set()` silently coerce
+    whatever it is given; Kit's bundled USD defaulted the same bare call to
+    double and raised outright the first time this passed it a `Gf.Vec3f` -
+    `'has typeName double3 which does not match the requested precision
+    PrecisionFloat'`. A fix that only swapped `Vec3f` for `Vec3d` would still
+    be depending on whichever build's default happened to agree with it.
+    """
+    from pxr import Gf, UsdGeom
+
+    xform.ClearXformOpOrder()
+    xform.AddTranslateOp(UsdGeom.XformOp.PrecisionDouble).Set(
+        Gf.Vec3d(*as_vec3(position, name="position")))
+    if orientation is not None:
+        ox, oy, oz = as_vec3(orientation, name="orientation")
+        xform.AddRotateXYZOp(UsdGeom.XformOp.PrecisionDouble).Set(
+            Gf.Vec3d(float(ox), float(oy), float(oz)))
+
+
 def spawn_prop(
     query: str,
     *,
@@ -207,14 +236,10 @@ def spawn_prop(
 
     add_reference(assets_root() + entry["path"], prim_path)
 
-    from pxr import Gf, UsdGeom
+    from pxr import UsdGeom
 
     xform = UsdGeom.Xformable(get_stage().GetPrimAtPath(prim_path))
-    xform.ClearXformOpOrder()
-    xform.AddTranslateOp().Set(Gf.Vec3d(*as_vec3(position, name="position")))
-    if orientation is not None:
-        ox, oy, oz = as_vec3(orientation, name="orientation")
-        xform.AddRotateXYZOp().Set(Gf.Vec3f(float(ox), float(oy), float(oz)))
+    _place(xform, position, orientation)
 
     if entry["physics"] != "dynamic":
         logger.warning(
