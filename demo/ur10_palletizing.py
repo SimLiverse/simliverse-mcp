@@ -62,6 +62,45 @@ timeline, and a stop between `start()` and Play drops the surface velocity.
 
 The sixth is in `Conveyor` itself; the rest are here because they are decisions
 about this cell rather than about the library.
+
+## OPEN: the seal forms and breaks under the first gram of load
+
+The cell now picks reliably in the sense that matters least: the cup seals on
+the carton, by name, on the first attempt.
+
+    SEALED on attempt 0: ['/World/Box0']
+    step 1  target_ee 0.6600  ee 0.6576  box_z 0.5266  rise +0.0017
+            holding False  gripped 0     <- lost it here
+
+It detaches on the very first lift step, having raised the carton 1.7 mm. Every
+run is byte-identical, so this is deterministic rather than flaky.
+
+Ruled out, each by measurement rather than reasoning:
+
+- **Force limits.** Set to -1 (the schema's unlimited sentinel) for both
+  coaxial and shear. Identical detach, same millimetre.
+- **Binding on the gate.** The carton rests against the stop at x=0.75, so a
+  vertical lift could drag its face along the blade. Retreating 4 mm in -X per
+  step changes nothing.
+- **Lift aggressiveness.** 2 cm steps fail exactly as a single 30 cm move does.
+- **The correction budget and trailing refines**, both of which were real
+  defects and are fixed above; neither was this one.
+- **The collider.** A PhysX raycast finds the carton at 41.5 mm now that it is
+  an authored mesh, and the seal itself proves contact is detected.
+- **Approach axis and grip distance.** forwardAxis measures
+  [0.0002, -0.0003, -1.0], the attachment origin sits 26 mm above the carton,
+  and the runtime view reports maxGripDistance 0.1, forces 500/500, retry 0.1
+  against a prim whose type really is `IsaacSurfaceGripper`.
+
+What has *not* been tried: the attachment joint's transZ drive
+(stiffness 5000, damping 100, target 0) fighting the load as the joint extends,
+and whether the gripper re-validates its grip by raycast each tick and drops it
+once the carton leaves the belt surface. Those are the two candidates left.
+
+One configuration has lifted a carton off the stop — +0.2854 m — and it did so
+after three failed descents had already shoved the box 31.5 mm clear. Whether
+that mattered because of the gate, the belt contact, or the carton's settled
+orientation is exactly what is unresolved.
 """
 
 import numpy as np
