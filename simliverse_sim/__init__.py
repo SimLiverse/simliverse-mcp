@@ -74,6 +74,7 @@ from .assertions import (
 from . import controller
 from .controller import ControllerError
 from .conveyor import Conveyor, ConveyorError, drive_surface
+from .deadplate import DeadPlate, DeadPlateError
 from .objects import RigidObject
 from .robots import (
     AerialRobot,
@@ -112,6 +113,8 @@ __all__ = [
     "Check",
     "ControllerError",
     "Conveyor",
+    "DeadPlate",
+    "DeadPlateError",
     "STANDARD_VIEWS",
     "VisionUnavailable",
     "views",
