@@ -95,6 +95,32 @@ def _runs(span: tuple[float, float],
     return [(a, b) for a, b in keep if (b - a) > 1e-6]
 
 
+def _translucent(scene: Any, prim_path: str, opacity: float) -> bool:
+    """Make a panel see-through, so the guarding does not hide the cell.
+
+    Guarding is mesh. Opaque panels are not a cosmetic problem: the render is
+    the thing a layout is reviewed from, and a cell you cannot see inside has
+    answered nothing. The first fenced render came back as a white box with a
+    gap in it.
+
+    Returns whether the attribute was authored, because `displayOpacity` is a
+    hint that a renderer may ignore and claiming translucency that did not
+    happen is worse than reporting that it did not.
+    """
+    try:
+        from pxr import UsdGeom
+
+        prim = scene.stage.GetPrimAtPath(prim_path)
+        if not prim or not prim.IsValid():
+            return False
+        gprim = UsdGeom.Gprim(prim)
+        gprim.CreateDisplayOpacityAttr().Set([float(opacity)])
+        return True
+    except Exception:  # noqa: BLE001 - a look is not worth failing a build for
+        logger.debug("could not set opacity on %s", prim_path, exc_info=True)
+        return False
+
+
 class SafetyFence:
     """A rectangular perimeter of mesh panels, with openings where asked.
 
@@ -132,6 +158,7 @@ class SafetyFence:
         gate_offset: float = 0.0,
         crossings: list[dict[str, Any]] | None = None,
         panel_max: float = 1.5,
+        panel_opacity: float = 0.25,
         colour: Any = (0.82, 0.72, 0.10),
         scene: Any = None,
     ) -> "SafetyFence":
@@ -216,6 +243,7 @@ class SafetyFence:
                         mass=0.0, static=True, friction=0.4, restitution=0.0,
                         color=(0.55, 0.60, 0.65),
                     )
+                    _translucent(scene, path, panel_opacity)
                     fence.panels.append(path)
 
         # Posts at every corner and either side of every opening: that is where

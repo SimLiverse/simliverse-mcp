@@ -64,23 +64,41 @@ def guard(cell: dict, *, scene: Any = None, gate: str = "south",
     # went just past it, and the guarding was inside the working envelope on
     # the one side nothing else stuck out of.
     envelope = REACH + margin
-    west = min(-envelope, -REACH - margin)
-    east = max(belt_far_x + 0.20, envelope)
+    west = -envelope
+    # NOT the belt's far end. The belt is the one thing here that is *meant* to
+    # cross the line - an infeed conveyor runs in from outside - so sizing this
+    # side to contain it guarantees it never reaches the fence and the crossing
+    # is never cut. Sizing it off the equipment that must be enclosed leaves
+    # the belt free to pass through.
+    east = envelope
     south = min(belt_y - belt_width / 2.0 - margin, -envelope)
     north = max(pallet_far_y + margin, envelope)
 
     centre = ((west + east) / 2.0, (south + north) / 2.0)
     size = (east - west, north - south)
 
+    # Only cut a slot for the belt if the belt actually reaches the line. Once
+    # the east side was widened to clear the reach envelope it moved out to
+    # 1.85 m while the belt still ended at 0.75, and the fence was built with a
+    # doorway onto nothing - a gap in the guarding that no conveyor uses. The
+    # first version of this tested that the slot lined up with the belt's
+    # centre-line, which it did, and never that the belt got there.
+    reaches = belt_far_x >= east - 1e-6
+    crossings = ([{"side": "east", "centre": belt_y,
+                   "width": belt_width + 0.30}] if reaches else [])
+
     fence = SafetyFence.build(
         "/World/Fence", centre=centre, size=size, gate=gate, gate_width=1.0,
-        # The slot the conveyor runs through. Sized off the belt, with room
-        # either side, because a crossing cut to the exact belt width is a
-        # crossing that clips the guide rails when anyone fits them.
-        crossings=[{"side": "east", "centre": belt_y,
-                    "width": belt_width + 0.30}],
+        # The slot the conveyor runs through, with room either side: cut to the
+        # exact belt width it clips the guide rails when anyone fits them.
+        crossings=crossings,
         scene=scene,
     )
+    if not reaches:
+        # Worth saying. A belt that terminates inside the guarding is a cell
+        # with no way in for cartons, which is a layout question, not a bug.
+        print("  note: the belt ends %.2f m short of the east guarding, so no "
+              "crossing was cut" % (east - belt_far_x))
 
     fit = fence.fits((0.0, 0.0), reach=REACH)
     if fit["touches_fence"]:

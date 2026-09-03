@@ -220,6 +220,7 @@ def views(
     *,
     names: list[str] | None = None,
     centre: Any = (0.0, 0.0, 0.0),
+    scale: float = 1.0,
     settle_frames: int = DEFAULT_SETTLE_FRAMES,
     directory: str = "/tmp",
     prefix: str = "view",
@@ -232,6 +233,12 @@ def views(
     `centre` moves the whole rig, so this works on a cell that is not at the
     origin. The camera is put back where it started, because a capture that
     silently re-aims the user's viewport is a capture that gets switched off.
+
+    `scale` backs the rig off. The offsets below were chosen on a cell about a
+    metre across, and they are wrong for anything much bigger: fence a cell and
+    the hero camera at 2.6 m is inside the guarding, looking at a panel. Scale
+    is a multiplier on the eye offset rather than a new set of viewpoints,
+    because the angles are the part worth keeping.
     """
     import numpy as np
 
@@ -273,9 +280,10 @@ def views(
     try:
         for name in wanted:
             eye_offset, target_offset = STANDARD_VIEWS[name]
+            eye_offset = np.asarray(eye_offset, dtype=float) * float(scale)
             manager.set_camera_view(
                 camera,
-                eye=(origin + np.asarray(eye_offset, dtype=float)).tolist(),
+                eye=(origin + eye_offset).tolist(),
                 target=(origin + np.asarray(target_offset, dtype=float)).tolist(),
             )
             # Let the move reach the renderer before asking for a frame.
@@ -311,6 +319,7 @@ def look(
     *,
     settle_frames: int = DEFAULT_SETTLE_FRAMES,
     centre: Any = (0.0, 0.0, 0.0),
+    scale: float = 1.0,
     single: bool = False,
 ) -> dict:
     """One call an agent makes to find out whether the scene looks right.
@@ -342,7 +351,7 @@ def look(
         return report
 
     try:
-        out = views(centre=centre, settle_frames=settle_frames)
+        out = views(centre=centre, scale=scale, settle_frames=settle_frames)
     except VisionUnavailable as exc:
         return {"ok": False, "reason": str(exc)}
 

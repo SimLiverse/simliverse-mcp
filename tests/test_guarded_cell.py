@@ -56,27 +56,29 @@ def _fence(scene, *, margin=MARGIN, belt=None):
     belt_y = belt["centre"][1]
     belt_far_x = belt["centre"][0] + belt["length"] / 2.0
     envelope = REACH + margin
-    west = min(-envelope, -REACH - margin)
-    east = max(belt_far_x + 0.20, envelope)
+    west = -envelope
+    east = envelope
     south = min(belt_y - belt["width"] / 2.0 - margin, -envelope)
     north = max(PALLET_Y + 0.605 + margin, envelope)
+    reaches = belt_far_x >= east - 1e-6
     return SafetyFence.build(
         "/World/Fence",
         centre=((west + east) / 2.0, (south + north) / 2.0),
         size=(east - west, north - south),
         gate="south", gate_width=1.0,
-        crossings=[{"side": "east", "centre": belt_y,
-                    "width": belt["width"] + 0.30}],
+        crossings=([{"side": "east", "centre": belt_y,
+                     "width": belt["width"] + 0.30}] if reaches else []),
         scene=scene)
 
 
 def test_the_conveyor_leaves_through_a_gap_not_a_panel() -> None:
     """The expensive failure: a panel across the belt, invisible from front."""
     scene = _FakeScene()
-    fence = _fence(scene)
+    belt = dict(BELT, centre=[0.9, -0.4, 0.45], length=3.0)
+    fence = _fence(scene, belt=belt)
 
-    belt_y = BELT["centre"][1]
-    half = BELT["width"] / 2.0
+    belt_y = belt["centre"][1]
+    half = belt["width"] / 2.0
     for panel in scene.spawned:
         if "East" not in panel.prim_path or "Post" in panel.prim_path:
             continue
@@ -86,14 +88,30 @@ def test_the_conveyor_leaves_through_a_gap_not_a_panel() -> None:
             "%s stands in the belt's path at y=%.2f" % (panel.prim_path, belt_y))
 
 
-def test_the_crossing_is_wider_than_the_belt_it_passes() -> None:
+def test_a_belt_that_reaches_the_line_gets_a_slot_wider_than_itself() -> None:
     """Cut to the exact belt width, a crossing clips the guide rails."""
     scene = _FakeScene()
-    fence = _fence(scene)
+    long_enough = dict(BELT, centre=[0.9, -0.4, 0.45], length=3.0)  # ends 2.4
+    fence = _fence(scene, belt=long_enough)
     start, end = fence.openings["east"][0]
 
-    assert end - start > BELT["width"], "no room either side of the belt"
-    assert start < BELT["centre"][1] < end, "the gap is not on the belt"
+    assert end - start > long_enough["width"], "no room either side"
+    assert start < long_enough["centre"][1] < end, "the gap is not on the belt"
+
+
+def test_a_belt_that_stops_short_gets_no_slot_at_all() -> None:
+    """A doorway onto nothing is a hole in the guarding that nothing uses.
+
+    The measured cell's belt ends at 0.75 m and the east line stands at 1.85,
+    because that side is set by the arm's reach rather than by the conveyor.
+    Cutting the slot anyway - which is what the first version did - leaves an
+    opening no carton ever passes through.
+    """
+    scene = _FakeScene()
+    fence = _fence(scene)
+
+    assert fence.openings["east"] == [], (
+        "the belt ends inside the guarding, so nothing should be cut for it")
 
 
 def test_the_arm_and_the_pallet_are_both_inside_the_guarding() -> None:
@@ -166,11 +184,17 @@ def test_a_longer_belt_moves_the_crossing_with_it() -> None:
     assert fence.contains((0.4, -0.9)), "the belt is not inside the fence"
 
 
-def test_the_fence_clears_the_belts_far_end() -> None:
-    """A fence drawn inside the belt's exit cuts the conveyor in half."""
+def test_a_short_belt_ends_inside_the_guarding() -> None:
+    """The measured cell's belt does not leave the fence, and that is fine.
+
+    It is a layout question - how do cartons get in - not a defect, so it is
+    reported rather than corrected. What would be a defect is cutting a slot
+    for a conveyor that never arrives at it.
+    """
     scene = _FakeScene()
     fence = _fence(scene)
     far_x = BELT["centre"][0] + BELT["length"] / 2.0
     east_line = fence.centre[0] + fence.size[0] / 2.0
 
-    assert east_line > far_x, "the guarding stands inside the belt run"
+    assert east_line > far_x
+    assert fence.openings["east"] == []
