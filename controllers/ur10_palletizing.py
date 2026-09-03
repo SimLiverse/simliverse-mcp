@@ -139,6 +139,7 @@ _tries = 0
 _carton = None
 _pick = None
 _lift_z = 0.0
+_plan = None
 _why = ""
 _placed = 0
 
@@ -185,12 +186,13 @@ def _on_timeline(event):
     import omni.timeline
 
     global _state, _frame, _arm, _cup, _belt, _scene
-    global _slot, _tries, _carton, _pick, _lift_z, _why, _placed
+    global _slot, _tries, _carton, _pick, _lift_z, _plan, _why, _placed
     if event.type == int(omni.timeline.TimelineEventType.STOP):
         _state, _frame = WARMUP, 0
         _arm = _cup = _belt = _scene = _carton = _pick = None
         _slot = _tries = _placed = 0
         _lift_z = 0.0
+        _plan = None
         _why = ""
         try:
             open(STATUS_PATH, "w", encoding="utf-8").close()
@@ -216,7 +218,7 @@ def _top_of(carton):
 
 def compute(db=None):
     global _arm, _cup, _belt, _scene, _slot, _tries, _carton, _pick
-    global _lift_z, _placed
+    global _lift_z, _plan, _placed
     _frame_tick()
 
     if _state in (DONE, FAILED):
@@ -313,13 +315,38 @@ def compute(db=None):
         return True
 
     if _state == TRAVERSE:
-        slot = SLOTS[_slot]
-        target = [float(slot["place"][0]), float(slot["place"][1]),
-                  0.55 + _cup.tip_offset + BOX / 2.0]
+        # Planned, not servoed. This is much the longest move in the cycle -
+        # about 1.07 m from the belt to the far pallet slot, carrying a carton -
+        # and `servo_to` is a reactive policy taking one step per tick toward a
+        # target it re-evaluates from scratch. It did not converge at four times
+        # the frame budget, and the failure read as "could not traverse", which
+        # sounds like an unreachable slot and was a move that never finished.
+        #
+        # `plan_to` computes the whole route once; `follow` advances one tick
+        # along it and keeps the same non-blocking contract, so the state's
+        # shape does not change. It also stalls its own clock while the arm is
+        # behind, which is what stops a heavy payload being handed a target
+        # further along a curve it has not reached yet.
         if not (_cup.holding and _cup.gripped_objects):
             _fail("dropped %s during the traverse" % _carton.prim_path)
             return True
-        if _arm.servo_to(target, DOWN, tolerance=0.03):
+
+        slot = SLOTS[_slot]
+        target = [float(slot["place"][0]), float(slot["place"][1]),
+                  0.55 + _cup.tip_offset + BOX / 2.0]
+
+        if _plan is None:
+            try:
+                _plan = _arm.plan_to(target, DOWN)
+            except Exception as exc:  # noqa: BLE001 - NoPathFound is an answer
+                # Falling back to servo silently would drive at the same target
+                # and stall against whatever the planner just refused.
+                _fail("no route to slot %d: %s: %s"
+                      % (_slot, type(exc).__name__, exc))
+                return True
+
+        if _arm.follow(_plan):
+            _plan = None
             _go(OVER_SLOT)
         elif _frame > TRAVERSE_LIMIT:
             _fail("could not traverse to slot %d" % _slot)
