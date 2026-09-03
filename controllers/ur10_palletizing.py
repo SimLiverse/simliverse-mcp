@@ -25,6 +25,32 @@ belt handle from a description literal.
 authoring time, so it conveys on its own from the moment Play starts. The
 controller only waits for what it delivers.
 
+## Where this currently gets to on Play
+
+    INIT -> WAIT_BOX -> OVER_BOX -> DESCEND -> SEAL -> LIFT -> TRAVERSE -> FAILED
+    why = could not traverse to slot 0
+
+Seven states, unattended, from pressing Play. The cup seals on a *named* carton
+and lifts it clear; the run then stalls swinging it across to the pallet.
+
+Three bugs were found and fixed getting this far, and each was invisible from
+outside the graph until the transition log existed:
+
+- `KeyError: 'belt_path'` in INIT, from a belt description written by hand
+  instead of pasted from `describe()`.
+- LIFT recomputing its target from the carton it was raising, so the goal rose
+  with the load and the arm chased it to the frame limit. It reported "could
+  not lift clear" while lifting perfectly well.
+- TRAVERSE sharing a frame budget sized for a 30 cm move while carrying a
+  carton 1.07 m across the cell.
+
+The traverse still does not complete with four times that budget, which points
+at `servo_to` rather than at the clock: it is a reactive policy taking one step
+per tick, and this is much the longest move in the cycle. `plan_to` and `follow`
+exist for exactly this - a planned path, sampled a step at a time - and are the
+next thing to try. The same sequence completes reliably outside the graph,
+where the traverse is a blocking `pose_to`.
+
 ## The measured numbers this depends on
 
 From the same cell run outside: 58.61 s per carton, four of four placed, 3.7 to
