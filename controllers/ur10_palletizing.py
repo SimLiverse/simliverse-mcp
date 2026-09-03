@@ -100,9 +100,35 @@ _why = ""
 _placed = 0
 
 
+#: A ScriptNode cannot report. It runs in its own namespace inside the graph, so
+#: nothing outside can import it and read its state, and `carb.log_warn` did not
+#: surface anywhere reachable either - the first delivered run came back
+#: "reproduced: True, moved: []" with no way at all to ask what it had done.
+#: One line per transition, in a file, is enough to answer that.
+STATUS_PATH = "/tmp/ur10_palletizing.status"
+
+_NAMES = {}
+
+
+def _note(tag):
+    """Record where the machine is, so a stalled run can be asked about."""
+    try:
+        if not _NAMES:
+            for name, value in list(globals().items()):
+                if name.isupper() and isinstance(value, int) and 0 <= value < 14:
+                    _NAMES.setdefault(value, name)
+        with open(STATUS_PATH, "a", encoding="utf-8") as handle:
+            line = "%-9s state=%-10s frame=%-5d slot=%d tries=%d why=%s" % (
+                tag, _NAMES.get(_state, _state), _frame, _slot, _tries, _why)
+            handle.write(line + chr(10))
+    except Exception:  # noqa: BLE001 - reporting must never break the run
+        pass
+
+
 def _go(state):
     global _state, _frame
     _state, _frame = state, 0
+    _note("enter")
 
 
 def _fail(reason):
@@ -122,6 +148,10 @@ def _on_timeline(event):
         _arm = _cup = _belt = _scene = _carton = _pick = None
         _slot = _tries = _placed = 0
         _why = ""
+        try:
+            open(STATUS_PATH, "w", encoding="utf-8").close()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 _timeline_sub = None
