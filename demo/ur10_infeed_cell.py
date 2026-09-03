@@ -185,7 +185,12 @@ def build(scene: Scene | None = None, *, boxes: int = 4) -> dict:
 
     plate = DeadPlate.build(
         PLATE, deck_z=PLATE_DECK, stop_x=PLATE_STOP,
-        length=PLATE_STOP - BELT_END, width=0.42,
+        # Guides close to the carton, not to the belt. At 0.42 wide there was
+        # 135 mm of slack either side of a 150 mm carton, and on a plate slick
+        # enough to reach the stop the cup's own descent skated it 103 mm
+        # sideways - the seal then failed and the failure named the gripper.
+        # Low friction and loose guides are the same mistake twice.
+        length=PLATE_STOP - BELT_END, width=BOX + 0.05,
         centre_y=OFFSET_Y, guide_height=0.10,
         friction=PLATE_FRICTION, scene=scene,
     )
