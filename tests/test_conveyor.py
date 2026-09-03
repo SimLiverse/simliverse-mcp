@@ -138,6 +138,32 @@ def test_boxes_are_queued_back_from_the_gate_in_arrival_order(belt) -> None:
     assert xs[0] - xs[1] == pytest.approx(0.5)
 
 
+def test_box_at_gate_ignores_a_carton_that_fell_off_the_belt(belt) -> None:
+    """Displacement along the belt says nothing about the other two axes.
+
+    Measured: a carton knocked onto the floor 0.68 m to the side and 0.45 m
+    below the deck still had an `along` inside the arrival tolerance, so it was
+    returned as the box at the gate. The arm was sent to fetch it 1.08 m away
+    and `pose_to` reported the target as outside the workspace - which is true,
+    and names the arm rather than the belt that handed it a fallen box.
+    """
+    belt.load(2, box=(0.15, 0.15, 0.15))
+    good, fallen = belt.boxes
+
+    # Both are level with the stop along the direction of travel.
+    at_gate = belt.length / 2.0 - 0.075
+    good.position = np.array([at_gate, 0.0, 1.0 + 0.075])
+    good.speed = 0.0
+    fallen.position = np.array([at_gate, -1.10, 0.075])
+    fallen.speed = 0.0
+
+    assert belt.box_at_gate() is good
+
+    # And with only the fallen one, nothing has arrived.
+    belt.track([fallen])
+    assert belt.box_at_gate() is None
+
+
 def test_boxes_are_spawned_beside_the_belt_never_beneath_it(belt) -> None:
     """Parented under a kinematic belt, a box rides it instead of resting on it."""
     belt.load(2, box=(0.18, 0.13, 0.11))

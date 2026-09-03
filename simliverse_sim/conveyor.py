@@ -722,6 +722,29 @@ class Conveyor:
                 continue
             if speed > max_speed:
                 continue
+            # Still ON the belt, not merely level with the stop.
+            #
+            # Displacement along the belt says nothing about the other two axes,
+            # and a carton that has been knocked off still has an `along` that
+            # can land inside the tolerance. Measured: a box on the floor 0.68 m
+            # to the side and 0.45 m below the deck was returned as the box at
+            # the gate, the arm was sent to fetch it 1.08 m away, and `pose_to`
+            # reported the target as outside the workspace - which is true, and
+            # names the arm rather than the belt that handed it a fallen box.
+            across = abs(float(np.cross(
+                np.append(self.direction[:2], 0.0),
+                np.append(position[:2] - origin[:2], 0.0),
+            )[2]))
+            half_width = (self.width or 0.0) / 2.0
+            half_box = float(self.box_size[1]) / 2.0 if self.box_size is not None else 0.0
+            if half_width and across > half_width + half_box:
+                continue
+            # And resting on the deck rather than under or far above it. One box
+            # height of slack covers a carton sitting on top of another.
+            if self.top_z is not None and self.box_size is not None:
+                rest_z = float(self.top_z) + float(self.box_size[2]) / 2.0
+                if abs(float(position[2]) - rest_z) > float(self.box_size[2]):
+                    continue
             if best_error is None or error < best_error:
                 best, best_error = body, error
         return best
