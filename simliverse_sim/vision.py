@@ -85,6 +85,9 @@ DEFAULT_SETTLE_FRAMES = 40
 #: an unlit or empty stage. Roughly: 80 KB is grey, 275 KB is a bare grid.
 BLANK_PNG_BYTES = 90_000
 
+#: Frames pumped after moving the camera, before a capture is requested.
+CAMERA_SETTLE_FRAMES = 8
+
 
 class VisionUnavailable(RuntimeError):
     """Rendering could not be reached at all, with the reason attached."""
@@ -275,6 +278,13 @@ def views(
                 eye=(origin + np.asarray(eye_offset, dtype=float)).tolist(),
                 target=(origin + np.asarray(target_offset, dtype=float)).tolist(),
             )
+            # Let the move reach the renderer before asking for a frame.
+            # `capture_viewport_to_file` queues the request immediately and only
+            # then are frames pumped, so without this the capture is taken with
+            # the *previous* camera - every view in the set came back identical
+            # and each looked like a plausible picture of the cell.
+            for _ in range(CAMERA_SETTLE_FRAMES):
+                update_app()
             report = png(
                 settle_frames=settle_frames,
                 path=f"{directory}/{prefix}_{name}.png",
