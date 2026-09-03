@@ -95,29 +95,56 @@ def _runs(span: tuple[float, float],
     return [(a, b) for a, b in keep if (b - a) > 1e-6]
 
 
-def _translucent(scene: Any, prim_path: str, opacity: float) -> bool:
+def _translucent(scene: Any, prim_path: str, opacity: float,
+                 colour: Any = (0.62, 0.70, 0.76)) -> bool:
     """Make a panel see-through, so the guarding does not hide the cell.
 
     Guarding is mesh. Opaque panels are not a cosmetic problem: the render is
-    the thing a layout is reviewed from, and a cell you cannot see inside has
+    what a layout gets reviewed from, and a cell you cannot see inside has
     answered nothing. The first fenced render came back as a white box with a
     gap in it.
 
-    Returns whether the attribute was authored, because `displayOpacity` is a
-    hint that a renderer may ignore and claiming translucency that did not
-    happen is worse than reporting that it did not.
+    This binds a `UsdPreviewSurface` rather than setting `displayOpacity`.
+    That was the first attempt and it is worth recording why it failed: the
+    attribute authored cleanly, the build reported success, and RTX rendered
+    the panels exactly as opaque as before. `displayOpacity` is a hint for
+    Hydra's fallback shading, and the path-tracer does not consult it - so the
+    only evidence anything was wrong was the picture.
+
+    Returns whether a material was bound, because claiming translucency that
+    did not happen is worse than reporting that it did not.
     """
     try:
-        from pxr import UsdGeom
+        from pxr import Gf, Sdf, UsdShade
 
-        prim = scene.stage.GetPrimAtPath(prim_path)
+        stage = scene.stage
+        prim = stage.GetPrimAtPath(prim_path)
         if not prim or not prim.IsValid():
             return False
-        gprim = UsdGeom.Gprim(prim)
-        gprim.CreateDisplayOpacityAttr().Set([float(opacity)])
+
+        material_path = "/World/Looks/GuardMesh"
+        material = UsdShade.Material.Get(stage, material_path)
+        if not material:
+            material = UsdShade.Material.Define(stage, material_path)
+            shader = UsdShade.Shader.Define(stage, material_path + "/Surface")
+            shader.CreateIdAttr("UsdPreviewSurface")
+            shader.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).Set(
+                Gf.Vec3f(*(float(c) for c in colour)))
+            shader.CreateInput("opacity", Sdf.ValueTypeNames.Float).Set(
+                float(opacity))
+            # Near-smooth on purpose. At 0.25 the panels came out frosted:
+            # translucent by the numbers, and the cell behind them was a blur.
+            # Guarding mesh reads as clear at this distance.
+            shader.CreateInput("roughness", Sdf.ValueTypeNames.Float).Set(0.05)
+            shader.CreateInput("metallic", Sdf.ValueTypeNames.Float).Set(0.0)
+            material.CreateSurfaceOutput().ConnectToSource(
+                shader.ConnectableAPI(), "surface")
+
+        UsdShade.MaterialBindingAPI.Apply(prim)
+        UsdShade.MaterialBindingAPI(prim).Bind(material)
         return True
     except Exception:  # noqa: BLE001 - a look is not worth failing a build for
-        logger.debug("could not set opacity on %s", prim_path, exc_info=True)
+        logger.debug("could not make %s translucent", prim_path, exc_info=True)
         return False
 
 
@@ -158,7 +185,7 @@ class SafetyFence:
         gate_offset: float = 0.0,
         crossings: list[dict[str, Any]] | None = None,
         panel_max: float = 1.5,
-        panel_opacity: float = 0.25,
+        panel_opacity: float = 0.15,
         colour: Any = (0.82, 0.72, 0.10),
         scene: Any = None,
     ) -> "SafetyFence":
