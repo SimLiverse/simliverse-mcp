@@ -246,8 +246,20 @@ def pick_waiting_box(cell: dict) -> dict:
     # a box it is hovering over. Descending to contact instead shoves a carton
     # resting against the stop 1.6 cm before the seal forms, and the grip then
     # lands on an edge with the box hanging off the cup.
+    # Eight corrections, not the default four, because convergence here is not
+    # monotonic and stopping early reads as a failure that isn't one. Measured,
+    # descending onto a settled carton:
+    #
+    #   command 0.0828 -> 0.0068 -> 0.0286 -> 0.0263 -> 0.0193 -> 0.0061 -> 0.0022
+    #
+    # The first correction very nearly lands it, the second overshoots, and the
+    # oscillation takes six passes to damp. The default budget stops at the
+    # fourth, at 19 mm, and `pose_to` raises "the drives are not tracking it" —
+    # which is true of that instant and false about the pose, since two more
+    # corrections reach 2.2 mm. Loosening the tolerance instead would hide the
+    # overshoot and hand the seal a cup that is still moving.
     arm.pose_to([float(here[0]), float(here[1]),
-                 box_top + cup.tip_offset + STANDOFF], DOWN)
+                 box_top + cup.tip_offset + STANDOFF], DOWN, corrections=8)
     arm.scene.settle(1.0)
     for _ in range(5):
         arm.refine_pose()
