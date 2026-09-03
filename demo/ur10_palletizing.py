@@ -92,10 +92,28 @@ PALLET_Y = 0.75
 HOME = [0.0, -1.2, 1.6, -1.9, -1.57, 0.0]
 #: Flange pointing at the floor.
 DOWN = [0.0, 1.0, 0.0, 0.0]
-#: How far above the box the cup stops. It seals across this gap rather than
-#: touching: measured, a 30 mm standoff left the box completely undisturbed
-#: (0.0000 m of nudge) and centred the cup on it to 0.3 mm.
-STANDOFF = 0.030
+#: How far above the box the cup stops.
+#:
+#: 6 mm, and the number was swept rather than chosen. Against a carton settled
+#: at the stop:
+#:
+#:     30 mm -> no seal, nudged 3.9 mm
+#:     20 mm -> no seal, nudged 5.8 mm
+#:     12 mm -> no seal, nudged 10.2 mm
+#:      6 mm -> SEALED, lifted +0.2854 m, nudged 31.5 mm
+#:
+#: This corrects a belief that cost several runs. The attachment joint has
+#: travel along its approach axis, so it looked as though the cup should seal
+#: across a gap without touching. It does not: widening that joint's transZ
+#: limit from 35 mm to the full 100 mm grip distance changed nothing at 30 mm
+#: or 20 mm, so the joint was never the binding constraint. The cup seals on
+#: contact, which is also what a real vacuum cup does.
+#:
+#: The 31.5 mm of nudge is not the cup pressing down - it is the descent
+#: overshooting. Correction 2 dips 28.6 mm past the target (see `corrections=8`
+#: below), and at a 6 mm standoff that dip lands inside the carton. Damping the
+#: descent, rather than moving the standoff, is what will remove it.
+STANDOFF = 0.006
 
 
 def build(scene: Scene | None = None, *, boxes: int = 4) -> dict:
