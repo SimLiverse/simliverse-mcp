@@ -462,93 +462,93 @@ def spawn_pedestal(prim_path: str = "/World/Pedestal", *,
             "height": float(height)}
 
 
-#: A person is about this tall, and the figure is built to it rather than to
-#: whatever looked right: the whole point of putting one in the scene is to
-#: give every other dimension something to be read against.
-OPERATOR_HEIGHT = 1.75
+def _stand_on_floor(scene: Any, prim_path: str, floor_z: float) -> float:
+    """Drop a referenced prop so its lowest point rests on `floor_z`.
+
+    Characters are not authored with their origin at their feet. Measured on
+    the six indexed here, the bounding box bottom sits 0.12 to 0.16 m *below*
+    the origin, so placing one at z=0 buries it to the shins - and it reads in
+    a render as a short person rather than as a placement bug.
+
+    Measured rather than tabulated, because the offset differs per character
+    and a table is a thing that goes stale the first time anyone indexes a
+    seventh one.
+    """
+    from pxr import Usd, UsdGeom
+
+    stage = scene.stage
+    prim = stage.GetPrimAtPath(prim_path)
+    if not prim or not prim.IsValid():
+        return floor_z
+    cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(),
+                              [UsdGeom.Tokens.default_, UsdGeom.Tokens.render])
+    rng = cache.ComputeWorldBound(prim).ComputeAlignedRange()
+    if rng.IsEmpty():
+        return floor_z
+    lift = float(floor_z) - float(rng.GetMin()[2])
+    xform = UsdGeom.Xformable(prim)
+    for op in xform.GetOrderedXformOps():
+        if op.GetOpName() == "xformOp:translate":
+            from pxr import Gf
+
+            at = op.Get()
+            op.Set(Gf.Vec3d(float(at[0]), float(at[1]), float(at[2]) + lift))
+            return float(at[2]) + lift
+    return floor_z
+
+
+#: The worker who stands at the gate. A real character, not a stack of
+#: primitives - the first version of this was capsules and a sphere, and a
+#: cell full of hand-built furniture reads as a mock-up whatever the physics
+#: underneath it is doing.
+DEFAULT_OPERATOR = "male_adult_construction_01_new"
 
 
 def spawn_operator(prim_path: str = "/World/Operator", *,
                    position: Any = (0.0, 0.0, 0.0),
-                   height: float = OPERATOR_HEIGHT,
+                   character: str = DEFAULT_OPERATOR,
                    facing: float = 0.0,
-                   colour: Any = (0.20, 0.30, 0.55),
-                   skin: Any = (0.85, 0.70, 0.58),
                    fence: "SafetyFence | None" = None,
                    scene: Any = None) -> dict[str, Any]:
-    """A standing figure, for scale. Nothing in the index, so it is primitives.
+    """A person, from the asset library, standing where you put them.
 
     `fence`, when given, is checked: a person authored inside the guarding is
-    a picture of a cell nobody is allowed to run. It is reported rather than
+    a picture of a cell nobody is allowed to run. Reported rather than
     refused, because a figure inside the fence is exactly what you draw when
-    illustrating a teach pendant or a maintenance access - but it should be a
+    illustrating a teach pendant or maintenance access - but it should be a
     thing someone chose, not a thing that happened.
-
-    The figure is static and collidable. An operator that a robot can sweep
-    through is scenery, and scenery is what makes a layout look checked when
-    it has not been.
     """
+    from .props import spawn_prop
     from .scene import Scene
 
     scene = scene or Scene.get()
-    if height <= 0:
-        raise GuardingError(f"height={height}: a person has positive height.")
-
     at = np.asarray(position, dtype=float).reshape(3)
-    x, y, base = float(at[0]), float(at[1]), float(at[2])
+    entry = spawn_prop(character, prim_path=prim_path,
+                       position=[float(at[0]), float(at[1]), float(at[2])],
+                       scene=scene)
 
-    # Proportions as fractions of height, so a shorter figure is still a
-    # person rather than the same body with a smaller head. They sum to 1.0
-    # on purpose: 0.47 + 0.40 + 2 x 0.065. The first set summed to 0.94, so a
-    # figure asked for 1.75 m stood 1.65 - which defeats the only reason to
-    # put a person in a scene, since everything else is read against them.
-    leg = height * 0.47
-    torso = height * 0.40
-    head_r = height * 0.065
-    shoulder = height * 0.22
+    if facing:
+        from pxr import Gf, UsdGeom
 
-    made: list[str] = []
-    for side, sign in (("L", 1.0), ("R", -1.0)):
-        path = f"{prim_path}_Leg{side}"
-        scene.spawn_rigid(
-            path, shape="cylinder", radius=height * 0.045, size=leg,
-            position=[x, y + sign * height * 0.05, base + leg / 2.0],
-            mass=0.0, static=True, friction=0.6, restitution=0.0,
-            color=(0.15, 0.15, 0.18),
-        )
-        made.append(path)
+        prim = scene.stage.GetPrimAtPath(prim_path)
+        UsdGeom.Xformable(prim).AddRotateZOp().Set(float(facing))
 
-    torso_path = f"{prim_path}_Torso"
-    scene.spawn_rigid(
-        torso_path, shape="cube",
-        scale=[height * 0.055, shoulder / 2.0, torso / 2.0],
-        position=[x, y, base + leg + torso / 2.0],
-        orientation=[0.0, 0.0, float(facing)],
-        mass=0.0, static=True, friction=0.6, restitution=0.0, color=colour,
-    )
-    made.append(torso_path)
-
-    head_path = f"{prim_path}_Head"
-    scene.spawn_rigid(
-        head_path, shape="sphere", radius=head_r,
-        position=[x, y, base + leg + torso + head_r],
-        mass=0.0, static=True, friction=0.6, restitution=0.0, color=skin,
-    )
-    made.append(head_path)
+    origin_z = _stand_on_floor(scene, prim_path, float(at[2]))
 
     report: dict[str, Any] = {
-        "prim_path": prim_path, "parts": made,
-        "height": float(height),
-        "top": float(base + leg + torso + 2.0 * head_r),
+        "prim_path": prim_path,
+        "character": character,
+        "extent": entry.get("extent"),
+        "origin_z": round(float(origin_z), 4),
     }
     if fence is not None:
-        inside = fence.contains((x, y))
+        inside = fence.contains((float(at[0]), float(at[1])))
         report["inside_guarding"] = bool(inside)
         if inside:
             logger.warning(
                 "The operator at (%.2f, %.2f) is inside the guarding at %s. "
                 "That is a cell nobody is allowed to run with the robot live, "
                 "so it wants to be a choice rather than an accident.",
-                x, y, fence.prim_path,
+                float(at[0]), float(at[1]), fence.prim_path,
             )
     return report

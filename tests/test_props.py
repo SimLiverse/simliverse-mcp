@@ -107,7 +107,12 @@ def test_every_entry_is_complete_and_unique() -> None:
     assert len(entries) == index["count"]
     assert len({e["path"] for e in entries}) == len(entries), "two keys share an asset"
     for entry in entries:
-        assert entry["path"].startswith("/Isaac/Props/")
+        # Not just /Isaac/Props. That assumption is why the index shipped
+        # with no people in it for months: the library keeps characters under
+        # /Isaac/People, the generator only ever looked in one place, and this
+        # test agreed with it. A search for "worker" returned a packing table.
+        assert entry["path"].startswith(("/Isaac/Props/", "/Isaac/People/")), (
+            "%s lives somewhere this index does not know about" % entry["path"])
         assert entry["physics"] in props.PHYSICS_KINDS
 
 

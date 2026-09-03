@@ -223,6 +223,7 @@ def build(
     guides: bool = False,
     grip_distance: float | None = None,
     pedestal: float = 0.0,
+    dressing: str | None = None,
 ) -> dict:
     """Author the cell and leave it playing with a box waiting at the stop.
 
@@ -293,6 +294,7 @@ def build(
         # for a failure at every mass, so the default stays off until the pick
         # lands centred on its own.
         guides=guides, guide_height=max(0.10, box * 0.8),
+        dressing=dressing,
         scene=scene,
     )
     belt.load(boxes, box=(box, box, box), mass=box_mass,
@@ -364,6 +366,7 @@ def build(
             "pallet_y": pallet_y, "rows": rows, "cols": cols,
             "layers": layers, "robot": robot, "guides": guides,
             "grip_distance": grip_distance, "pedestal": pedestal,
+            "dressing": dressing,
         },
     }
 

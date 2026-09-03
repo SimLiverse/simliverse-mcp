@@ -221,61 +221,29 @@ def test_a_short_belt_ends_inside_the_guarding() -> None:
 
 def test_the_operator_stands_outside_the_guarding() -> None:
     """The safety invariant. A person inside the line is not a runnable cell."""
-    from simliverse_sim.guarding import spawn_operator
+    from simliverse_sim.guarding import SafetyFence as _F
 
     scene = _FakeScene()
     fence = _fence(scene)
     gate_line = float(fence.centre[1] - fence.size[1] / 2.0)
-    made = spawn_operator("/World/Operator",
-                          position=(float(fence.centre[0] + 0.45),
-                                    gate_line - 1.0, 0.05),
-                          fence=fence, scene=scene)
 
-    assert made["inside_guarding"] is False
+    assert not fence.contains((float(fence.centre[0] + 0.45), gate_line - 1.0))
 
 
-def test_the_operator_stands_on_the_platform_not_beside_it() -> None:
-    """A figure floating next to its own standing area reads as an error.
+def test_the_operator_cannot_see_over_the_guarding() -> None:
+    """A 1.95 m character and 2.1 m of guarding.
 
-    Both feet, not just the centre-line: a person placed by their middle can
-    still have half of them off the edge.
+    Recorded because it looks wrong in a render and is right in a cell:
+    guarding is sized to stop a reach-over, so it stands above eye level.
     """
-    from simliverse_sim.guarding import spawn_operator
+    from simliverse_sim.guarding import PANEL_GROUND_GAP
+    from simliverse_sim.props import find_prop
 
     scene = _FakeScene()
     fence = _fence(scene)
-    gate_line = float(fence.centre[1] - fence.size[1] / 2.0)
-    platform_x, platform_y = float(fence.centre[0]), gate_line - 1.0
-    half = 1.6 / 2.0
+    person = find_prop("worker")["extent"][2]
 
-    spawn_operator("/World/Operator",
-                   position=(platform_x + 0.45, platform_y, 0.05),
-                   fence=fence, scene=scene)
-
-    for part in scene.spawned:
-        if "Operator" not in part.prim_path:
-            continue
-        low, high = part.bounds()
-        assert low[0] >= platform_x - half - 1e-6, part.prim_path
-        assert high[0] <= platform_x + half + 1e-6, part.prim_path
-        assert low[1] >= platform_y - half - 1e-6, part.prim_path
-        assert high[1] <= platform_y + half + 1e-6, part.prim_path
-
-
-def test_the_operator_can_see_the_cell_over_the_guarding() -> None:
-    """A 1.75 m person and 2.0 m guarding: they cannot, and that is the point.
-
-    Recorded because it is the kind of thing that looks wrong in a render and
-    is right in a cell - guarding is sized to stop a reach-over, so it stands
-    above eye level on purpose.
-    """
-    from simliverse_sim.guarding import OPERATOR_HEIGHT, PANEL_GROUND_GAP
-
-    scene = _FakeScene()
-    fence = _fence(scene)
-    panel_top = PANEL_GROUND_GAP + fence.height
-
-    assert panel_top > OPERATOR_HEIGHT
+    assert PANEL_GROUND_GAP + fence.height > person
 
 
 def test_the_pedestal_puts_the_arm_base_on_top_of_it() -> None:
@@ -293,22 +261,14 @@ def test_the_pedestal_puts_the_arm_base_on_top_of_it() -> None:
 
 
 def test_a_pedestal_keeps_the_arm_under_the_guarding() -> None:
-    """Raising the base raises the whole envelope; the fence has to still win.
-
-    A 0.35 m plinth under a 1.3 m arm reaches 1.65 m, which is under 2.1 m of
-    guarding. Say so, because the check that matters when someone raises the
-    plinth is this one and it is not obvious from either number alone.
-    """
+    """Raising the base raises the whole envelope; the fence has to still win."""
     from simliverse_sim.guarding import PANEL_GROUND_GAP
 
     scene = _FakeScene()
     fence = _fence(scene)
-    pedestal = 0.35
     panel_top = PANEL_GROUND_GAP + fence.height
 
-    assert pedestal + REACH < panel_top, (
-        "an arm on a %.2f m plinth clears %.2f m of guarding"
-        % (pedestal, panel_top))
+    assert 0.35 + REACH < panel_top
 
 
 def test_a_tall_pedestal_lifts_the_arm_over_the_fence() -> None:
@@ -317,7 +277,5 @@ def test_a_tall_pedestal_lifts_the_arm_over_the_fence() -> None:
 
     scene = _FakeScene()
     fence = _fence(scene)
-    panel_top = PANEL_GROUND_GAP + fence.height
 
-    assert 1.0 + REACH > panel_top, (
-        "a 1 m plinth should put a 1.3 m arm above 2.1 m of guarding")
+    assert 1.0 + REACH > PANEL_GROUND_GAP + fence.height

@@ -391,56 +391,36 @@ def test_a_pedestal_with_no_height_is_refused(scene) -> None:
 # ── The operator ─────────────────────────────────────────────────────────────
 
 
-def test_the_operator_stands_on_the_floor_and_is_person_sized(scene) -> None:
-    made = G.spawn_operator(position=(0.0, -3.0, 0.0), scene=scene)
+def test_the_operator_is_a_real_character_not_a_stack_of_primitives() -> None:
+    """A cell full of hand-built furniture reads as a mock-up.
 
-    lowest = min(p.bounds()[0][2] for p in scene.spawned)
-    assert lowest == pytest.approx(0.0, abs=1e-6), "feet below the floor"
-    assert made["top"] == pytest.approx(G.OPERATOR_HEIGHT, abs=0.02), (
-        "the figure is not the height it reports")
-
-
-def test_the_operator_is_built_from_proportions_not_fixed_sizes(scene) -> None:
-    """A shorter figure should be a person, not the same body scaled oddly."""
-    short = G.spawn_operator("/World/Short", position=(0.0, 0.0, 0.0),
-                             height=1.2, scene=scene)
-    assert short["top"] == pytest.approx(1.2, abs=0.02)
-
-
-def test_the_operator_has_a_head_two_legs_and_a_torso(scene) -> None:
-    made = G.spawn_operator(position=(0.0, 0.0, 0.0), scene=scene)
-    names = " ".join(made["parts"])
-
-    assert "LegL" in names and "LegR" in names
-    assert "Torso" in names and "Head" in names
-
-
-def test_a_person_of_no_height_is_refused(scene) -> None:
-    with pytest.raises(GuardingError, match="positive height"):
-        G.spawn_operator(height=0.0, scene=scene)
-
-
-def test_an_operator_outside_the_guarding_is_the_normal_case(scene) -> None:
-    fence = SafetyFence.build(size=(4.0, 4.0), gate="south", scene=scene)
-    made = G.spawn_operator(position=(0.0, -3.0, 0.0), fence=fence,
-                            scene=scene)
-
-    assert made["inside_guarding"] is False
-
-
-def test_an_operator_inside_the_guarding_is_reported(scene) -> None:
-    """A person inside the fence is a cell nobody may run with the robot live.
-
-    Reported rather than refused: it is exactly what you draw to illustrate a
-    teach pendant or maintenance access. It should be a thing someone chose.
+    The first version of this was two capsules and a sphere. It was the right
+    shape and the wrong answer: the asset library ships 23 people and the
+    index simply never scanned `/Isaac/People`.
     """
-    fence = SafetyFence.build(size=(4.0, 4.0), gate="south", scene=scene)
-    made = G.spawn_operator(position=(0.0, 0.0, 0.0), fence=fence, scene=scene)
+    from simliverse_sim.props import find_prop
 
-    assert made["inside_guarding"] is True
+    entry = find_prop(G.DEFAULT_OPERATOR)
+    assert entry["path"].startswith("/Isaac/People/Characters/")
+    assert entry["category"] == "people"
 
 
-def test_without_a_fence_no_safety_claim_is_made(scene) -> None:
-    """Silence, not a guess: nothing was checked, so nothing is reported."""
-    made = G.spawn_operator(position=(0.0, 0.0, 0.0), scene=scene)
-    assert "inside_guarding" not in made
+def test_the_indexed_people_are_person_sized() -> None:
+    """Measured on the asset server, not guessed."""
+    from simliverse_sim.props import list_props
+
+    people = [e for e in list_props("person") if e["category"] == "people"]
+    assert people, "no people in the index"
+    for entry in people:
+        height = entry["extent"][2]
+        assert 1.5 <= height <= 2.1, (
+            "%s stands %.2f m" % (entry["key"], height))
+
+
+def test_a_worker_can_be_found_by_the_words_anyone_would_use() -> None:
+    from simliverse_sim.props import find_prop
+
+    for query in ("worker", "operator", "person"):
+        entry = find_prop(query)
+        assert entry["category"] == "people", (
+            "%r found %s instead of a person" % (query, entry["key"]))

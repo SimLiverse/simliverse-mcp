@@ -30,8 +30,10 @@ from simliverse_sim import (
 
 from . import ur10_palletizing as base
 
-#: A UR10 reaches about 1.3 m. Guarding goes outside the envelope, not on it:
-#: a fence set exactly at the reach is a fence the arm polishes.
+#: A KR210 reaches about 2.7 m; a UR10 about 1.3. Guarding goes outside the
+#: envelope, not on it: a fence set exactly at the reach is one the arm
+#: polishes.
+REACH_BY_ROBOT = {"ur10": 1.3, "kuka_kr210": 2.70}
 REACH = 1.3
 STANDOFF = 0.55
 
@@ -64,7 +66,8 @@ def guard(cell: dict, *, scene: Any = None, gate: str = "south",
     # line ended up 0.95 m from a 1.3 m arm: the belt ends at 0.75, the fence
     # went just past it, and the guarding was inside the working envelope on
     # the one side nothing else stuck out of.
-    envelope = REACH + margin
+    reach = REACH_BY_ROBOT.get(spec.get("robot", "ur10"), REACH)
+    envelope = reach + margin
     west = -envelope
     # NOT the belt's far end. The belt is the one thing here that is *meant* to
     # cross the line - an infeed conveyor runs in from outside - so sizing this
@@ -101,7 +104,8 @@ def guard(cell: dict, *, scene: Any = None, gate: str = "south",
         print("  note: the belt ends %.2f m short of the east guarding, so no "
               "crossing was cut" % (east - belt_far_x))
 
-    fit = fence.fits((0.0, 0.0), reach=REACH)
+    reach = REACH_BY_ROBOT.get(spec.get("robot", "ur10"), REACH)
+    fit = fence.fits((0.0, 0.0), reach=reach)
     if fit["touches_fence"]:
         # Reported, not raised: guarding at the envelope is a real choice.
         # Silently shipping it is not.
@@ -142,8 +146,7 @@ def guard(cell: dict, *, scene: Any = None, gate: str = "south",
     return cell
 
 
-def build(scene: Any = None, *, boxes: int = 4, pedestal: float = 0.35,
-          **spec) -> dict:
+def build(scene: Any = None, *, boxes: int = 4, **spec) -> dict:
     """The measured palletising cell, fenced.
 
     Guarding is authored after the working cell rather than before it because
@@ -151,7 +154,14 @@ def build(scene: Any = None, *, boxes: int = 4, pedestal: float = 0.35,
     guessing, and the fence is exactly the thing that must not be guessed.
     """
     scene = scene or Scene.get()
-    cell = base.build(scene, boxes=boxes, pedestal=pedestal, **spec)
+    # Defaults chosen to look like the cell an integrator would show a
+    # customer, not like the cell the numbers were measured on: a real arm on
+    # a real mount, feeding off a real conveyor at a real conveyor's height.
+    spec.setdefault("robot", "kuka_kr210")
+    spec.setdefault("deck", 0.767)
+    spec.setdefault("dressing", "conveyorbelt_a05")
+    spec.setdefault("pedestal", 0.35)
+    cell = base.build(scene, boxes=boxes, **spec)
     return guard(cell, scene=scene)
 
 

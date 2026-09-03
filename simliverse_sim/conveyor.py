@@ -112,6 +112,11 @@ logger = logging.getLogger(__name__)
 #: Belt speeds outside this range are almost always a units mistake.
 # Slow enough not to fling a carton, fast enough that PhysX does not put it
 # straight back to sleep before the belt surface takes over.
+#: Where a ConveyorBelt_A0x prop's carrying surface sits above its own origin.
+#: Measured off the rollers (0.714..0.767) rather than the bounding box, which
+#: tops out at 1.166 because it includes the side frames.
+DRESSING_DECK = 0.767
+
 _WAKE_SPEED = 0.05
 _SANE_SPEED = (0.0, 5.0)
 
@@ -312,6 +317,8 @@ class Conveyor:
         gate_thickness: float = 0.04,
         guides: bool = False,
         guide_height: float = 0.10,
+        dressing: str | None = None,
+        dressing_deck: float = DRESSING_DECK,
         color: Any = (0.15, 0.16, 0.18),
         scene: Any = None,
     ) -> "Conveyor":
@@ -418,8 +425,63 @@ class Conveyor:
                     "height. Offset the belt across its travel, or shorten it.",
                     prim_path, hit["robot"], hit["offset"], hit["half_width"],
                 )
+        if dressing:
+            belt.dress(dressing, deck=dressing_deck)
+
         belt.start()
         return belt
+
+    def dress(self, prop: str = "conveyorbelt_a05", *,
+              deck: float = DRESSING_DECK) -> dict[str, Any]:
+        """Put a real conveyor over the slab, and hide the slab.
+
+        The slab is the physics: a kinematic body with a surface velocity, a
+        known deck height and a stop. It is also, visually, a grey box, and a
+        layout drawn out of grey boxes reads as a mock-up whatever the
+        simulation underneath it is doing. The library ships 47 conveyor
+        sections and this cell was built from a cuboid.
+
+        `deck` is where the *prop's* carrying surface sits above its own
+        origin - 0.767 m on ConveyorBelt_A05, measured off its rollers rather
+        than its bounding box, because the box includes legs and side frames
+        and lands the belt surface 0.4 m out. The prop is dropped so its
+        rollers land on this conveyor's deck, which is the only alignment that
+        makes a carton look like it is riding the belt it is riding.
+        """
+        from .props import spawn_prop
+
+        origin = self._origin
+        start = origin[:2] - self.direction[:2] * (float(self.length or 0.0) / 2.0)
+        path = f"{self.belt_path}_Dressing"
+        entry = spawn_prop(
+            prop, prim_path=path,
+            position=[float(start[0]), float(start[1]),
+                      float(self.top_z) - float(deck)],
+            scene=self.scene,
+        )
+        self._hide(self.belt_path)
+        self.dressing = path
+        return {"prim_path": path, "prop": entry.get("key"),
+                "deck": float(deck)}
+
+    def _hide(self, prim_path: str) -> bool:
+        """Make a prim invisible without touching its collider.
+
+        Deleting the slab would take the physics with it, and scaling it away
+        moves the surface the cartons ride on. Visibility is the only one of
+        the three that changes nothing but the picture.
+        """
+        try:
+            from pxr import UsdGeom
+
+            prim = self.scene.stage.GetPrimAtPath(prim_path)
+            if not prim or not prim.IsValid():
+                return False
+            UsdGeom.Imageable(prim).MakeInvisible()
+            return True
+        except Exception:  # noqa: BLE001 - a look is not worth failing over
+            logger.debug("could not hide %s", prim_path, exc_info=True)
+            return False
 
     def _robots_in_the_way(self) -> list[dict[str, Any]]:
         """Robot bases sitting under the belt's footprint.
@@ -558,10 +620,9 @@ class Conveyor:
                 yaw=float(np.degrees(np.arctan2(heading[1], heading[0]))),
                 height=gate_height, thickness=gate_thickness,
             )
+
         belt.start()
         return belt
-
-    # ── Driving ──────────────────────────────────────────────────────────────
 
     def start(self) -> dict[str, Any]:
         """Switch the belt on, and wake whatever fell asleep on it. Idempotent.
