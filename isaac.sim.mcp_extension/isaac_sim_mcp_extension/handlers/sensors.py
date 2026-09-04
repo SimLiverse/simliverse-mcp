@@ -47,6 +47,13 @@ def register(registry: Dict[str, Any], adapter: IsaacAdapterBase) -> None:
 _SENSORS: Dict[str, Any] = {}
 
 
+def release_all_sensors() -> list:
+    """Release every sensor we own. `scene.clear` calls this before deleting
+    prims, because a live sensor re-creates its camera within five frames of
+    the prim going -- which is how a "cleared" stage grew cameras back."""
+    return [path for path in list(_SENSORS) if release_sensor(path)]
+
+
 def release_sensor(prim_path: str) -> bool:
     """Shut down the sensor owning `prim_path`, if we made one.
 

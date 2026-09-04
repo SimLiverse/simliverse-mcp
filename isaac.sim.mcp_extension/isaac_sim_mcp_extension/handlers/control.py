@@ -387,6 +387,19 @@ def capture_view(
             except Exception as exc:  # noqa: BLE001
                 captured["error"] = f"{type(exc).__name__}: {exc}"
 
+        # Whether the renderer is producing frames at all, before waiting on
+        # one. In the streaming headless app the render loop suspends when no
+        # WebRTC client is attached: the viewport reports `updates_enabled`,
+        # a plausible fps, and a frame counter that never moves -- measured
+        # frozen at the same frame number across calls minutes apart the
+        # moment the last browser tab closed. Every capture then times out,
+        # and the old message blamed the capture rather than the cause.
+        frame_before = None
+        try:
+            frame_before = viewport.frame_info.get("frame_number")
+        except Exception:  # noqa: BLE001 -- diagnosis must not break capture
+            pass
+
         capture_viewport_to_buffer(viewport, _on_capture)
 
         # The callback fires on a later frame, so the loop is the wait.
@@ -398,6 +411,26 @@ def capture_view(
         if "error" in captured:
             return {"status": "error", "message": captured["error"]}
         if "png" not in captured:
+            frozen = False
+            try:
+                frozen = (
+                    frame_before is not None
+                    and viewport.frame_info.get("frame_number") == frame_before
+                )
+            except Exception:  # noqa: BLE001
+                pass
+            if frozen:
+                return {
+                    "status": "error",
+                    "message": (
+                        "The renderer is not producing frames: the frame "
+                        "counter did not move across the wait. In the "
+                        "streaming app this means no WebRTC client is "
+                        "attached -- rendering suspends without a viewer. "
+                        "Open the session's viewport in the dashboard (or "
+                        "any stream client), then capture again."
+                    ),
+                }
             return {
                 "status": "error",
                 "message": "Viewport capture did not complete within 40 frames.",

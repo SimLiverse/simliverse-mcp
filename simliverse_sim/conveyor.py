@@ -80,6 +80,14 @@ four boxes sat at their spawn positions through ten seconds of Play, then moved
 
 A controller does this in its INIT state, which runs after Play by construction.
 
+The measurement above is Isaac Sim 6.0. On a 5.1 worker the exact failure
+sequence -- author + start, stop, then Play with no second `start()` -- was
+re-run and *did not reproduce*: 5.1 re-reads the authored attribute when the
+simulation starts, and the boxes conveyed anyway. Keep calling `start()` after
+Play (idempotent, cheap, correct on both), but on 5.1 do not accept "the stop
+dropped the drive" as the diagnosis for a belt that fails to convey -- there,
+something else is wrong.
+
 **GPU dynamics does not have to be turned off, whatever the forums say.**
 IsaacLab discussion #3216 is the first thing anyone finds on this, and its
 working recipe disables GPU dynamics and runs PhysX on the CPU
@@ -476,6 +484,7 @@ class Conveyor:
             belt.dress(dressing, deck=dressing_deck)
 
         belt.start()
+        belt._stamp()
         return belt
 
     def dress(self, prop: str = "conveyorbelt_a05", *,
@@ -686,6 +695,31 @@ class Conveyor:
                 entry["key"], along, across,
             )
 
+        # `position` means the centre of the belt's deck footprint -- the thing
+        # a layout actually states. The shipped assets author their origin
+        # wherever the artist left it: A09's is at the discharge end, so
+        # placing by origin put a 4 m belt two metres from where it was asked
+        # for, and the sketch's promise that what you draw is where it lands
+        # was quietly broken. Measure the deck, then shift the prop so its
+        # centre is at `position`; z stays authored, because the frame's feet
+        # belong on the floor.
+        want = as_vec3(position, name="position")
+        deck_centre = np.array([(low[0] + high[0]) / 2.0, (low[1] + high[1]) / 2.0])
+        delta = np.array([float(want[0]) - deck_centre[0],
+                          float(want[1]) - deck_centre[1], 0.0])
+        if float(np.abs(delta).max()) > 1e-4:
+            from pxr import Gf, UsdGeom
+
+            prim = get_stage().GetPrimAtPath(prim_path)
+            xform = UsdGeom.Xformable(prim)
+            ops = {op.GetOpName(): op for op in xform.GetOrderedXformOps()}
+            translate = ops.get("xformOp:translate") or xform.AddTranslateOp()
+            current = translate.Get()
+            current = np.zeros(3) if current is None else np.array(current, dtype=float)
+            translate.Set(Gf.Vec3d(*(current + delta)))
+            low = tuple(np.array(low) + delta)
+            high = tuple(np.array(high) + delta)
+
         _force_kinematic(deck_path)
         scene.apply_physics_material(deck_path, friction=friction, restitution=0.0)
 
@@ -720,6 +754,7 @@ class Conveyor:
             )
 
         belt.start()
+        belt._stamp()
         return belt
 
     def start(self) -> dict[str, Any]:
@@ -861,10 +896,10 @@ class Conveyor:
         cls,
         prim_path: str,
         *,
-        direction: Any,
-        speed: float,
-        top_z: float,
-        length: float,
+        direction: Any = None,
+        speed: "float | None" = None,
+        top_z: "float | None" = None,
+        length: "float | None" = None,
         width: float | None = None,
         centre: Any = None,
         gate_path: str | None = None,
@@ -875,18 +910,48 @@ class Conveyor:
         The counterpart to `Robot.attach`. A controller runs against a scene it
         did not build, and re-running `build()` from inside `compute()` would
         author a second belt over the first one on every Play.
+
+        With no arguments, the belt's own stamp is read: `build()` and
+        `from_prop()` record the geometry and drive on the prim, so
+        `Conveyor.attach("/World/Sketch/r1")` is enough in a session that did
+        not build the belt. Anything passed explicitly overrides the stamp --
+        and for a belt with no stamp (authored by hand, or before stamping
+        existed) all four of `direction`, `speed`, `top_z` and `length` must be
+        given, exactly as before.
         """
-        return cls(
+        stamp = cls.read_stamp(prim_path) or {}
+        merged = {
+            "direction": direction if direction is not None else stamp.get("direction"),
+            "speed": speed if speed is not None else stamp.get("speed"),
+            "top_z": top_z if top_z is not None else stamp.get("top_z"),
+            "length": length if length is not None else stamp.get("length"),
+            "width": width if width is not None else stamp.get("width"),
+            "centre": centre if centre is not None else stamp.get("centre"),
+            "gate_path": gate_path if gate_path is not None else stamp.get("gate_path"),
+        }
+        missing = [k for k in ("direction", "speed", "top_z", "length") if merged[k] is None]
+        if missing:
+            raise ValueError(
+                f"{prim_path} carries no stamp and {', '.join(missing)} "
+                f"was not given. A belt made by Conveyor.build()/from_prop() "
+                f"records these on the prim; for one authored another way, "
+                f"pass them explicitly."
+            )
+        belt = cls(
             prim_path,
-            direction=direction,
-            speed=speed,
-            top_z=top_z,
-            length=length,
-            width=width,
-            gate_path=gate_path,
-            centre=centre,
+            direction=merged["direction"],
+            speed=merged["speed"],
+            top_z=merged["top_z"],
+            length=merged["length"],
+            width=merged["width"],
+            gate_path=merged["gate_path"],
+            centre=merged["centre"],
             scene=scene,
         )
+        size = stamp.get("box_size")
+        if size is not None and belt.box_size is None:
+            belt.box_size = np.asarray(size, dtype=float)
+        return belt
 
     # ── Reading the queue ────────────────────────────────────────────────────
 
@@ -1000,6 +1065,57 @@ class Conveyor:
             "boxes": [b.prim_path for b in self._boxes],
             "mechanism": "PhysxSurfaceVelocityAPI",
         }
+
+    #: Where a belt's drive parameters live on the stage. `build()` and
+    #: `from_prop()` write it; `attach()` with no arguments reads it. JSON in
+    #: one string attribute, because the record is `describe()`'s dict and the
+    #: two must never drift.
+    STAMP_ATTR = "simliverse:conveyor"
+
+    def _stamp(self) -> None:
+        """Record this belt's geometry and drive on its own prim.
+
+        `describe()` gives a controller everything `attach()` needs -- but only
+        within the session that built the belt. The stage outlives that session:
+        an agent reconnecting, a controller on its second Play, or a person who
+        cleared their chat all face a belt whose numbers exist nowhere but in a
+        dead process. The robot path solved this with `simliverse:motion_config`
+        on the prim; this is the same move.
+
+        Volatile state (`running`, `boxes`) is dropped: the stamp describes what
+        the belt *is*, not what it happened to be doing.
+        """
+        import json as _json
+
+        from pxr import Sdf
+
+        try:
+            prim = get_stage().GetPrimAtPath(self.belt_path)
+            if not prim or not prim.IsValid():
+                return
+            record = self.describe()
+            record.pop("running", None)
+            record.pop("boxes", None)
+            attr = prim.CreateAttribute(self.STAMP_ATTR, Sdf.ValueTypeNames.String)
+            attr.Set(_json.dumps(record))
+        except Exception:  # noqa: BLE001 -- a stamp that cannot be written is a warning, not a failure
+            logger.debug("Could not stamp %s", self.belt_path, exc_info=True)
+
+    @classmethod
+    def read_stamp(cls, prim_path: str) -> "dict[str, Any] | None":
+        """The recorded description of the belt at `prim_path`, or None."""
+        import json as _json
+
+        try:
+            prim = get_stage().GetPrimAtPath(prim_path)
+            if not prim or not prim.IsValid():
+                return None
+            attr = prim.GetAttribute(cls.STAMP_ATTR)
+            if not attr or not attr.HasValue():
+                return None
+            return _json.loads(attr.Get())
+        except Exception:  # noqa: BLE001
+            return None
 
     @classmethod
     def from_description(cls, described: dict[str, Any], *, scene: Any = None) -> "Conveyor":
