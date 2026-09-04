@@ -141,8 +141,25 @@ def delete(adapter: IsaacAdapterBase, prim_path: Optional[str] = None) -> Dict[s
     try:
         if not prim_path:
             return {"status": "error", "message": "prim_path is required"}
+
+        # Shut down any sensor that owns this prim first. A camera sensor
+        # re-authors its prim on the next render tick, so removing the prim
+        # while the sensor lives is a delete that silently undoes itself --
+        # verified: gone immediately after RemovePrim, back within five frames,
+        # with every call reporting success.
+        released = False
+        try:
+            from .sensors import release_sensor
+
+            released = release_sensor(prim_path)
+        except Exception:
+            pass
+
         adapter.delete_prim(prim_path)
-        return {"status": "success", "message": f"Deleted {prim_path}"}
+        message = f"Deleted {prim_path}"
+        if released:
+            message += " (and released the sensor that owned it)"
+        return {"status": "success", "message": message}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
