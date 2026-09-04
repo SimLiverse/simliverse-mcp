@@ -1104,7 +1104,22 @@ class Manipulator(Robot):
         """
         if parent_prim_path is None:
             parent_prim_path = self._tool_link()
-            kwargs.setdefault("approach_axis", self._approach_axis(parent_prim_path))
+            # The cup points along tool +Z, because that is the axis every
+            # down-orientation this library commands (`downward_orientation`,
+            # the `[0, 1, 0, 0]` family) points at the floor. The cup and the
+            # servo have to agree on one axis, and that is the whole rule.
+            #
+            # The old default asked `_approach_axis`, which projects the last
+            # structural link offset onto the tool frame. On a KR210 that
+            # offset is a 3.7 cm lateral wrist step along tool X, so the cup
+            # was mounted sideways: measured on a flange-down pick, the cup sat
+            # 18 cm beside the flange at the flange's own height, above a box
+            # 18 cm below, and eight seal retries found nothing. Pass
+            # `approach_axis="auto"` to get the old measurement back.
+            axis = kwargs.get("approach_axis", "Z")
+            if axis == "auto":
+                axis = self._approach_axis(parent_prim_path)
+            kwargs["approach_axis"] = axis
             # Outside the robot's own hierarchy - see `SuctionGripper.create`.
             kwargs.setdefault("cup_parent", self.prim_path.rsplit("/", 1)[0])
         self.suction = SuctionGripper.create(
