@@ -1171,8 +1171,11 @@ class Manipulator(Robot):
             # 18 cm beside the flange at the flange's own height, above a box
             # 18 cm below, and eight seal retries found nothing. Pass
             # `approach_axis="auto"` to get the old measurement back.
-            axis = kwargs.get("approach_axis", "Z")
-            if axis == "auto":
+            # Measured off the flange, not assumed. Hardcoding "Z" bolted the
+            # tool to the side of a KR210's wrist, at right angles to the
+            # plate it belongs on -- it picked boxes and looked broken.
+            axis = kwargs.get("approach_axis")
+            if axis in (None, "auto"):
                 axis = self._approach_axis(parent_prim_path)
             kwargs["approach_axis"] = axis
             # Outside the robot's own hierarchy - see `SuctionGripper.create`.
@@ -2136,19 +2139,56 @@ class Manipulator(Robot):
                 pinned.append(f"{names[index]}={value:.3f} (limits {low:.3f}..{high:.3f})")
         return pinned
 
+    @property
+    def approach_axis(self) -> str:
+        """Which of the tool frame's own axes the end effector points along.
+
+        Read from the suction cup if one is fitted -- it was mounted on that
+        axis -- and otherwise measured off the flange. It matters because the
+        two are not the same on every arm: a KR210's flange *face* normal is
+        its tool X, not Z, so a tool mounted along Z bolts to the side of the
+        wrist and sticks out at right angles to the plate it should be bolted
+        to. Correct enough to pick with, and obviously wrong in a render.
+        """
+        fitted = getattr(getattr(self, "suction", None), "approach_axis", None)
+        if fitted:
+            return str(fitted)
+        try:
+            return self._approach_axis(self._tool_link())
+        except Exception:  # noqa: BLE001 - the Z convention is the fallback
+            return "Z"
+
+    def down_at_yaw(self, yaw_degrees: float) -> list:
+        """Point the tool's approach axis at the floor, yawed as asked.
+
+        The orientation the arm must hold depends on which axis the tool
+        points along, so this is the one place that knows both.
+
+        * Approach along **Z**: `qz(yaw) * qx(pi)` sends tool Z to world -Z.
+        * Approach along **X**: `qz(yaw) * qy(pi/2)` sends tool X to world -Z,
+          which is what puts a KR210's flange plate face-down with the tool
+          hanging off it, rather than the plate on edge.
+        """
+        import math
+
+        half = math.radians(float(yaw_degrees)) / 2.0
+        axis = self.approach_axis.upper().lstrip("-")
+        if axis == "X":
+            root = math.sqrt(0.5)
+            return [root * math.cos(half), -root * math.sin(half),
+                    root * math.cos(half), root * math.sin(half)]
+        return [0.0, math.cos(half), math.sin(half), 0.0]
+
     def downward_orientation(self, target: Any) -> list:
-        """A flange-down orientation whose yaw faces the reach, as (w, x, y, z).
+        """A tool-down orientation whose yaw faces the reach, as (w, x, y, z).
 
-        The fixed quat `[0, 1, 0, 0]` -- "flange down" in world frame -- also
-        pins the tool's yaw, and the wrist must then absorb the whole base
-        rotation. In the quadrant the demos were built in that cost nothing;
-        on a cell mirrored to the other side of the arm the servo plateaued a
-        measured 0.18 m from a reachable target and never converged, because
-        the demanded yaw sat past the wrist's travel. Yawing the down
-        orientation toward the target keeps the wrist in the middle of its
-        range wherever the cell is drawn.
-
-        Algebra: qz(yaw) * qx(pi) == (0, cos(yaw/2), sin(yaw/2), 0).
+        A fixed down quaternion also pins the tool's yaw, and the wrist must
+        then absorb the whole base rotation. In the quadrant the demos were
+        built in that cost nothing; on a cell mirrored to the other side of
+        the arm the servo plateaued a measured 0.18 m from a reachable target
+        and never converged, because the demanded yaw sat past the wrist's
+        travel. Yawing toward the target keeps the wrist mid-range wherever
+        the cell is drawn.
         """
         import math
 
@@ -2156,7 +2196,7 @@ class Manipulator(Robot):
         goal = as_vec3(target, name="target")
         yaw = math.atan2(float(goal[1]) - float(base[1]),
                          float(goal[0]) - float(base[0]))
-        return [0.0, math.cos(yaw / 2.0), math.sin(yaw / 2.0), 0.0]
+        return self.down_at_yaw(math.degrees(yaw))
 
     def servo_to(
         self,
