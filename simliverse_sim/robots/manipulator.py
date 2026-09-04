@@ -1037,6 +1037,33 @@ class SuctionGripper:
         return any(prim_path in held for held in self.gripped_objects)
 
 
+class LulaRoute:
+    """A Lula c-space trajectory in the shape `Manipulator.follow` drives.
+
+    The same contract as `planning.MotionPlan` -- `joint_names`, `duration`,
+    `sample(t)` -- over Lula's own `start_time`/`end_time`/`get_joint_targets`
+    surface, so a route made without cuMotion is followed by the same code.
+    """
+
+    def __init__(self, trajectory: Any, joint_names: Any) -> None:
+        self._trajectory = trajectory
+        self.joint_names = list(joint_names)
+        self._start = float(trajectory.start_time)
+        self.duration = float(trajectory.end_time) - self._start
+
+    def __repr__(self) -> str:
+        return f"<LulaRoute {self.duration:.2f}s, {len(self.joint_names)} joints>"
+
+    def sample(self, t: float) -> tuple[np.ndarray, np.ndarray]:
+        at = self._start + float(np.clip(t, 0.0, self.duration))
+        result = self._trajectory.get_joint_targets(at)
+        if isinstance(result, (tuple, list)) and len(result) == 2:
+            positions, velocities = result
+        else:
+            positions, velocities = result, np.zeros(len(self.joint_names))
+        return np.asarray(positions, dtype=float), np.asarray(velocities, dtype=float)
+
+
 class Manipulator(Robot):
     """A robot arm with an end effector."""
 
@@ -1515,11 +1542,12 @@ class Manipulator(Robot):
             default_physics_dt=self.scene.dt,
         )
         frame = self._end_effector_frame or config.get("end_effector_frame_name")
+        # Kept: the c-space trajectory generator behind `route_to` is built
+        # from the same description and URDF.
+        self._lula_kinematics_config = loader.load_supported_lula_kinematics_solver_config(name)
         self._ik = mg.ArticulationKinematicsSolver(
             robot_articulation=self._articulation,
-            kinematics_solver=mg.LulaKinematicsSolver(
-                **loader.load_supported_lula_kinematics_solver_config(name)
-            ),
+            kinematics_solver=mg.LulaKinematicsSolver(**self._lula_kinematics_config),
             end_effector_frame_name=frame,
         )
         self._end_effector_frame = frame
@@ -2201,6 +2229,64 @@ class Manipulator(Robot):
             if source:
                 return str(source).lower()
         return self.prim_path.rstrip("/").rsplit("/", 1)[-1].lower()
+
+    def route_to(self, position: Any, orientation: Any = None, *,
+                 seed: Any = None) -> "LulaRoute":
+        """A joint-space route to a Cartesian pose, without a collision checker.
+
+        What a long move needs on an install with no cuMotion (Isaac 5.x ships
+        none): `plan_to` raises there, and `servo_to` is a reactive policy that
+        winds the wrist up over a base swing -- measured on a belt-to-pallet
+        traverse, every later placement "converged" with the flange tilted
+        0.25-0.50 rad, or never converged at all.
+
+        Two steps. The goal joints come from Lula IK warm-started at `seed`
+        -- the arm's ready pose, so the solution is an unwound configuration
+        rather than the one nearest whatever the wrist has accumulated. Then a
+        Lula c-space trajectory from the current joints to that goal, time-
+        parameterised within the arm's own limits, driven by `follow` exactly
+        as a cuMotion plan would be. It checks nothing for collisions: keep
+        the route above the cell (a carry height over the belt's frame) the
+        way the palletizing controller does.
+        """
+        self._ensure_motion_policy()
+        self._sync_base_pose()
+        solver = self._ik.get_kinematics_solver()
+        names = list(solver.get_joint_names())
+        indices = self._solver_indices()
+        q_now = np.asarray(self.joint_positions, dtype=float)[indices]
+        warm = np.asarray(seed, dtype=float).reshape(-1) if seed is not None else q_now
+        target = as_vec3(position, name="position")
+        rotation = as_quat(orientation) if orientation is not None else None
+        q_goal, solved = solver.compute_inverse_kinematics(
+            self._end_effector_frame, np.asarray(target, dtype=float),
+            np.asarray(rotation, dtype=float) if rotation is not None else None,
+            warm_start=warm,
+        )
+        if not solved:
+            raise MotionError(
+                f"{self.prim_path}: no inverse-kinematics solution for "
+                f"{np.round(target, 3).tolist()} with the flange as asked."
+            )
+        generator = self._cspace_generator()
+        trajectory = generator.compute_c_space_trajectory(
+            np.asarray([q_now, np.asarray(q_goal, dtype=float)], dtype=float)
+        )
+        if trajectory is None:
+            raise MotionError(f"{self.prim_path}: Lula could not time-parameterise the route.")
+        return LulaRoute(trajectory, names)
+
+    def _cspace_generator(self) -> Any:
+        if getattr(self, "_cspace_gen", None) is None:
+            from isaacsim.robot_motion.motion_generation.lula.trajectory_generator import (
+                LulaCSpaceTrajectoryGenerator,
+            )
+
+            cfg = self._lula_kinematics_config
+            self._cspace_gen = LulaCSpaceTrajectoryGenerator(
+                cfg["robot_description_path"], cfg["urdf_path"]
+            )
+        return self._cspace_gen
 
     def plan_to(self, position: Any, orientation: Any = None, *,
                 robot_name: str | None = None) -> Any:

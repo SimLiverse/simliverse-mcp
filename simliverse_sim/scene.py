@@ -259,6 +259,8 @@ class Scene:
     def ensure_ground_plane(self, path: str = "/World/GroundPlane", z: float = 0.0) -> str:
         from pxr import UsdGeom, UsdPhysics
 
+        from pxr import Gf, Sdf, UsdShade
+
         stage = self.stage
         prim = stage.GetPrimAtPath(path)
         if not prim.IsValid():
@@ -266,6 +268,23 @@ class Scene:
             plane.CreateAxisAttr().Set("Z")
             plane.AddTranslateOp().Set((0.0, 0.0, z))
             prim = plane.GetPrim()
+        # A UsdGeom.Plane is 2 x 2 m by default. The collider PhysX makes of
+        # it is infinite, so physics never noticed -- but visually the floor
+        # ended two metres out and the rest of every cell stood on nothing.
+        plane = UsdGeom.Plane(prim)
+        if (plane.GetWidthAttr().Get() or 2.0) < 100.0:
+            plane.CreateWidthAttr().Set(400.0)
+            plane.CreateLengthAttr().Set(400.0)
+        # And a surface to see: a bare plane renders near black under RTX.
+        material_path = f"{path}/Material"
+        if not stage.GetPrimAtPath(material_path).IsValid():
+            material = UsdShade.Material.Define(stage, material_path)
+            shader = UsdShade.Shader.Define(stage, f"{material_path}/Shader")
+            shader.CreateIdAttr("UsdPreviewSurface")
+            shader.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f(0.42, 0.43, 0.45))
+            shader.CreateInput("roughness", Sdf.ValueTypeNames.Float).Set(0.85)
+            material.CreateSurfaceOutput().ConnectToSource(shader.ConnectableAPI(), "surface")
+            UsdShade.MaterialBindingAPI.Apply(prim).Bind(material)
         if not prim.HasAPI(UsdPhysics.CollisionAPI):
             UsdPhysics.CollisionAPI.Apply(prim)
         return path
@@ -280,15 +299,20 @@ class Scene:
         (a dome from an environment, a distant light someone placed) is left
         alone.
         """
-        from pxr import UsdLux
+        from pxr import Gf, UsdLux
 
         stage = self.stage
+        # A dome specifically. The first version stood down for any light at
+        # all, and Kit's default stage carries one distant light -- a single
+        # sun with no sky: every face turned away from it is black, the ground
+        # is black, the background is black. Measured as "why is it so dark"
+        # on every capture of an otherwise correct cell.
         for prim in stage.Traverse():
-            if prim.IsA(UsdLux.DomeLight) or prim.IsA(UsdLux.DistantLight) or \
-                    prim.IsA(UsdLux.SphereLight) or prim.IsA(UsdLux.RectLight):
+            if prim.IsA(UsdLux.DomeLight):
                 return str(prim.GetPath())
         dome = UsdLux.DomeLight.Define(stage, path)
         dome.CreateIntensityAttr().Set(float(intensity))
+        dome.CreateColorAttr().Set(Gf.Vec3f(0.85, 0.88, 0.95))
         return path
 
     # ── Timeline and stepping ─────────────────────────────────────────────────
