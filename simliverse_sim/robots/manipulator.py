@@ -2041,6 +2041,28 @@ class Manipulator(Robot):
                 pinned.append(f"{names[index]}={value:.3f} (limits {low:.3f}..{high:.3f})")
         return pinned
 
+    def downward_orientation(self, target: Any) -> list:
+        """A flange-down orientation whose yaw faces the reach, as (w, x, y, z).
+
+        The fixed quat `[0, 1, 0, 0]` -- "flange down" in world frame -- also
+        pins the tool's yaw, and the wrist must then absorb the whole base
+        rotation. In the quadrant the demos were built in that cost nothing;
+        on a cell mirrored to the other side of the arm the servo plateaued a
+        measured 0.18 m from a reachable target and never converged, because
+        the demanded yaw sat past the wrist's travel. Yawing the down
+        orientation toward the target keeps the wrist in the middle of its
+        range wherever the cell is drawn.
+
+        Algebra: qz(yaw) * qx(pi) == (0, cos(yaw/2), sin(yaw/2), 0).
+        """
+        import math
+
+        base, _ = self._arm_base_pose()
+        goal = as_vec3(target, name="target")
+        yaw = math.atan2(float(goal[1]) - float(base[1]),
+                         float(goal[0]) - float(base[0]))
+        return [0.0, math.cos(yaw / 2.0), math.sin(yaw / 2.0), 0.0]
+
     def servo_to(
         self,
         position: Any,
