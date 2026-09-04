@@ -2282,6 +2282,15 @@ class Manipulator(Robot):
             high = np.asarray(generator.get_c_space_position_limits()[1], dtype=float)
         except Exception:  # noqa: BLE001 - unreadable limits are not a failure
             low = high = None
+        # The *measured* start pose drifts a hair outside the limits under
+        # position control -- PhysX settles a joint at its stop, the encoder
+        # reads a whisker past it, and the trajectory generator refuses the
+        # whole trajectory over a micro-radian. Clamped, because this is
+        # measurement noise about where the arm already is, not a request.
+        start = np.asarray(q_now, dtype=float)
+        if low is not None:
+            start = np.clip(start, low, high)
+
         if low is not None and (np.any(goal < low - 1e-6) or np.any(goal > high + 1e-6)):
             over = [
                 f"{name}={value:.3f} outside [{lo:.3f}, {hi:.3f}]"
@@ -2295,7 +2304,7 @@ class Manipulator(Robot):
             )
 
         trajectory = generator.compute_c_space_trajectory(
-            np.asarray([q_now, goal], dtype=float)
+            np.asarray([start, goal], dtype=float)
         )
         if trajectory is None:
             raise MotionError(f"{self.prim_path}: Lula could not time-parameterise the route.")
