@@ -661,9 +661,23 @@ class SuctionGripper:
           entities created mid-play are never registered, and the gripper then
           ignores every action.
         """
-        from isaacsim.robot.surface_gripper import create_surface_gripper
         from pxr import Gf, UsdGeom, UsdPhysics
         from usd.schema.isaac import robot_schema
+
+        try:
+            from isaacsim.robot.surface_gripper import create_surface_gripper
+        except ImportError:
+            # Isaac 5.x ships no module-level helper. Its CreateSurfaceGripper
+            # *command* is a thin wrapper -- resolve a free child path, call
+            # the schema -- so go straight to the schema with the same layout
+            # 6.0's helper produces: the gripper prim is a child of the cup.
+            def create_surface_gripper(stage, parent_path):
+                import omni.usd
+
+                path = omni.usd.get_stage_next_free_path(
+                    stage, parent_path + "/SurfaceGripper", False
+                )
+                return robot_schema.CreateSurfaceGripper(stage, path)
 
         from ..scene import Scene as _Scene
 

@@ -33,12 +33,13 @@ shipped assets or forced by the arm:
   wrist is physically wider than a 10 cm box, so small cartons cannot be
   approached without the wrist fouling the ones beside them. 30 cm boxes at
   ~1.9 m are the job this machine is built for.
-* **Belt deck at 0.90 m.** `Conveyor.build()` rather than the shipped asset,
-  because `ConveyorBelt_A09` decks at 1.781 m — fine for the arm, but it puts
-  the pick 1.8 m up while the pallet decks at 0.14 m, and a 1.6 m vertical
-  travel per box makes a slow cycle look like a broken one. Pass
-  `asset=True` to build it from the real prop instead; the geometry is
-  re-measured from the belt either way.
+* **The real low belt, `conveyorbelt_a08`.** The first version built the belt
+  from primitives because the only straight *prop* then indexed was A09, which
+  decks at 1.781 m — a pick 1.8 m up against a pallet at 0.14 m makes a slow
+  cycle look like a broken one. A08 is the straight low section, deck measured
+  at 0.769 m, so the cell is made of the shipped asset at working height. Pass
+  `asset=False` to get the old primitive slab (dimensions of your choosing);
+  the geometry is measured off the belt either way.
 * **Suction, not fingers.** A KR210 ships with a bare flange. Real palletisers
   use vacuum, a 30 cm box has a flat top, and a parallel gripper would have to
   span the whole carton. `attach_suction_gripper` is the honest fitting, and it
@@ -91,7 +92,7 @@ PALLET_DECK = (1.2132, 0.8023)
 ROWS, COLS, LAYERS = 2, 2, 2  # eight boxes
 
 
-def build(scene: Scene | None = None, *, asset: bool = False, boxes: int = 4) -> dict:
+def build(scene: Scene | None = None, *, asset: bool = True, boxes: int = 4) -> dict:
     """Author the cell. Returns what the controller needs to drive it."""
     scene = scene or Scene.get()
     scene.stop()
@@ -106,7 +107,7 @@ def build(scene: Scene | None = None, *, asset: bool = False, boxes: int = 4) ->
     belt_centre_x = BELT_STOP_X - BELT_LENGTH / 2.0
     if asset:
         belt = Conveyor.from_prop(
-            "conveyorbelt_a09",
+            "conveyorbelt_a08",
             prim_path=BELT,
             position=[belt_centre_x, BELT_OFFSET_Y, 0.0],
             direction=(1, 0, 0),

@@ -873,6 +873,9 @@ class Conveyor:
 
         self._boxes = made
         self.box_size = size
+        # Re-stamp: the builder's stamp predates the load, and a controller
+        # attaching by stamp needs the box size to read the queue.
+        self._stamp()
         return made
 
     @property

@@ -47,20 +47,6 @@ TRACE = "/tmp/kuka_palletizing.log"
 DOWN = [0.0, 1.0, 0.0, 0.0]
 
 BOX = 0.30                      # full box size, metres
-# Exactly what demo/kuka_palletizing.py's build() reported, pasted in rather
-# than re-derived. Re-deriving it is what put the controller's idea of the belt
-# a metre away from the real one when the cell layout moved.
-BELT_DESCRIPTION = {
-    "belt_path": "/World/Conveyor",
-    "direction": [1.0, 0.0, 0.0],
-    "centre": [-0.30, -1.05, 0.90],
-    "speed": 0.30,
-    "top_z": 0.90,
-    "length": 3.2,
-    "width": 0.70,
-    "gate_path": "/World/ConveyorGate",
-    "box_size": [0.30, 0.30, 0.30],
-}
 PALLET_Y = 1.90
 PALLET_DECK_Z = 0.1425
 ROWS, COLS, LAYERS = 2, 2, 2
@@ -152,11 +138,18 @@ def compute(db=None):
         _arm.rebind_suction()
         # Attach to the belt already on the stage rather than rebuilding it —
         # `build()` from inside compute() would author a second belt over the
-        # first one on every Play. On a replay the boxes are back at their
-        # authored poses and the belt is still driven, so the queue re-forms.
-        _belt = Conveyor.from_description(BELT_DESCRIPTION, scene=scene)
+        # first one on every Play. The belt's geometry and drive come from the
+        # stamp its builder wrote on the prim, so nothing here is pasted in:
+        # an earlier version carried the builder's numbers as constants, and
+        # they went stale the moment the cell layout moved.
+        _belt = Conveyor.attach(BELT, scene=scene)
         paths = sorted(scene.find("Box"))
         _belt.track([RigidObject(path, scene=scene) for path in paths])
+        import numpy as _np
+
+        # The stamp predates load(), so it carries no box size; the queue
+        # reader needs it to tell "at the stop" from "half a box short".
+        _belt.box_size = _np.array([BOX, BOX, BOX])
         _trace("bound %d boxes: %s" % (len(paths), paths))
 
         # After Play, always. A stop between the belt being switched on and the
