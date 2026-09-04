@@ -2269,8 +2269,33 @@ class Manipulator(Robot):
                 f"{np.round(target, 3).tolist()} with the flange as asked."
             )
         generator = self._cspace_generator()
+
+        # Lula's IK will hand back a solution outside the arm's joint limits,
+        # and the trajectory generator then dies on a bare
+        # "Failed check (q(i) >= min_pos(i))" naming neither the joint nor the
+        # pose that produced it. Checked here so an unreachable orientation
+        # comes back as MotionError -- which callers already treat as "try a
+        # different orientation" -- instead of a crash mid-task.
+        goal = np.asarray(q_goal, dtype=float)
+        try:
+            low = np.asarray(generator.get_c_space_position_limits()[0], dtype=float)
+            high = np.asarray(generator.get_c_space_position_limits()[1], dtype=float)
+        except Exception:  # noqa: BLE001 - unreadable limits are not a failure
+            low = high = None
+        if low is not None and (np.any(goal < low - 1e-6) or np.any(goal > high + 1e-6)):
+            over = [
+                f"{name}={value:.3f} outside [{lo:.3f}, {hi:.3f}]"
+                for name, value, lo, hi in zip(names, goal, low, high)
+                if value < lo - 1e-6 or value > hi + 1e-6
+            ]
+            raise MotionError(
+                f"{self.prim_path}: the inverse-kinematics solution for "
+                f"{np.round(target, 3).tolist()} needs {'; '.join(over)}. "
+                f"That pose is reachable only past a joint limit."
+            )
+
         trajectory = generator.compute_c_space_trajectory(
-            np.asarray([q_now, np.asarray(q_goal, dtype=float)], dtype=float)
+            np.asarray([q_now, goal], dtype=float)
         )
         if trajectory is None:
             raise MotionError(f"{self.prim_path}: Lula could not time-parameterise the route.")
