@@ -74,6 +74,7 @@ _state = WARMUP
 _frame = 0
 _job = 0
 _arm = None
+_tip = 0.0
 _belt = None
 _slots = None
 _pick = None
@@ -114,7 +115,7 @@ def setup(db=None):
 
 
 def compute(db=None):
-    global _state, _frame, _job, _arm, _belt, _slots, _pick, _held
+    global _state, _frame, _job, _arm, _belt, _slots, _tip, _pick, _held
     _frame += 1
 
     if _state in (DONE, FAILED):
@@ -136,6 +137,11 @@ def compute(db=None):
         # handle is new on every Play, so bind it to the cup already there —
         # calling attach_suction_gripper() here would author a second one.
         _arm.rebind_suction()
+        # The servo target is the FLANGE; the cup hangs tip_offset below it.
+        # Without this the descent commands the flange to the box top, drives
+        # the cup into the carton, and never converges -- which is why this
+        # controller had never survived a replay.
+        _tip = float(getattr(_arm.suction, "tip_offset", 0.0) or 0.0)
         # Attach to the belt already on the stage rather than rebuilding it —
         # `build()` from inside compute() would author a second belt over the
         # first one on every Play. The belt's geometry and drive come from the
@@ -191,7 +197,7 @@ def compute(db=None):
 
     elif _state == DOWN_TO_BOX:
         # Onto the box's top face, not its centre.
-        target_z = _pick[2] + BOX / 2.0 + GRIP_LIFT
+        target_z = _pick[2] + BOX / 2.0 + _tip + GRIP_LIFT
         if _arm.servo_to([_pick[0], _pick[1], target_z], DOWN, tolerance=0.012):
             _arm.suction.close(settle_steps=0)
             _go(GRIP)
@@ -214,14 +220,14 @@ def compute(db=None):
 
     elif _state == OVER_SLOT:
         if _arm.servo_to([slot["rest"][0], slot["rest"][1],
-                          slot["rest"][2] + BOX / 2.0 + COARSE], DOWN, tolerance=0.018):
+                          slot["rest"][2] + BOX / 2.0 + _tip + COARSE], DOWN, tolerance=0.018):
             _go(PLACE)
 
     elif _state == PLACE:
         # Two-stage descent. A single move overshoots on arrival and nudges what
         # is already stacked; measured on a three-cube tower that came apart.
         if _arm.servo_to([slot["rest"][0], slot["rest"][1],
-                          slot["rest"][2] + BOX / 2.0 + FINAL], DOWN, tolerance=0.008):
+                          slot["rest"][2] + BOX / 2.0 + _tip + FINAL], DOWN, tolerance=0.008):
             _arm.suction.open(settle_steps=0)
             _go(RELEASE)
 
