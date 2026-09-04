@@ -69,7 +69,47 @@ def load_usd(
             return {"status": "error", "message": "usd_url is required"}
         loader = USDLoader()
         result_path = loader.load_usd_from_url(url_path=usd_url, target_path=prim_path, location=position, scale=scale)
-        return {"status": "success", "message": f"Loaded USD from {usd_url}", "prim_path": result_path}
+
+        # Verify the reference actually composed before claiming success.
+        #
+        # `AddReference` on a URL that 404s does not raise: USD authors the
+        # reference arc, the layer fails to resolve, and you are left with a
+        # prim of empty type and no children. The handler then reported
+        # `status: success`, which is the worst answer available to an agent --
+        # it proceeds believing a conveyor is on the stage and every later
+        # decision is built on that. Six guessed conveyor paths all "loaded"
+        # this way; all six were 404s, and the scene stayed empty.
+        import omni.usd
+
+        stage = omni.usd.get_context().get_stage()
+        prim = stage.GetPrimAtPath(result_path)
+        if not prim or not prim.IsValid():
+            return {
+                "status": "error",
+                "message": f"No prim at {result_path} after loading {usd_url}.",
+            }
+
+        type_name = str(prim.GetTypeName() or "")
+        has_children = bool(list(prim.GetChildren()))
+        if not type_name and not has_children:
+            return {
+                "status": "error",
+                "message": (
+                    f"{usd_url} did not resolve: the reference was authored but "
+                    f"composed to an empty prim at {result_path}. The asset "
+                    f"probably does not exist at that URL."
+                ),
+                "prim_path": result_path,
+                "hint": "Check the path with a HEAD request, or use search_usd.",
+            }
+
+        return {
+            "status": "success",
+            "message": f"Loaded USD from {usd_url}",
+            "prim_path": result_path,
+            "type": type_name,
+            "children": len(list(prim.GetChildren())),
+        }
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
