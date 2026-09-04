@@ -948,6 +948,13 @@ class SuctionGripper:
             prim.CreateAttribute(
                 "simliverse:tip_offset", _Sdf.ValueTypeNames.Float
             ).Set(float(gripper.tip_offset))
+            # And which axis it was mounted on. `rebind_suction` builds a
+            # fresh handle whose default is "Z", so an X-mounted tool came
+            # back claiming Z -- and the arm then aimed the wrong axis at the
+            # floor while the cup pointed sideways. Recorded, not inferred.
+            prim.CreateAttribute(
+                "simliverse:approach_axis", _Sdf.ValueTypeNames.String
+            ).Set(str(gripper.approach_axis))
         except Exception:  # noqa: BLE001 -- a stamp that cannot be written is a warning
             logger.debug("Could not stamp tip_offset on %s", cup_path, exc_info=True)
         # Author the schema attributes as well as setting them through the view:
@@ -1320,6 +1327,15 @@ class Manipulator(Robot):
         if height:
             self.suction.cup_path = cup_path
             self.suction.tip_offset = float(height)
+        try:
+            gripper_prim = get_stage().GetPrimAtPath(self._find_surface_gripper())
+            axis_attr = gripper_prim.GetAttribute("simliverse:approach_axis")
+            if axis_attr and axis_attr.HasValue():
+                self.suction.approach_axis = str(axis_attr.Get())
+        except Exception:  # noqa: BLE001 - an unreadable stamp leaves the default
+            logger.debug("Could not read the mounted approach axis", exc_info=True)
+        if height:
+            pass
         else:
             logger.warning(
                 "Could not measure the suction cup at %s, so tip_offset stays "
