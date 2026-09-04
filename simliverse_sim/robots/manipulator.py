@@ -911,6 +911,17 @@ class SuctionGripper:
         # pick still succeeds (+0.271 m) but the cup lands 65 mm off centre
         # against 43 mm before, which is the disagreement showing.
         gripper.tip_offset = float(stand_off) + float(cup_length)
+        # And author it on the prim, so `rebind_suction` can read the truth
+        # back instead of re-measuring the cup cylinder alone -- which misses
+        # the standoff and sends every later pick that much too low.
+        try:
+            from pxr import Sdf as _Sdf
+
+            prim.CreateAttribute(
+                "simliverse:tip_offset", _Sdf.ValueTypeNames.Float
+            ).Set(float(gripper.tip_offset))
+        except Exception:  # noqa: BLE001 -- a stamp that cannot be written is a warning
+            logger.debug("Could not stamp tip_offset on %s", cup_path, exc_info=True)
         # Author the schema attributes as well as setting them through the view:
         # the view sets them per-instance, the prim carries them across stop/play.
         for attr, value in (
@@ -1212,14 +1223,27 @@ class Manipulator(Robot):
         # The cup is the SurfaceGripper's parent: `create` authors the cylinder
         # and puts the gripper prim beneath it.
         cup_path = path.rsplit("/", 1)[0]
+        # The stamp first: `attach_suction_gripper` records standoff + cup on
+        # the gripper prim, and measuring the cup cylinder alone misses the
+        # standoff -- the two disagreed by exactly that much, and a controller
+        # that rebound after Play descended the difference too low.
+        height = None
         try:
-            from pxr import UsdGeom
+            gripper_prim = get_stage().GetPrimAtPath(self._find_surface_gripper())
+            attr = gripper_prim.GetAttribute("simliverse:tip_offset")
+            if attr and attr.HasValue():
+                height = float(attr.Get())
+        except Exception:  # noqa: BLE001 - fall through to measuring
+            logger.debug("No tip stamp; measuring the cup", exc_info=True)
+        if not height:
+            try:
+                from pxr import UsdGeom
 
-            cup_prim = get_stage().GetPrimAtPath(cup_path)
-            height = UsdGeom.Cylinder(cup_prim).GetHeightAttr().Get() if cup_prim.IsValid() else None
-        except Exception:  # noqa: BLE001 - a cup we cannot measure is not fatal
-            logger.debug("Could not measure the cup at %s", cup_path, exc_info=True)
-            height = None
+                cup_prim = get_stage().GetPrimAtPath(cup_path)
+                height = UsdGeom.Cylinder(cup_prim).GetHeightAttr().Get() if cup_prim.IsValid() else None
+            except Exception:  # noqa: BLE001 - a cup we cannot measure is not fatal
+                logger.debug("Could not measure the cup at %s", cup_path, exc_info=True)
+                height = None
         if height:
             self.suction.cup_path = cup_path
             self.suction.tip_offset = float(height)
