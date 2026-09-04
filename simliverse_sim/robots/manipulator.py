@@ -728,6 +728,7 @@ class SuctionGripper:
         # old cup is still a child of the mount link, and measuring it as the
         # geometry to clear walks the new one further out every single build.
         for stale in (f"{parent_prim_path}/SuctionCup",
+                      f"{parent_prim_path}/SuctionStem",
                       f"{parent_prim_path}/SuctionCup_AttachPoint"):
             if scene.stage.GetPrimAtPath(stale):
                 scene.stage.RemovePrim(stale)
@@ -745,6 +746,33 @@ class SuctionGripper:
         # parented to a link is not a rigid body, so the rule that parenting a
         # *body* under an articulation link is fatal does not apply to it.
         # `cup_parent` is accepted for callers that still pass it and ignored.
+        # The stem between the flange and the cup. Without it the cup hangs in
+        # mid-air: the standoff is real -- it is what lifts the cup clear of a
+        # conveyor's frame rail -- but nothing was drawn across it, so a
+        # perfectly correct tool rendered as a disc floating below the wrist,
+        # and the first person to look at it reasonably asked what was broken.
+        # Visual only: no collider, no rigid body, exactly like the cup.
+        if float(stand_off) > 1e-4:
+            stem_path = f"{parent_prim_path}/SuctionStem"
+            stem = UsdGeom.Cylinder.Define(scene.stage, stem_path)
+            stem_radius = max(0.02, float(cup_radius) * 0.35)
+            stem.CreateRadiusAttr(stem_radius)
+            stem.CreateHeightAttr(float(stand_off))
+            stem.CreateAxisAttr("Z")
+            stem.CreateExtentAttr([
+                (-stem_radius, -stem_radius, -float(stand_off) / 2.0),
+                (stem_radius, stem_radius, float(stand_off) / 2.0),
+            ])
+            stem_xform = UsdGeom.Xformable(stem.GetPrim())
+            stem_xform.ClearXformOpOrder()
+            stem_xform.AddTranslateOp().Set(
+                Gf.Vec3d(*[float(v) for v in direction * (float(stand_off) / 2.0)])
+            )
+            stem_xform.AddOrientOp().Set(rot)
+            UsdGeom.Gprim(stem.GetPrim()).CreateDisplayColorAttr(
+                [Gf.Vec3f(0.25, 0.25, 0.28)]
+            )
+
         cup_path = f"{parent_prim_path}/SuctionCup"
         cup = UsdGeom.Cylinder.Define(scene.stage, cup_path)
         cup.CreateRadiusAttr(float(cup_radius))
