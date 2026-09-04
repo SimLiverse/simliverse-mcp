@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Scoped the conveyor "start after Play or the drive is dropped" docstring to Isaac Sim 6.0 — the failure sequence was re-run on a 5.1 worker and did not reproduce.
 
 ### Added
+- **The extension puts `simliverse_sim` on `sys.path` at startup.** `--ext-folder` paths the extension, not the repository around it, so on a cold worker every `execute_script` import of the library failed with "No module named 'simliverse_sim'" -- while working in any session where an earlier script had inserted the path by hand. Found by restarting the container mid-session.
+- **`Scene.ensure_light()`**: a dome light if the stage has no light of any kind, checked by type so an already-lit stage is left alone. A cold headless stage renders every correct scene as shapes on black, and the numbers never say "dark".
 - **Belts stamp their geometry and drive on their own prim** (`simliverse:conveyor`, JSON, the `describe()` record), and `Conveyor.attach(path)` with no other arguments reads it back — a session that did not build a belt can take a handle on it, the same move as `simliverse:motion_config` on robots.
 - `release_all_sensors()` in the sensors handler, used by `clear_scene`.
 - `capture_view` switches the viewport to a temporary camera and restores it, so capturing never moves the operator's view; sensors are registered on creation and released on delete.

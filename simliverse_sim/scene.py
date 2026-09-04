@@ -270,6 +270,27 @@ class Scene:
             UsdPhysics.CollisionAPI.Apply(prim)
         return path
 
+    def ensure_light(self, path: str = "/World/SketchDome", intensity: float = 1000.0) -> str:
+        """Give the stage a light if it has none, and never a second one.
+
+        A cold headless stage has no light at all: everything authored into it
+        is correct, physical, and renders as shapes on black. The first person
+        to notice is whoever looks at a capture -- the numbers never say
+        "dark". Checked by *type*, not by path, so a stage lit any other way
+        (a dome from an environment, a distant light someone placed) is left
+        alone.
+        """
+        from pxr import UsdLux
+
+        stage = self.stage
+        for prim in stage.Traverse():
+            if prim.IsA(UsdLux.DomeLight) or prim.IsA(UsdLux.DistantLight) or \
+                    prim.IsA(UsdLux.SphereLight) or prim.IsA(UsdLux.RectLight):
+                return str(prim.GetPath())
+        dome = UsdLux.DomeLight.Define(stage, path)
+        dome.CreateIntensityAttr().Set(float(intensity))
+        return path
+
     # ── Timeline and stepping ─────────────────────────────────────────────────
 
     def play(self) -> None:
