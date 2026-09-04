@@ -195,6 +195,37 @@ belt = Conveyor.build(
 
 ---
 
+## 5b. Placing with a suction tool — measured on a KR210 (Isaac Sim 6.0.1)
+
+Every number here came from a cell built out of a layout sketch and run
+end to end; each one was a failure first.
+
+- **The reachable annulus is 1.20–2.70 m** from the base, at a carton's
+  release height, with the flange vertical. Both ends bite: inside 1.20 m the
+  arm cannot fold in tight enough to point the tool down and IK has *no*
+  solution, which looks nothing like "out of reach". An earlier outer figure
+  of 1.90 m came from RMPflow servo failures and measured the policy, not the
+  robot.
+- **Route the last centimetres, do not servo them.** RMPflow trades
+  orientation against position and settles ~0.165 rad off vertical at the edge
+  of reach — enough to set a carton on a corner. The same descent through
+  `route_to` (exact IK, or no answer) arrives at 0.002 rad and places within
+  8 mm.
+- **Ask for the slot's yaw, accept the reach-facing one.** A 6-axis arm cannot
+  present every orientation at every reach: a slot that solved reach-facing had
+  no solution at its own yaw. Prefer square, fall back, and say which was used.
+- **Lift straight up before moving away.** One move from the place pose to
+  carry height lets the policy reconfigure the whole arm, dragging the cup —
+  3 mm above the carton it just released — sideways through it.
+- **Leave 50 mm between cartons, not 10.** Tight pitch transmits placement
+  error along the row: cartons landing 16–137 mm off shouldered each other
+  until one placed at 16 mm had drifted to 228 mm, untouched by the arm.
+- **Verify the stack at the end, not each carton as it lands.** Checking one
+  carton immediately proves only that it arrived. A run reported "4 placed and
+  verified" while `verify_pallet` found three on the deck and one on the floor.
+
+---
+
 ## 6. Robots
 
 | key | reach | note |
