@@ -2109,11 +2109,21 @@ class Manipulator(Robot):
         *,
         tolerance: float = 0.005,
         hold: int = 3,
+        tilt_tolerance: float = 0.09,
     ) -> bool:
         """Advance the arm one control tick toward a Cartesian target.
 
         Does NOT step physics, and does not block. Returns True once the end
-        effector has stayed inside `tolerance` for `hold` consecutive ticks.
+        effector has stayed inside `tolerance` for `hold` consecutive ticks --
+        and, when an orientation was asked for, the tool's approach axis (its
+        own Z) is within `tilt_tolerance` radians of the target's. Yaw about
+        that axis is deliberately not checked: a suction cup is round.
+
+        The tilt check exists because success used to mean position alone.
+        Measured on a sketch-built KR210 cell: every servo reported converged,
+        and the cartons landed 12-27 cm past their pallet slots in one
+        direction -- the flange was never pointing down at the edge of reach,
+        and the 0.21 m tool swung each carton outward by the tilt.
 
         This is the form a controller needs. `move_ee_to` steps physics itself,
         which is correct when driving the sim from outside but wrong inside a
@@ -2145,7 +2155,15 @@ class Manipulator(Robot):
         self._controller().apply_action(self._policy.get_next_articulation_action())
 
         self._servo_error = float(np.linalg.norm(self.ee_position - target))
-        self._servo_settled = self._servo_settled + 1 if self._servo_error < tolerance else 0
+        self._servo_tilt = 0.0
+        if rotation is not None:
+            w, x, y, z = (float(v) for v in rotation)
+            want_z = np.array([2 * (x * z + w * y), 2 * (y * z - w * x), 1 - 2 * (x * x + y * y)])
+            have_z = np.asarray(self.ee_rotation)[:, 2]
+            cosine = float(np.clip(have_z @ want_z / (np.linalg.norm(have_z) * np.linalg.norm(want_z) + 1e-12), -1.0, 1.0))
+            self._servo_tilt = float(np.arccos(cosine))
+        arrived = self._servo_error < tolerance and self._servo_tilt < tilt_tolerance
+        self._servo_settled = self._servo_settled + 1 if arrived else 0
         return self._servo_settled >= hold
 
     def move_ee_by(self, delta: Any, **kwargs: Any) -> MotionResult:
