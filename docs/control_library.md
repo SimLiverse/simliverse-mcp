@@ -181,6 +181,17 @@ belt = Conveyor.build(
   they currently cost placement accuracy, because the pick is not centred and
   a carton normally slides into line under the cup as it lifts. Off by default
   until the approach lands centred.
+- **`from_prop("conveyorbelt_a09", position=...)` drives the real asset**, and
+  its `position` means the centre of the belt deck's footprint — the assets
+  author their origin wherever the artist left it (A09: the discharge end),
+  and the library recentres so the belt lands where the layout says. Name a
+  straight section: the fuzzy query "conveyor belt" resolves to A01, the
+  90-degree curve. In a scene a customer looks at, prefer `from_prop` over a
+  primitive `build()`.
+- **A built belt stamps `describe()` onto its prim** (`simliverse:conveyor`),
+  so `Conveyor.attach("/World/Sketch/r1")` with no other arguments works in a
+  session that did not build it. Explicit arguments override the stamp; only a
+  hand-authored belt still needs all four numbers.
 
 ---
 

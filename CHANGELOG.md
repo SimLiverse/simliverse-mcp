@@ -5,6 +5,20 @@ All notable changes to the isaacsim-mcp-server project will be documented in thi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - feat/conveyor-palletizing
+
+### Fixed
+- **`clear_scene` leaves a buildable stage.** The old handler deleted every root prim, `/World` included, and reported success; the next `spawn_robot` then died on `'NoneType' object has no attribute 'create_articulation_view'` because the World singleton and `SimulationManager` still held handles into the deleted physics scene. `clear` now stops the timeline, rebinds the viewport, releases sensors, stops the Replicator orchestrator, removes render products whose camera lives under `/World` (one such product kept re-authoring a "deleted" camera for an entire session), deletes the *children* of `/World`, and keeps the physics scene, materials and ground plane. `keep_physics` now defaults `True`.
+- **`get_world` heals a stage broken by the old clear**: its rebuild path purges `SimulationManager`'s expired `PhysxSceneAPI` handles, which re-defining the prim at the same path does not refresh.
+- **`Conveyor.from_prop` places the deck centre at `position`.** The shipped assets author their origin wherever the artist left it (A09: the discharge end), so placing by origin put a 4 m belt two metres from where it was asked for.
+- **`capture_view` distinguishes a slow capture from a renderer producing no frames.** In the streaming app rendering suspends when no WebRTC client is attached; the error now says so and says what to do, instead of a generic 40-frame timeout.
+- Scoped the conveyor "start after Play or the drive is dropped" docstring to Isaac Sim 6.0 — the failure sequence was re-run on a 5.1 worker and did not reproduce.
+
+### Added
+- **Belts stamp their geometry and drive on their own prim** (`simliverse:conveyor`, JSON, the `describe()` record), and `Conveyor.attach(path)` with no other arguments reads it back — a session that did not build a belt can take a handle on it, the same move as `simliverse:motion_config` on robots.
+- `release_all_sensors()` in the sensors handler, used by `clear_scene`.
+- `capture_view` switches the viewport to a temporary camera and restores it, so capturing never moves the operator's view; sensors are registered on creation and released on delete.
+
 ## [0.5.2] - 2026-04-07
 
 ### Fixed
