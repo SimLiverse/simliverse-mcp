@@ -224,6 +224,30 @@ end to end; each one was a failure first.
   carton immediately proves only that it arrived. A run reported "4 placed and
   verified" while `verify_pallet` found three on the deck and one on the floor.
 
+- **Route what has to arrive; servo only to refine.** `servo_to` is a local
+  reactive policy, and where reaching a pose means turning the base most of the
+  way round it stalls in a local minimum rather than going the long way. Two
+  pick states each burned a 1001-frame budget that way, closing the cup on
+  nothing and retrying a seal against thin air until the run looked hung --
+  nothing was out of reach. `route_to` solves the goal configuration and drives
+  to it, base rotation included.
+- **Seed IK from the arm's current pose, not from a home pose.** Lula returns
+  the solution nearest its seed. A HOME seed asks for the configuration nearest
+  *home*, so the arm swings out toward home and back on every single move; the
+  symptom is a robot that visibly circles between picks, and placements that
+  arrive in a configuration discontinuous with the one before.
+- **Mount the tool on the flange face, and aim that axis at the floor.** The
+  face normal is not tool Z on every arm -- a KR210's is tool X -- and a tool
+  mounted on the wrong axis bolts to the side of the wrist. `approach_axis` is
+  measured, stamped on the gripper prim, and read back on rebind, and
+  `down_at_yaw` sends *that* axis to world -Z.
+- **Release in the orientation you gripped in.** The cup fixes the carton
+  relative to the flange, so an identical orientation returns it to the yaw it
+  had on the belt. Correcting the yaw at the slot instead spun the wrist to
+  arbitrary angles -- 21 and 41 degrees off, never settling on 0 or 90.
+- **Meter the queue with `deadplate.Escapement`, do not stop the belt.** One
+  carton released per cycle, blade back up behind it, line running throughout.
+
 ---
 
 ## 6. Robots
