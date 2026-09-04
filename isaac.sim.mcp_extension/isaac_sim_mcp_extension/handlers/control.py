@@ -328,6 +328,21 @@ def capture_view(
         stage = omni.usd.get_context().get_stage()
         original_camera = str(viewport.camera_path)
 
+        # Sweep any camera a previous capture left behind, before making a new
+        # one. The `finally` below removes it on the way out, but cleanup that
+        # only runs on exit is one missed path away from littering somebody's
+        # stage -- and a stray prim in their outliner is a thing they have to
+        # wonder about. Removing on entry means at most one can ever exist and
+        # the next capture clears it, whatever happened last time.
+        try:
+            from pxr import Sdf as _Sdf
+
+            _stale = stage.GetPrimAtPath("/World/__capture_view_cam")
+            if _stale and _stale.IsValid() and original_camera != "/World/__capture_view_cam":
+                stage.RemovePrim(_Sdf.Path("/World/__capture_view_cam"))
+        except Exception:
+            pass
+
         if camera_path:
             viewport.camera_path = camera_path
         elif position or look_at:
@@ -406,9 +421,16 @@ def capture_view(
         # Give the operator their view back even on failure. Leaving somebody's
         # stream pointing wherever the agent last looked is worse than the
         # failure that got us here.
+        # Two separate attempts, deliberately. Sharing one try meant a failure
+        # restoring the operator's view skipped removing the camera, and the
+        # stage kept a `__capture_view_cam` nobody put there. Each half of the
+        # cleanup has to survive the other failing.
         try:
             if viewport is not None and original_camera:
                 viewport.camera_path = original_camera
+        except Exception:
+            pass
+        try:
             if stage is not None and temp_camera:
                 from pxr import Sdf
 
