@@ -37,15 +37,12 @@ from __future__ import annotations
 
 import ast
 import importlib.util
-import sys
 from pathlib import Path
 
 import pytest
 
 _ROOT = Path(__file__).resolve().parents[1]
-_SPEC = importlib.util.spec_from_file_location(
-    "_sl_controller_src", _ROOT / "simliverse_sim" / "controller.py"
-)
+_SPEC = importlib.util.spec_from_file_location("_sl_controller_src", _ROOT / "simliverse_sim" / "controller.py")
 
 
 def _skeleton() -> str:
@@ -114,7 +111,7 @@ def test_the_outcome_is_checked_before_declaring_done(tree, text) -> None:
 
 
 def test_failure_carries_a_reason(text) -> None:
-    """"It failed" is not actionable; which part failed is."""
+    """ "It failed" is not actionable; which part failed is."""
     assert "_why" in text
     assert "log_warn" in text, "a failure that is not logged is invisible on a replay"
 

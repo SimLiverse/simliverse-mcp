@@ -87,8 +87,7 @@ class MCPExtension(omni.ext.IExt):
                     sys.path.insert(0, root)
                     print(f"simliverse_sim on sys.path from {root}")
                 return
-        print("WARNING: simliverse_sim not found above the extension; "
-              "execute_script imports of it will fail")
+        print("WARNING: simliverse_sim not found above the extension; execute_script imports of it will fail")
 
     def on_shutdown(self) -> None:
         print("trigger  on_shutdown for: ", self.ext_id)

@@ -100,9 +100,7 @@ def pallet_slots(
     size = np.asarray(box, dtype=float).reshape(3)
 
     if rows < 1 or cols < 1 or layers < 1:
-        raise PalletError(
-            f"rows={rows} cols={cols} layers={layers}: each must be at least 1."
-        )
+        raise PalletError(f"rows={rows} cols={cols} layers={layers}: each must be at least 1.")
     if np.any(size <= 0):
         raise PalletError(f"box={size.tolist()}: every dimension must be positive.")
     if gap < 0:
@@ -172,8 +170,7 @@ def pallet_slots(
 def _yaw_degrees(quat: Any) -> float:
     """Rotation about world z, in degrees, from a (w, x, y, z) quaternion."""
     w, x, y, z = (float(v) for v in quat)
-    return float(np.degrees(np.arctan2(2.0 * (w * z + x * y),
-                                       1.0 - 2.0 * (y * y + z * z))))
+    return float(np.degrees(np.arctan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))))
 
 
 def _skew_degrees(quat: Any, want_deg: float) -> float:
@@ -217,9 +214,7 @@ def verify_pallet(
             position = np.asarray(obj.position, dtype=float)
             speed = float(obj.speed)
         except Exception as exc:  # noqa: BLE001 - report it, do not crash the check
-            results.append(
-                {"index": slot["index"], "ok": False, "reason": f"unreadable: {exc}"}
-            )
+            results.append({"index": slot["index"], "ok": False, "reason": f"unreadable: {exc}"})
             continue
         # Separately, and forgivingly: an object that cannot report an
         # orientation is not thereby unplaced. Position and speed are the
@@ -246,9 +241,12 @@ def verify_pallet(
                 "speed": round(speed, 4),
                 "skew": round(skew, 2),
                 "reason": (
-                    "" if ok
-                    else "still moving" if moving
-                    else f"{error:.3f} m from its slot" if error > tolerance
+                    ""
+                    if ok
+                    else "still moving"
+                    if moving
+                    else f"{error:.3f} m from its slot"
+                    if error > tolerance
                     else f"{skew:.1f} deg off square"
                 ),
             }

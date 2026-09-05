@@ -120,11 +120,15 @@ def fake_usd(monkeypatch):
             def GetHeightAttr(self):
                 return _Attr(cup_height)
 
-        fake = type("pxr", (), {
-            "Usd": _Usd,
-            "UsdPhysics": _UsdPhysics,
-            "UsdGeom": type("UsdGeom", (), {"Cylinder": _Cylinder}),
-        })
+        fake = type(
+            "pxr",
+            (),
+            {
+                "Usd": _Usd,
+                "UsdPhysics": _UsdPhysics,
+                "UsdGeom": type("UsdGeom", (), {"Cylinder": _Cylinder}),
+            },
+        )
         monkeypatch.setitem(__import__("sys").modules, "pxr", fake)
         return stage
 
@@ -132,14 +136,13 @@ def fake_usd(monkeypatch):
 
 
 def test_the_only_surface_gripper_on_the_stage_is_the_one_bound(fake_usd) -> None:
-    fake_usd([
-        _Prim("/World/Arm_link6_SuctionCup/SurfaceGripper", "SurfaceGripper"),
-        _Prim("/World/Box0", "Cube"),
-    ])
-    assert (
-        _arm()._find_surface_gripper()
-        == "/World/Arm_link6_SuctionCup/SurfaceGripper"
+    fake_usd(
+        [
+            _Prim("/World/Arm_link6_SuctionCup/SurfaceGripper", "SurfaceGripper"),
+            _Prim("/World/Box0", "Cube"),
+        ]
     )
+    assert _arm()._find_surface_gripper() == "/World/Arm_link6_SuctionCup/SurfaceGripper"
 
 
 def test_no_gripper_says_it_must_be_authored_before_physics(fake_usd) -> None:
@@ -150,20 +153,24 @@ def test_no_gripper_says_it_must_be_authored_before_physics(fake_usd) -> None:
 
 
 def test_two_arms_resolve_to_the_one_naming_this_robot(fake_usd) -> None:
-    fake_usd([
-        _Prim("/World/World_Arm_link6_SuctionCup/SurfaceGripper", "SurfaceGripper"),
-        _Prim("/World/World_Other_link6_SuctionCup/SurfaceGripper", "SurfaceGripper"),
-    ])
+    fake_usd(
+        [
+            _Prim("/World/World_Arm_link6_SuctionCup/SurfaceGripper", "SurfaceGripper"),
+            _Prim("/World/World_Other_link6_SuctionCup/SurfaceGripper", "SurfaceGripper"),
+        ]
+    )
     found = _arm("/World/Arm")._find_surface_gripper()
     assert found == "/World/World_Arm_link6_SuctionCup/SurfaceGripper"
 
 
 def test_an_ambiguous_stage_raises_rather_than_driving_the_wrong_cup(fake_usd) -> None:
     """Guessing here silently operates another robot's gripper."""
-    fake_usd([
-        _Prim("/World/CupA/SurfaceGripper", "SurfaceGripper"),
-        _Prim("/World/CupB/SurfaceGripper", "SurfaceGripper"),
-    ])
+    fake_usd(
+        [
+            _Prim("/World/CupA/SurfaceGripper", "SurfaceGripper"),
+            _Prim("/World/CupB/SurfaceGripper", "SurfaceGripper"),
+        ]
+    )
     with pytest.raises(MotionError, match="ambiguous"):
         _arm("/World/Arm")._find_surface_gripper()
 
@@ -175,14 +182,20 @@ def test_rebind_reads_the_settings_written_on_the_prim(fake_usd, monkeypatch) ->
     differently on the second Play than it did on the first.
     """
     path = "/World/Arm_link6_SuctionCup/SurfaceGripper"
-    fake_usd([
-        _Prim(path, "SurfaceGripper", {
-            "isaac:maxGripDistance": _Attr(0.06),
-            "isaac:coaxialForceLimit": _Attr(1234.0),
-            "isaac:shearForceLimit": _Attr(555.0),
-            "isaac:retryInterval": _Attr(2.0),
-        }),
-    ])
+    fake_usd(
+        [
+            _Prim(
+                path,
+                "SurfaceGripper",
+                {
+                    "isaac:maxGripDistance": _Attr(0.06),
+                    "isaac:coaxialForceLimit": _Attr(1234.0),
+                    "isaac:shearForceLimit": _Attr(555.0),
+                    "isaac:retryInterval": _Attr(2.0),
+                },
+            ),
+        ]
+    )
     captured = {}
 
     class _FakeGripper:

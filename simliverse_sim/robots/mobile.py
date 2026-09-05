@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from .._compat import articulation_action, as_vec3
+from .._compat import articulation_action
 from .base import Morphology, Robot
 
 if TYPE_CHECKING:
@@ -44,17 +44,13 @@ class WheeledRobot(Robot):
         self.wheel_base = wheel_base
         self.wheel_indices = self.groups.wheels
         if not self.wheel_indices:
-            raise NavigationError(
-                f"{prim_path} has no joints that look like wheels. Joints: {self.joint_names}"
-            )
+            raise NavigationError(f"{prim_path} has no joints that look like wheels. Joints: {self.joint_names}")
 
     # ── Velocity control ──────────────────────────────────────────────────────
 
     def set_wheel_velocities(self, velocities: Any, *, settle_steps: int = 0) -> None:
         """Command each wheel joint directly, in rad/s."""
-        self.set_joint_velocities(
-            velocities, indices=self.wheel_indices, settle_steps=settle_steps
-        )
+        self.set_joint_velocities(velocities, indices=self.wheel_indices, settle_steps=settle_steps)
 
     def drive(self, linear: float = 0.0, angular: float = 0.0, *, steps: int = 0) -> None:
         """Drive at `linear` m/s forward and `angular` rad/s yaw.
@@ -103,9 +99,7 @@ class WheeledRobot(Robot):
                 # its lateral offset from the base.
                 for link in self.links():
                     if name.replace("_joint", "") in link.lower():
-                        matrix = UsdGeom.Xformable(
-                            stage.GetPrimAtPath(link)
-                        ).ComputeLocalToWorldTransform(0)
+                        matrix = UsdGeom.Xformable(stage.GetPrimAtPath(link)).ComputeLocalToWorldTransform(0)
                         side = float(matrix.ExtractTranslation()[1]) - self.base_position[1]
                         break
             (left if (side or 0.0) >= 0 else right).append(index)
@@ -141,9 +135,7 @@ class WheeledRobot(Robot):
         targets = np.zeros(self.dof)
         for slot, value in zip(ordered, values):
             targets[slot] = float(value)
-        self._controller().apply_action(
-            articulation_action(joint_velocities=targets)
-        )
+        self._controller().apply_action(articulation_action(joint_velocities=targets))
 
     def plan_path(self, waypoints: Any, **kwargs: Any) -> Any:
         """Smooth a route into a followable path. Does not drive.
@@ -163,9 +155,7 @@ class WheeledRobot(Robot):
         here = np.asarray(self.base_position, dtype=float)[:2]
         if not points or float(np.linalg.norm(points[0] - here)) > 1e-3:
             points = [here] + points
-            logger.info(
-                "Route did not start at the base; prepending %s", here.round(3).tolist()
-            )
+            logger.info("Route did not start at the base; prepending %s", here.round(3).tolist())
         kwargs.setdefault("start_yaw", self._heading())
         return _plan_path(points, **kwargs)
 
@@ -207,9 +197,7 @@ class WheeledRobot(Robot):
         """
         wanted = np.asarray(position, dtype=float).reshape(-1)
         if wanted.size not in (2, 3):
-            raise ValueError(
-                f"position must be [x, y] or [x, y, z], got {wanted.size}: {position!r}"
-            )
+            raise ValueError(f"position must be [x, y] or [x, y, z], got {wanted.size}: {position!r}")
         target = wanted[:2]
         self.scene.play()
 
@@ -222,8 +210,10 @@ class WheeledRobot(Robot):
                 settled = float(np.linalg.norm(target - self.base_position[:2]))
                 if settled > tolerance:
                     logger.info(
-                        "%s coasted to %.3f m from the goal while stopping "
-                        "(tolerance %.3f)", self.prim_path, settled, tolerance
+                        "%s coasted to %.3f m from the goal while stopping (tolerance %.3f)",
+                        self.prim_path,
+                        settled,
+                        tolerance,
                     )
                 return settled <= tolerance
 
@@ -280,18 +270,16 @@ class MobileManipulator(WheeledRobot):
     morphology = Morphology.MOBILE_MANIPULATOR
 
     def __init__(self, prim_path: str, *, scene: Any = None, **kwargs: Any) -> None:
-        super().__init__(prim_path, scene=scene, **{
-            k: v for k, v in kwargs.items() if k in ("wheel_radius", "wheel_base")
-        })
+        super().__init__(
+            prim_path, scene=scene, **{k: v for k, v in kwargs.items() if k in ("wheel_radius", "wheel_base")}
+        )
         from .manipulator import Gripper
 
         self.gripper = Gripper(self, self.groups.gripper)
         self.arm_joint_indices = self.groups.arms
 
     def set_arm_pose(self, positions: Any, *, settle_steps: int = 30) -> None:
-        self.set_joint_positions(
-            positions, indices=self.arm_joint_indices, settle_steps=settle_steps
-        )
+        self.set_joint_positions(positions, indices=self.arm_joint_indices, settle_steps=settle_steps)
 
     def is_grasping(self, obj: "RigidObject", *, min_contacts: int = 1) -> bool:
         touching = [b for b in obj.contact_bodies() if b.startswith(self.prim_path)]

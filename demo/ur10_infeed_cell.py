@@ -132,9 +132,9 @@ BLADE = "/World/Escapement"
 BOX = 0.15
 BOX_MASS = 1.0
 BELT_DECK = 0.45
-PLATE_DECK = 0.33              #: 120 mm below the belt. See the module docstring.
-BELT_END = 0.50                #: where the belt stops and the carton leaves it
-PLATE_STOP = 0.78              #: inner face of the mechanical stop
+PLATE_DECK = 0.33  #: 120 mm below the belt. See the module docstring.
+BELT_END = 0.50  #: where the belt stops and the carton leaves it
+PLATE_STOP = 0.78  #: inner face of the mechanical stop
 #: A singulated carton has to reach the stop on its own momentum.
 #:
 #: With the whole queue on the plate the cartons behind push the leader onto the
@@ -165,6 +165,7 @@ HOME = [0.0, -1.8, 1.5, -1.3, -1.57, 0.0]
 PICK_X = PLATE_STOP - BOX / 2.0
 PICK_Z = PLATE_DECK + BOX / 2.0
 
+
 def clear_cell(scene) -> list[str]:
     """Remove a previous cell's prims. `scene.stop()` does not do this.
 
@@ -188,44 +189,58 @@ def build(scene: Scene | None = None, *, boxes: int = 4) -> dict:
     gains = arm.tune_drives(stiffness=1.0e5, damping=1.0e4, max_force=1.0e4)
 
     belt = Conveyor.build(
-        BELT, length=BELT_LENGTH, width=BELT_WIDTH,
+        BELT,
+        length=BELT_LENGTH,
+        width=BELT_WIDTH,
         position=[BELT_END - BELT_LENGTH / 2.0, OFFSET_Y, BELT_DECK],
-        direction=(1, 0, 0), speed=SPEED,
-        gate=False,                      # discharge; the stop is on the plate
+        direction=(1, 0, 0),
+        speed=SPEED,
+        gate=False,  # discharge; the stop is on the plate
         scene=scene,
     )
-    cartons = belt.load(boxes, box=(BOX, BOX, BOX), mass=BOX_MASS,
-                        spacing=0.30, start_offset=0.20)
+    cartons = belt.load(boxes, box=(BOX, BOX, BOX), mass=BOX_MASS, spacing=0.30, start_offset=0.20)
 
     # Upstream of the discharge by a carton and a half, so a released carton
     # is clear of the blade before it comes back up behind the next one.
     blade = Escapement.build(
-        BLADE, at_x=BELT_END - BOX * 1.5, centre_y=OFFSET_Y,
-        deck_z=BELT_DECK, width=BELT_WIDTH + 0.04, scene=scene,
+        BLADE,
+        at_x=BELT_END - BOX * 1.5,
+        centre_y=OFFSET_Y,
+        deck_z=BELT_DECK,
+        width=BELT_WIDTH + 0.04,
+        scene=scene,
     )
 
     plate = DeadPlate.build(
-        PLATE, deck_z=PLATE_DECK, stop_x=PLATE_STOP,
+        PLATE,
+        deck_z=PLATE_DECK,
+        stop_x=PLATE_STOP,
         # Guides close to the carton, not to the belt. At 0.42 wide there was
         # 135 mm of slack either side of a 150 mm carton, and on a plate slick
         # enough to reach the stop the cup's own descent skated it 103 mm
         # sideways - the seal then failed and the failure named the gripper.
         # Low friction and loose guides are the same mistake twice.
-        length=PLATE_STOP - BELT_END, width=BOX + 0.05,
-        centre_y=OFFSET_Y, guide_height=0.10,
-        friction=PLATE_FRICTION, tilt_deg=PLATE_TILT_DEG, scene=scene,
+        length=PLATE_STOP - BELT_END,
+        width=BOX + 0.05,
+        centre_y=OFFSET_Y,
+        guide_height=0.10,
+        friction=PLATE_FRICTION,
+        tilt_deg=PLATE_TILT_DEG,
+        scene=scene,
     )
     plate.set_box_size((BOX, BOX, BOX)).track(cartons)
 
-    spawn_prop("pallet", prim_path=PALLET,
-               position=[0.0, PALLET_Y, 0.0], scene=scene)
-    slots = pallet_slots(origin=[0.0, PALLET_Y, 0.1425], box=(BOX, BOX, BOX),
-                         rows=2, cols=2, layers=1, gap=0.01)
+    spawn_prop("pallet", prim_path=PALLET, position=[0.0, PALLET_Y, 0.0], scene=scene)
+    slots = pallet_slots(origin=[0.0, PALLET_Y, 0.1425], box=(BOX, BOX, BOX), rows=2, cols=2, layers=1, gap=0.01)
 
     arm.attach_suction_gripper(
-        approach_axis="Z", max_grip_distance=0.10,
-        cup_radius=0.045, cup_length=0.04,
-        coaxial_force_limit=1.0e6, shear_force_limit=1.0e6, retry_interval=0.1,
+        approach_axis="Z",
+        max_grip_distance=0.10,
+        cup_radius=0.045,
+        cup_length=0.04,
+        coaxial_force_limit=1.0e6,
+        shear_force_limit=1.0e6,
+        retry_interval=0.1,
     )
     described_belt = belt.describe()
     described_plate = plate.describe()
@@ -252,11 +267,15 @@ def build(scene: Scene | None = None, *, boxes: int = 4) -> dict:
     blade.hold()
 
     return {
-        "arm": arm, "cup": cup, "belt": belt, "plate": plate,
-        "blade": blade, "slots": slots,
-        "gains": gains, "box_size": BOX,
-        "described": {"belt": described_belt, "plate": described_plate,
-                      "blade": described_blade},
+        "arm": arm,
+        "cup": cup,
+        "belt": belt,
+        "plate": plate,
+        "blade": blade,
+        "slots": slots,
+        "gains": gains,
+        "box_size": BOX,
+        "described": {"belt": described_belt, "plate": described_plate, "blade": described_blade},
     }
 
 
@@ -313,9 +332,12 @@ def pick_from_plate(cell: dict) -> dict:
 
     sealed = False
     for attempt in range(10):
-        arm.pose_to([float(here[0]), float(here[1]),
-                     top + cup.tip_offset + STANDOFF - attempt * 0.002],
-                    DOWN, corrections=8, raise_on_fail=False)
+        arm.pose_to(
+            [float(here[0]), float(here[1]), top + cup.tip_offset + STANDOFF - attempt * 0.002],
+            DOWN,
+            corrections=8,
+            raise_on_fail=False,
+        )
         arm.scene.settle(0.6)
         cup.close(settle_steps=0)
         for _ in range(8):
@@ -329,11 +351,9 @@ def pick_from_plate(cell: dict) -> dict:
         arm.scene.settle(0.2)
 
     if not sealed:
-        return {"picked": False,
-                "reason": f"cup did not seal after 10 descents (status {cup.status})"}
+        return {"picked": False, "reason": f"cup did not seal after 10 descents (status {cup.status})"}
 
-    arm.pose_to([float(here[0]), float(here[1]), top + cup.tip_offset + 0.30],
-                DOWN, corrections=8, raise_on_fail=False)
+    arm.pose_to([float(here[0]), float(here[1]), top + cup.tip_offset + 0.30], DOWN, corrections=8, raise_on_fail=False)
     arm.scene.settle(1.2)
 
     end = np.asarray(carton.position, dtype=float)
@@ -366,26 +386,27 @@ def palletise(cell: dict, *, count: int | None = None) -> dict:
             blade.hold()
         carton = wait_at_stop(plate)
         if carton is None:
-            cycles.append({"slot": index, "ok": False,
-                           "reason": "no carton reached the stop"})
+            cycles.append({"slot": index, "ok": False, "reason": "no carton reached the stop"})
             break
 
         picked = pick_from_plate(cell)
         if not picked.get("picked"):
-            cycles.append({"slot": index, "ok": False,
-                           "reason": picked.get("reason", "pick failed")})
+            cycles.append({"slot": index, "ok": False, "reason": picked.get("reason", "pick failed")})
             break
 
         result = place_on_slot(cell, slots[index], box=carton)
         finished = float(SimulationManager.get_simulation_time())
         ok = bool(result.get("placed"))
         placed += int(ok)
-        cycles.append({
-            "slot": index, "ok": ok,
-            "seconds": round(finished - started, 2),
-            "error": result.get("error"),
-            "reason": result.get("reason"),
-        })
+        cycles.append(
+            {
+                "slot": index,
+                "ok": ok,
+                "seconds": round(finished - started, 2),
+                "error": result.get("error"),
+                "reason": result.get("reason"),
+            }
+        )
         if not ok:
             break
 

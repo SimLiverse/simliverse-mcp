@@ -6,6 +6,7 @@ matter because every failure in this area is silent: a crossing that misses
 the belt puts a panel across it, and a panel across a conveyor is edge-on from
 the camera angle anyone would take and stops every carton.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -81,17 +82,18 @@ def _fence(scene, *, margin=MARGIN, belt=None):
         "/World/Fence",
         centre=((west + east) / 2.0, (south + north) / 2.0),
         size=(east - west, north - south),
-        gate="south", gate_width=1.0,
-        crossings=([{"side": "east", "centre": belt_y,
-                     "width": belt["width"] + 0.30}] if reaches else []),
-        scene=scene)
+        gate="south",
+        gate_width=1.0,
+        crossings=([{"side": "east", "centre": belt_y, "width": belt["width"] + 0.30}] if reaches else []),
+        scene=scene,
+    )
 
 
 def test_the_conveyor_leaves_through_a_gap_not_a_panel() -> None:
     """The expensive failure: a panel across the belt, invisible from front."""
     scene = _FakeScene()
     belt = dict(BELT, centre=[0.9, -0.4, 0.45], length=3.0)
-    fence = _fence(scene, belt=belt)
+    _fence(scene, belt=belt)
 
     belt_y = belt["centre"][1]
     half = belt["width"] / 2.0
@@ -100,8 +102,10 @@ def test_the_conveyor_leaves_through_a_gap_not_a_panel() -> None:
             continue
         low = panel.position[1] - panel.scale[1]
         high = panel.position[1] + panel.scale[1]
-        assert high <= belt_y - half or low >= belt_y + half, (
-            "%s stands in the belt's path at y=%.2f" % (panel.prim_path, belt_y))
+        assert high <= belt_y - half or low >= belt_y + half, "%s stands in the belt's path at y=%.2f" % (
+            panel.prim_path,
+            belt_y,
+        )
 
 
 def test_a_belt_that_reaches_the_line_gets_a_slot_wider_than_itself() -> None:
@@ -126,8 +130,7 @@ def test_a_belt_that_stops_short_gets_no_slot_at_all() -> None:
     scene = _FakeScene()
     fence = _fence(scene)
 
-    assert fence.openings["east"] == [], (
-        "the belt ends inside the guarding, so nothing should be cut for it")
+    assert fence.openings["east"] == [], "the belt ends inside the guarding, so nothing should be cut for it"
 
 
 def test_the_arm_and_the_pallet_are_both_inside_the_guarding() -> None:
@@ -155,8 +158,7 @@ def test_the_arm_does_not_reach_the_fence() -> None:
     verdict = fence.fits((0.0, 0.0), reach=REACH)
 
     assert verdict["inside"]
-    assert not verdict["touches_fence"], (
-        "the arm reaches the guarding with %.2f m to spare" % verdict["clearance"])
+    assert not verdict["touches_fence"], "the arm reaches the guarding with %.2f m to spare" % verdict["clearance"]
 
 
 @pytest.mark.parametrize("margin", [0.05, 0.2, 0.55, 1.0, 2.0])
@@ -173,9 +175,10 @@ def test_the_guarding_clears_the_envelope_at_any_margin(margin) -> None:
     verdict = fence.fits((0.0, 0.0), reach=REACH)
 
     assert verdict["inside"]
-    assert not verdict["touches_fence"], (
-        "at margin %.2f the arm reaches guarding %.2f m away"
-        % (margin, verdict["clearance"]))
+    assert not verdict["touches_fence"], "at margin %.2f the arm reaches guarding %.2f m away" % (
+        margin,
+        verdict["clearance"],
+    )
     assert verdict["clearance"] >= REACH + margin - 1e-6
 
 
@@ -221,7 +224,6 @@ def test_a_short_belt_ends_inside_the_guarding() -> None:
 
 def test_the_operator_stands_outside_the_guarding() -> None:
     """The safety invariant. A person inside the line is not a runnable cell."""
-    from simliverse_sim.guarding import SafetyFence as _F
 
     scene = _FakeScene()
     fence = _fence(scene)
@@ -251,8 +253,7 @@ def test_the_pedestal_puts_the_arm_base_on_top_of_it() -> None:
     from simliverse_sim.guarding import spawn_pedestal
 
     scene = _FakeScene()
-    plinth = spawn_pedestal("/World/Pedestal", position=(0.0, 0.0, 0.0),
-                            height=0.35, scene=scene)
+    plinth = spawn_pedestal("/World/Pedestal", position=(0.0, 0.0, 0.0), height=0.35, scene=scene)
 
     assert plinth["top"] == pytest.approx(0.35)
     low, high = scene.spawned[-1].bounds()

@@ -210,30 +210,42 @@ class SocketServer:
                 self._schedule(execute)
             except Exception as exc:
                 traceback.print_exc()
-                self._reply(client, {
-                    "status": "error",
-                    "message": f"Could not schedule the command on Isaac's main loop: {exc}",
-                })
+                self._reply(
+                    client,
+                    {
+                        "status": "error",
+                        "message": f"Could not schedule the command on Isaac's main loop: {exc}",
+                    },
+                )
                 return
 
             if not done.wait(self.command_timeout):
-                self._reply(client, {
-                    "status": "error",
-                    "message": (
-                        f"Command {command.get('type', '?')!r} was scheduled on Isaac's "
-                        f"main loop and did not finish within {self.command_timeout:.0f}s. "
-                        f"Either it is genuinely long-running, or its task was destroyed "
-                        f"by a collision with Kit's own update coroutines — check the Kit "
-                        f"log for 'Cannot enter into task'. The simulator may still be "
-                        f"executing it; do not assume the scene is unchanged."
-                    ),
-                })
+                self._reply(
+                    client,
+                    {
+                        "status": "error",
+                        "message": (
+                            f"Command {command.get('type', '?')!r} was scheduled on Isaac's "
+                            f"main loop and did not finish within {self.command_timeout:.0f}s. "
+                            f"Either it is genuinely long-running, or its task was destroyed "
+                            f"by a collision with Kit's own update coroutines — check the Kit "
+                            f"log for 'Cannot enter into task'. The simulator may still be "
+                            f"executing it; do not assume the scene is unchanged."
+                        ),
+                    },
+                )
                 return
 
-        self._reply(client, outcome.get("response", {
-            "status": "error",
-            "message": "The command completed without producing a response.",
-        }))
+        self._reply(
+            client,
+            outcome.get(
+                "response",
+                {
+                    "status": "error",
+                    "message": "The command completed without producing a response.",
+                },
+            ),
+        )
 
     @staticmethod
     def _capture_loop() -> Any:

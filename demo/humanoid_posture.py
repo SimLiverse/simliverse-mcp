@@ -11,7 +11,7 @@ NAMES = ["WARMUP", "INIT", "STAND", "POSE", "HOLD", "DONE", "FAILED"]
 TRACE_PATH = "/tmp/ctl_trace.log"
 
 SHOULDER = "left_shoulder_pitch_joint"
-RAISED = -1.2          # radians
+RAISED = -1.2  # radians
 WARMUP_FRAMES = 40
 STAND_FRAMES = 150
 POSE_FRAMES = 150
@@ -31,8 +31,7 @@ def _trace(line):
 def _go(state):
     global _state, _frame
     try:
-        note = "h=%.3f upright=%s tilt=%.2f" % (
-            _bot.base_height(), _bot.is_upright(), _bot.tilt_degrees())
+        note = "h=%.3f upright=%s tilt=%.2f" % (_bot.base_height(), _bot.is_upright(), _bot.tilt_degrees())
     except Exception:
         note = "-"
     _trace("%-7s -> %-7s frames=%4d %s" % (NAMES[_state], NAMES[state], _frame, note))
@@ -88,8 +87,7 @@ def _compute(db=None):
         from simliverse_sim import Robot, Scene
 
         _bot = Robot.attach("/World/Human", scene=Scene.get())
-        _trace("init: %s dof=%d drives_bad=%d"
-               % (type(_bot).__name__, _bot.dof, len(_bot.drive_health())))
+        _trace("init: %s dof=%d drives_bad=%d" % (type(_bot).__name__, _bot.dof, len(_bot.drive_health())))
         _go(STAND)
         return True
 
@@ -122,8 +120,10 @@ def _compute(db=None):
         if _frame >= HOLD_FRAMES:
             index = _bot.joint_names.index(SHOULDER)
             reached = float(np.asarray(_bot.joint_positions, dtype=float)[index])
-            _trace("  held: shoulder at %.3f rad (target %.3f), upright=%s tilt=%.2f"
-                   % (reached, RAISED, _bot.is_upright(), _bot.tilt_degrees()))
+            _trace(
+                "  held: shoulder at %.3f rad (target %.3f), upright=%s tilt=%.2f"
+                % (reached, RAISED, _bot.is_upright(), _bot.tilt_degrees())
+            )
             _go(DONE)
         return True
 

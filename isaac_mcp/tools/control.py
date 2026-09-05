@@ -187,9 +187,7 @@ def register_tools(mcp: FastMCP, get_connection: "Callable[[], IsaacConnection]"
         result = conn.send_command("control.capture_view", params)
         encoded = result.get("image_base64")
         if not encoded:
-            raise RuntimeError(
-                f"Render returned no image data: {result.get('message', 'unknown error')}"
-            )
+            raise RuntimeError(f"Render returned no image data: {result.get('message', 'unknown error')}")
         return Image(data=base64.b64decode(encoded), format=result.get("format", "png"))
 
     @mcp.tool("observe")

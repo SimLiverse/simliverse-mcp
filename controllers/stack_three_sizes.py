@@ -24,32 +24,63 @@ import carb
 import numpy as np
 
 ARM = "/World/Arm"
-BASE = "/World/CubeLarge"          # stays put; the tower is built on it
+BASE = "/World/CubeLarge"  # stays put; the tower is built on it
 JOBS = [("/World/CubeMedium", 0.070), ("/World/CubeSmall", 0.105)]
 
 DOWN = [0.0, 1.0, 0.0, 0.0]
 HOME = [0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785, 0.04, 0.04]
 
 STACK_X, STACK_Y = 0.45, -0.20
-CARRY_Z = 0.36                     # clear of the finished tower
+CARRY_Z = 0.36  # clear of the finished tower
 APPROACH = 0.13
 GRASP_LIFT = 0.004
-COARSE = 0.06                      # first stage of the descent onto the tower
-FINAL = 0.003                      # set down, do not drop
+COARSE = 0.06  # first stage of the descent onto the tower
+FINAL = 0.003  # set down, do not drop
 
 HOME_FRAMES = 90
 GRIP_FRAMES = 45
 RELEASE_FRAMES = 45
 SETTLE_FRAMES = 40
 WARMUP_FRAMES = 30
-LIMIT = 1400                       # per state; a servo move is ~100-300 ticks
+LIMIT = 1400  # per state; a servo move is ~100-300 ticks
 
-(WARMUP, INIT, HOME_ARM, OVER_PICK, DOWN_PICK, GRIP, LIFT, TRAVERSE,
- OVER_STACK, PLACE, RELEASE, RETREAT, NEXT, CHECK, DONE, FAILED) = range(16)
+(
+    WARMUP,
+    INIT,
+    HOME_ARM,
+    OVER_PICK,
+    DOWN_PICK,
+    GRIP,
+    LIFT,
+    TRAVERSE,
+    OVER_STACK,
+    PLACE,
+    RELEASE,
+    RETREAT,
+    NEXT,
+    CHECK,
+    DONE,
+    FAILED,
+) = range(16)
 
-NAMES = ["WARMUP", "INIT", "HOME_ARM", "OVER_PICK", "DOWN_PICK", "GRIP", "LIFT",
-         "TRAVERSE", "OVER_STACK", "PLACE", "RELEASE", "RETREAT", "NEXT",
-         "CHECK", "DONE", "FAILED"]
+NAMES = [
+    "WARMUP",
+    "INIT",
+    "HOME_ARM",
+    "OVER_PICK",
+    "DOWN_PICK",
+    "GRIP",
+    "LIFT",
+    "TRAVERSE",
+    "OVER_STACK",
+    "PLACE",
+    "RELEASE",
+    "RETREAT",
+    "NEXT",
+    "CHECK",
+    "DONE",
+    "FAILED",
+]
 
 _state = WARMUP
 _frame = 0
@@ -206,11 +237,12 @@ def compute(db=None):
         if _frame < SETTLE_FRAMES:
             return True
         heights = [float(c.position[2]) for c in _cubes]
-        spread = [float(np.hypot(c.position[0] - STACK_X, c.position[1] - STACK_Y))
-                  for c in _cubes]
+        spread = [float(np.hypot(c.position[0] - STACK_X, c.position[1] - STACK_Y)) for c in _cubes]
         wanted = [z for _, z in JOBS]
-        carb.log_warn("[stack3] heights=%s wanted=%s spread=%s"
-                      % (np.round(heights, 4).tolist(), wanted, np.round(spread, 4).tolist()))
+        carb.log_warn(
+            "[stack3] heights=%s wanted=%s spread=%s"
+            % (np.round(heights, 4).tolist(), wanted, np.round(spread, 4).tolist())
+        )
 
         for i, (path, want) in enumerate(JOBS):
             if abs(heights[i] - want) > 0.015:

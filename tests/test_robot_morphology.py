@@ -35,49 +35,96 @@ import pytest
 from simliverse_sim.robots.base import JointGroups, Morphology, classify_morphology
 
 FRANKA = [
-    "panda_joint1", "panda_joint2", "panda_joint3", "panda_joint4",
-    "panda_joint5", "panda_joint6", "panda_joint7",
-    "panda_finger_joint1", "panda_finger_joint2",
+    "panda_joint1",
+    "panda_joint2",
+    "panda_joint3",
+    "panda_joint4",
+    "panda_joint5",
+    "panda_joint6",
+    "panda_joint7",
+    "panda_finger_joint1",
+    "panda_finger_joint2",
 ]
 
 UR10 = [
-    "shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint",
-    "wrist_1_joint", "wrist_2_joint", "wrist_3_joint",
+    "shoulder_pan_joint",
+    "shoulder_lift_joint",
+    "elbow_joint",
+    "wrist_1_joint",
+    "wrist_2_joint",
+    "wrist_3_joint",
 ]
 
 CARTER = ["left_wheel", "right_wheel", "rear_pivot", "rear_axle"]
 
 ANYMAL_C = [
-    "LF_HAA", "LF_HFE", "LF_KFE", "RF_HAA", "RF_HFE", "RF_KFE",
-    "LH_HAA", "LH_HFE", "LH_KFE", "RH_HAA", "RH_HFE", "RH_KFE",
+    "LF_HAA",
+    "LF_HFE",
+    "LF_KFE",
+    "RF_HAA",
+    "RF_HFE",
+    "RF_KFE",
+    "LH_HAA",
+    "LH_HFE",
+    "LH_KFE",
+    "RH_HAA",
+    "RH_HFE",
+    "RH_KFE",
 ]
 
 UNITREE_H1 = [
-    "left_hip_yaw_joint", "left_hip_roll_joint", "left_hip_pitch_joint",
-    "left_knee_joint", "left_ankle_joint",
-    "right_hip_yaw_joint", "right_hip_roll_joint", "right_hip_pitch_joint",
-    "right_knee_joint", "right_ankle_joint",
+    "left_hip_yaw_joint",
+    "left_hip_roll_joint",
+    "left_hip_pitch_joint",
+    "left_knee_joint",
+    "left_ankle_joint",
+    "right_hip_yaw_joint",
+    "right_hip_roll_joint",
+    "right_hip_pitch_joint",
+    "right_knee_joint",
+    "right_ankle_joint",
     "torso_joint",
-    "left_shoulder_pitch_joint", "left_shoulder_roll_joint",
-    "left_shoulder_yaw_joint", "left_elbow_joint",
-    "right_shoulder_pitch_joint", "right_shoulder_roll_joint",
-    "right_shoulder_yaw_joint", "right_elbow_joint",
+    "left_shoulder_pitch_joint",
+    "left_shoulder_roll_joint",
+    "left_shoulder_yaw_joint",
+    "left_elbow_joint",
+    "right_shoulder_pitch_joint",
+    "right_shoulder_roll_joint",
+    "right_shoulder_yaw_joint",
+    "right_elbow_joint",
 ]
 
 ALLEGRO_HAND = [
-    "index_joint_0", "index_joint_1", "index_joint_2", "index_joint_3",
-    "middle_joint_0", "middle_joint_1", "middle_joint_2", "middle_joint_3",
-    "ring_joint_0", "ring_joint_1", "ring_joint_2", "ring_joint_3",
-    "thumb_joint_0", "thumb_joint_1", "thumb_joint_2", "thumb_joint_3",
+    "index_joint_0",
+    "index_joint_1",
+    "index_joint_2",
+    "index_joint_3",
+    "middle_joint_0",
+    "middle_joint_1",
+    "middle_joint_2",
+    "middle_joint_3",
+    "ring_joint_0",
+    "ring_joint_1",
+    "ring_joint_2",
+    "ring_joint_3",
+    "thumb_joint_0",
+    "thumb_joint_1",
+    "thumb_joint_2",
+    "thumb_joint_3",
 ]
 
 QUADCOPTER = ["rotor0_joint", "rotor1_joint", "rotor2_joint", "rotor3_joint"]
 
 MOBILE_MANIPULATOR = [
-    "left_wheel_joint", "right_wheel_joint",
-    "arm_shoulder_pan", "arm_shoulder_lift", "arm_elbow",
-    "arm_wrist_1", "arm_wrist_2",
-    "gripper_finger_left", "gripper_finger_right",
+    "left_wheel_joint",
+    "right_wheel_joint",
+    "arm_shoulder_pan",
+    "arm_shoulder_lift",
+    "arm_elbow",
+    "arm_wrist_1",
+    "arm_wrist_2",
+    "gripper_finger_left",
+    "gripper_finger_right",
 ]
 
 
@@ -128,7 +175,7 @@ def test_wheel_and_steering_split():
 
 
 def test_steering_joints_are_not_mistaken_for_fingers():
-    """"steering" contains "ring", which is also a finger name."""
+    """ "steering" contains "ring", which is also a finger name."""
     joints = ["front_steering_joint", "rear_steering_joint", "left_wheel", "right_wheel"]
     groups = JointGroups.classify(joints)
 

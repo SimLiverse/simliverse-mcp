@@ -10,6 +10,7 @@ where the arm hits it.
 None of those raise. All of them are arithmetic, and all of them are cheaper
 to find here than in a render.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -101,12 +102,11 @@ def test_every_panel_stands_on_the_perimeter(scene) -> None:
         if "Post" in panel.prim_path:
             continue
         gap = fence.clearance(panel.position[:2])
-        assert abs(gap) < 1e-6, (
-            "%s sits %.3f m from the fence line" % (panel.prim_path, gap))
+        assert abs(gap) < 1e-6, "%s sits %.3f m from the fence line" % (panel.prim_path, gap)
 
 
 def test_panels_clear_the_floor_and_stand_full_height(scene) -> None:
-    fence = SafetyFence.build(size=(4.0, 4.0), height=2.4, scene=scene)
+    SafetyFence.build(size=(4.0, 4.0), height=2.4, scene=scene)
     panel = next(p for p in scene.spawned if "Post" not in p.prim_path)
     low, high = panel.bounds()
     assert low[2] == pytest.approx(G.PANEL_GROUND_GAP)
@@ -117,16 +117,13 @@ def test_panels_clear_the_floor_and_stand_full_height(scene) -> None:
 
 
 def test_a_gate_leaves_a_real_gap_in_the_line(scene) -> None:
-    fence = SafetyFence.build(size=(4.0, 4.0), gate="south",
-                              gate_width=1.2, scene=scene)
+    SafetyFence.build(size=(4.0, 4.0), gate="south", gate_width=1.2, scene=scene)
 
-    south = [p for p in scene.spawned
-             if "South" in p.prim_path and "Post" not in p.prim_path]
+    south = [p for p in scene.spawned if "South" in p.prim_path and "Post" not in p.prim_path]
     assert south, "the south side still needs panels either side of the gate"
     for panel in south:
         low, high = panel.bounds()
-        assert high[0] <= -0.6 + 1e-6 or low[0] >= 0.6 - 1e-6, (
-            "%s crosses the gateway" % panel.prim_path)
+        assert high[0] <= -0.6 + 1e-6 or low[0] >= 0.6 - 1e-6, "%s crosses the gateway" % panel.prim_path
 
 
 def test_no_gate_means_a_closed_perimeter(scene) -> None:
@@ -142,23 +139,27 @@ def test_a_conveyor_crossing_is_left_open(scene) -> None:
     stopped delivering for no visible reason.
     """
     fence = SafetyFence.build(
-        size=(4.0, 4.0), gate="south",
-        crossings=[{"side": "east", "centre": -0.4, "width": 0.6}],
-        scene=scene)
+        size=(4.0, 4.0), gate="south", crossings=[{"side": "east", "centre": -0.4, "width": 0.6}], scene=scene
+    )
 
     assert len(fence.openings["east"]) == 1
     assert list(fence.openings["east"][0]) == pytest.approx([-0.7, -0.1])
     for panel in scene.by_prefix("East"):
         low, high = panel.bounds()
         assert high[1] <= -0.7 + 1e-6 or low[1] >= -0.1 - 1e-6, (
-            "%s is authored across the conveyor slot" % panel.prim_path)
+            "%s is authored across the conveyor slot" % panel.prim_path
+        )
 
 
 def test_a_crossing_and_a_gate_on_the_same_side_both_survive(scene) -> None:
     fence = SafetyFence.build(
-        size=(6.0, 4.0), gate="south", gate_width=1.0, gate_offset=-2.0,
+        size=(6.0, 4.0),
+        gate="south",
+        gate_width=1.0,
+        gate_offset=-2.0,
         crossings=[{"side": "south", "centre": 2.0, "width": 0.8}],
-        scene=scene)
+        scene=scene,
+    )
 
     got = sorted(fence.openings["south"])
     flat = [v for pair in got for v in pair]
@@ -171,10 +172,8 @@ def test_a_crossing_and_a_gate_on_the_same_side_both_survive(scene) -> None:
 
 def test_posts_stand_at_both_edges_of_every_opening(scene) -> None:
     """Guarding ends at a post. An opening with no post is a torn panel."""
-    fence = SafetyFence.build(size=(4.0, 4.0), gate="south", gate_width=1.0,
-                              scene=scene)
-    posts = {tuple(np.round(p.position[:2], 4))
-             for p in scene.by_prefix("Post")}
+    SafetyFence.build(size=(4.0, 4.0), gate="south", gate_width=1.0, scene=scene)
+    posts = {tuple(np.round(p.position[:2], 4)) for p in scene.by_prefix("Post")}
     assert (-0.5, -2.0) in posts
     assert (0.5, -2.0) in posts
     for corner in ((-2.0, -2.0), (2.0, -2.0), (2.0, 2.0), (-2.0, 2.0)):
@@ -187,8 +186,7 @@ def test_posts_stand_at_both_edges_of_every_opening(scene) -> None:
 def test_a_gate_running_off_the_end_is_refused(scene) -> None:
     """It would leave a corner unguarded rather than a doorway."""
     with pytest.raises(GuardingError, match="off the south side"):
-        SafetyFence.build(size=(4.0, 4.0), gate="south", gate_width=1.0,
-                          gate_offset=1.8, scene=scene)
+        SafetyFence.build(size=(4.0, 4.0), gate="south", gate_width=1.0, gate_offset=1.8, scene=scene)
 
 
 def test_a_gate_too_narrow_to_walk_through_is_refused(scene) -> None:
@@ -200,10 +198,7 @@ def test_an_unknown_side_is_refused(scene) -> None:
     with pytest.raises(GuardingError, match="expected one of"):
         SafetyFence.build(size=(4.0, 4.0), gate="starboard", scene=scene)
     with pytest.raises(GuardingError, match="expected one of"):
-        SafetyFence.build(
-            size=(4.0, 4.0),
-            crossings=[{"side": "up", "centre": 0.0, "width": 0.5}],
-            scene=scene)
+        SafetyFence.build(size=(4.0, 4.0), crossings=[{"side": "up", "centre": 0.0, "width": 0.5}], scene=scene)
 
 
 @pytest.mark.parametrize("size", [(0.0, 4.0), (-1.0, 4.0), (4.0, 0.0)])
@@ -214,10 +209,7 @@ def test_a_fence_with_no_area_is_refused(scene, size) -> None:
 
 def test_a_crossing_with_no_width_is_refused(scene) -> None:
     with pytest.raises(GuardingError, match="positive width"):
-        SafetyFence.build(
-            size=(4.0, 4.0),
-            crossings=[{"side": "east", "centre": 0.0, "width": 0.0}],
-            scene=scene)
+        SafetyFence.build(size=(4.0, 4.0), crossings=[{"side": "east", "centre": 0.0, "width": 0.0}], scene=scene)
 
 
 # ── Does the cell actually fit inside it ─────────────────────────────────────
@@ -268,24 +260,20 @@ def test_a_margin_larger_than_the_cell_contains_nothing(scene) -> None:
 @pytest.mark.parametrize("side_length", [1.0, 2.0, 3.5, 6.0, 12.0])
 def test_long_runs_are_split_into_panels(scene, side_length) -> None:
     """Guarding is bought in widths; a 12 m slab does not read as a fence."""
-    SafetyFence.build(size=(side_length, side_length), gate=None,
-                      panel_max=1.5, scene=scene)
+    SafetyFence.build(size=(side_length, side_length), gate=None, panel_max=1.5, scene=scene)
     for panel in scene.spawned:
         if "Post" in panel.prim_path:
             continue
         along = max(panel.scale[0], panel.scale[1]) * 2.0
-        assert along <= 1.5 + 1e-6, (
-            "%s is %.2f m wide" % (panel.prim_path, along))
+        assert along <= 1.5 + 1e-6, "%s is %.2f m wide" % (panel.prim_path, along)
 
 
 def test_panels_tile_a_run_without_leaving_a_gap(scene) -> None:
     """A gap between panels is a hole in the guarding that nothing reports."""
     SafetyFence.build(size=(5.0, 4.0), gate=None, panel_max=1.5, scene=scene)
 
-    north = sorted((p for p in scene.by_prefix("North")),
-                   key=lambda p: p.position[0])
-    edges = [(p.position[0] - p.scale[0], p.position[0] + p.scale[0])
-             for p in north]
+    north = sorted((p for p in scene.by_prefix("North")), key=lambda p: p.position[0])
+    edges = [(p.position[0] - p.scale[0], p.position[0] + p.scale[0]) for p in north]
     assert edges[0][0] == pytest.approx(-2.5)
     assert edges[-1][1] == pytest.approx(2.5)
     for (_, end), (start, _) in zip(edges, edges[1:]):
@@ -297,9 +285,13 @@ def test_panels_tile_a_run_without_leaving_a_gap(scene) -> None:
 
 def test_describe_round_trips_the_layout(scene) -> None:
     fence = SafetyFence.build(
-        size=(6.0, 4.0), centre=(1.0, 0.0), height=2.2, gate="west",
+        size=(6.0, 4.0),
+        centre=(1.0, 0.0),
+        height=2.2,
+        gate="west",
         crossings=[{"side": "east", "centre": 0.0, "width": 0.5}],
-        scene=scene)
+        scene=scene,
+    )
     described = fence.describe()
 
     assert described["size"] == [6.0, 4.0]
@@ -315,8 +307,7 @@ def test_describe_round_trips_the_layout(scene) -> None:
 
 def test_a_cabinet_stands_on_the_floor_rather_than_half_in_it(scene) -> None:
     """The commonest way this furniture gets placed wrong."""
-    G.spawn_cabinet(position=(2.0, 1.0, 0.0), size=(0.6, 0.5, 1.2),
-                    scene=scene)
+    G.spawn_cabinet(position=(2.0, 1.0, 0.0), size=(0.6, 0.5, 1.2), scene=scene)
     low, high = scene.spawned[-1].bounds()
 
     assert low[2] == pytest.approx(0.0)
@@ -331,8 +322,7 @@ def test_a_beacon_stands_on_the_floor(scene) -> None:
 
 def test_an_operator_platform_sits_on_the_floor_not_in_it(scene) -> None:
     """A platform sunk into the floor renders as a stain."""
-    G.spawn_operator_platform(position=(0.0, -3.0, 0.0), thickness=0.06,
-                              scene=scene)
+    G.spawn_operator_platform(position=(0.0, -3.0, 0.0), thickness=0.06, scene=scene)
     low, high = scene.spawned[-1].bounds()
 
     assert low[2] == pytest.approx(0.0)
@@ -366,13 +356,11 @@ def test_the_pedestal_reports_where_the_base_actually_goes(scene, height) -> Non
     An arm spawned anywhere but here intersects the plinth it is supposedly
     bolted to, and the render shows a robot growing out of a crate.
     """
-    made = G.spawn_pedestal(position=(0.3, -0.2, 0.0), height=height,
-                            scene=scene)
+    made = G.spawn_pedestal(position=(0.3, -0.2, 0.0), height=height, scene=scene)
     _, high = scene.spawned[-1].bounds()
 
     assert made["top"] == pytest.approx(height)
-    assert made["top"] == pytest.approx(high[2]), (
-        "the reported base height is not the top of the plinth")
+    assert made["top"] == pytest.approx(high[2]), "the reported base height is not the top of the plinth"
 
 
 def test_a_pedestal_on_a_raised_floor_still_reports_its_own_top(scene) -> None:
@@ -413,8 +401,7 @@ def test_the_indexed_people_are_person_sized() -> None:
     assert people, "no people in the index"
     for entry in people:
         height = entry["extent"][2]
-        assert 1.5 <= height <= 2.1, (
-            "%s stands %.2f m" % (entry["key"], height))
+        assert 1.5 <= height <= 2.1, "%s stands %.2f m" % (entry["key"], height)
 
 
 def test_a_worker_can_be_found_by_the_words_anyone_would_use() -> None:
@@ -422,5 +409,4 @@ def test_a_worker_can_be_found_by_the_words_anyone_would_use() -> None:
 
     for query in ("worker", "operator", "person"):
         entry = find_prop(query)
-        assert entry["category"] == "people", (
-            "%r found %s instead of a person" % (query, entry["key"]))
+        assert entry["category"] == "people", "%r found %s instead of a person" % (query, entry["key"])

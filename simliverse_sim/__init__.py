@@ -54,6 +54,7 @@ Navigation example:
 See `simliverse-core/docs/adr/012-agent-hierarchy-rewrite.md` for the design.
 """
 
+from . import controller
 from ._compat import IsaacSimUnavailable, isaac_version
 from .assertions import (
     Check,
@@ -71,16 +72,9 @@ from .assertions import (
     verify_navigation,
     verify_throw,
 )
-from . import controller
 from .controller import ControllerError
 from .conveyor import Conveyor, ConveyorError, drive_surface
 from .deadplate import DeadPlate, DeadPlateError, Escapement
-from .sketch import (
-    SketchError,
-    fence_from_sketch,
-    parse_sketch,
-    zones_from_sketch,
-)
 from .guarding import (
     GuardingError,
     SafetyFence,
@@ -91,6 +85,14 @@ from .guarding import (
     spawn_pedestal,
 )
 from .objects import RigidObject
+from .palletizing import PalletError, pallet_slots, verify_pallet
+from .props import (
+    PropNotFound,
+    find_prop,
+    list_props,
+    spawn_prop,
+    verify_index,  # noqa: F401 -- re-exported
+)
 from .robots import (
     AerialRobot,
     DexterousHand,
@@ -112,16 +114,14 @@ from .robots import (
     list_robots,
     spawn_robot,
 )
-from .palletizing import PalletError, pallet_slots, verify_pallet
-from .vision import STANDARD_VIEWS, VisionUnavailable, capture, look, png, views
-from .props import (
-    PropNotFound,
-    find_prop,
-    list_props,
-    spawn_prop,
-    verify_index,
-)
 from .scene import PhysicsConfig, Scene
+from .sketch import (
+    SketchError,
+    fence_from_sketch,
+    parse_sketch,
+    zones_from_sketch,
+)
+from .vision import STANDARD_VIEWS, VisionUnavailable, capture, look, png, views
 
 __all__ = [
     "AerialRobot",

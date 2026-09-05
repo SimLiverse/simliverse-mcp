@@ -49,8 +49,11 @@ class _FakeBody:
 
     def set_velocity(self, linear=None, angular=None):
         self.velocity_writes.append(
-            (None if linear is None else np.asarray(linear, dtype=float),
-             None if angular is None else np.asarray(angular, dtype=float)))
+            (
+                None if linear is None else np.asarray(linear, dtype=float),
+                None if angular is None else np.asarray(angular, dtype=float),
+            )
+        )
 
 
 class _FakeScene:
@@ -214,8 +217,8 @@ def test_an_arrived_box_is_found_though_its_centre_is_half_a_box_short(belt) -> 
     zero rejected it, so the belt conveyed perfectly and the arm was never told
     a box had arrived. The expected gap has to come from the box size.
     """
-    belt.load(1, box=(0.30, 0.30, 0.30))          # sets box_size
-    far = 2.0                                      # length / 2
+    belt.load(1, box=(0.30, 0.30, 0.30))  # sets box_size
+    far = 2.0  # length / 2
     belt._boxes = [
         _FakeBody("/World/Box0", [far - 0.15, 0, 1.15], speed=0.0),
     ]
@@ -275,8 +278,13 @@ def test_a_belt_running_along_y_measures_arrival_along_y(monkeypatch) -> None:
     monkeypatch.setattr(C, "_body_of", lambda path: path)
     monkeypatch.setattr(C, "drive_surface", lambda *a, **k: {"enabled": True})
     belt = Conveyor(
-        "/World/Conveyor", direction=(0, 1, 0), speed=0.3, top_z=1.0,
-        length=4.0, width=0.9, scene=_FakeScene(),
+        "/World/Conveyor",
+        direction=(0, 1, 0),
+        speed=0.3,
+        top_z=1.0,
+        length=4.0,
+        width=0.9,
+        scene=_FakeScene(),
     )
     belt._origin = np.array([0.0, 0.0, 1.0])
     belt._boxes = [_FakeBody("/World/Box0", [0.0, 1.96, 1.05], speed=0.0)]
@@ -370,16 +378,15 @@ def test_starting_a_belt_wakes_the_cartons_asleep_on_it(belt) -> None:
     cartons sat at v=0.0 and the controller timed out waiting for one to
     arrive. Every observable said the belt was running.
     """
-    cartons = [_FakeBody("/World/Box%d" % i, (i * 0.2, 0.0, 1.075))
-               for i in range(3)]
+    cartons = [_FakeBody("/World/Box%d" % i, (i * 0.2, 0.0, 1.075)) for i in range(3)]
     belt.track(cartons)
 
     belt.start()
 
     for carton in cartons:
         assert carton.velocity_writes, (
-            "%s was never nudged, so PhysX will leave it asleep on a "
-            "running belt" % carton.prim_path)
+            "%s was never nudged, so PhysX will leave it asleep on a running belt" % carton.prim_path
+        )
         linear, _ = carton.velocity_writes[-1]
         assert linear[0] > 0.0, "the nudge must push along the belt"
         assert linear[1] == pytest.approx(0.0)
@@ -391,8 +398,13 @@ def test_the_wake_nudge_is_gentler_than_a_fast_belt(monkeypatch) -> None:
     monkeypatch.setattr(C, "_body_of", lambda path: path)
     monkeypatch.setattr(C, "drive_surface", lambda *a, **k: {"enabled": True})
     fast = Conveyor(
-        "/World/Fast", direction=(1, 0, 0), speed=2.0, top_z=1.0,
-        length=4.0, width=0.9, scene=_FakeScene(),
+        "/World/Fast",
+        direction=(1, 0, 0),
+        speed=2.0,
+        top_z=1.0,
+        length=4.0,
+        width=0.9,
+        scene=_FakeScene(),
     )
     carton = _FakeBody("/World/Box0", (0.0, 0.0, 1.075))
     fast.track([carton])
@@ -428,12 +440,14 @@ class _FakeSpawnProp:
         self.calls: list[dict] = []
 
     def __call__(self, prop, *, prim_path, position, orientation=None, scene=None):
-        self.calls.append({
-            "prop": prop, "prim_path": prim_path,
-            "position": np.asarray(position, dtype=float),
-            "orientation": (None if orientation is None
-                            else np.asarray(orientation, dtype=float)),
-        })
+        self.calls.append(
+            {
+                "prop": prop,
+                "prim_path": prim_path,
+                "position": np.asarray(position, dtype=float),
+                "orientation": (None if orientation is None else np.asarray(orientation, dtype=float)),
+            }
+        )
         return {"key": prop, "extent": [2.0, 1.15, 1.166]}
 
 
@@ -463,8 +477,7 @@ def test_dressing_is_rotated_to_the_belts_own_heading(dressable) -> None:
 
     assert fake.calls, "dress() made no spawn_prop calls"
     for call in fake.calls:
-        assert call["orientation"] is not None, (
-            "a dressing prop with no orientation always faces world +X")
+        assert call["orientation"] is not None, "a dressing prop with no orientation always faces world +X"
         assert call["orientation"][2] == pytest.approx(180.0)
 
 
@@ -474,12 +487,15 @@ def test_a_belt_along_plus_x_needs_no_rotation(dressable) -> None:
     assert fake.calls[0]["orientation"][2] == pytest.approx(0.0)
 
 
-@pytest.mark.parametrize("heading,yaw", [
-    ((1.0, 0.0, 0.0), 0.0),
-    ((-1.0, 0.0, 0.0), 180.0),
-    ((0.0, 1.0, 0.0), 90.0),
-    ((0.0, -1.0, 0.0), -90.0),
-])
+@pytest.mark.parametrize(
+    "heading,yaw",
+    [
+        ((1.0, 0.0, 0.0), 0.0),
+        ((-1.0, 0.0, 0.0), 180.0),
+        ((0.0, 1.0, 0.0), 90.0),
+        ((0.0, -1.0, 0.0), -90.0),
+    ],
+)
 def test_the_yaw_matches_the_belts_direction(dressable, heading, yaw) -> None:
     belt, fake = dressable
     belt.direction = np.asarray(heading, dtype=float)
@@ -498,8 +514,7 @@ def test_a_belt_longer_than_one_section_gets_more_than_one(dressable) -> None:
 
     assert result["sections"] == 4, "ceil(6.4 / 2.0) sections should be placed"
     assert len(fake.calls) == 4
-    assert len(set(c["prim_path"] for c in fake.calls)) == 4, (
-        "sections must not collide on the same prim path")
+    assert len(set(c["prim_path"] for c in fake.calls)) == 4, "sections must not collide on the same prim path"
 
 
 def test_a_belt_shorter_than_one_section_still_gets_one(dressable) -> None:
@@ -516,15 +531,14 @@ def test_tiled_sections_walk_the_belts_full_length(dressable) -> None:
     """Placed edge to edge along the belt, not stacked on top of each other."""
     belt, fake = dressable
     belt.length = 6.4
-    belt._origin = np.array([3.2, 0.0, 1.0])   # centre, belt spans 0.0..6.4
+    belt._origin = np.array([3.2, 0.0, 1.0])  # centre, belt spans 0.0..6.4
 
     belt.dress("conveyorbelt_a05", section_length=2.0)
 
     xs = sorted(c["position"][0] for c in fake.calls)
     assert xs[0] == pytest.approx(0.0, abs=1e-6)
     for a, b in zip(xs, xs[1:]):
-        assert b - a == pytest.approx(2.0), (
-            "sections must be spaced one section-length apart, not overlapping")
+        assert b - a == pytest.approx(2.0), "sections must be spaced one section-length apart, not overlapping"
 
 
 def test_the_slab_is_hidden_after_dressing(dressable) -> None:
@@ -572,14 +586,13 @@ def test_dressing_strips_the_physics_the_prop_shipped_with(monkeypatch, dressabl
     """
     belt, fake = dressable
     stripped = []
-    monkeypatch.setattr(C, "_strip_physics",
-                        lambda scene, path: stripped.append(path) or 1)
+    monkeypatch.setattr(C, "_strip_physics", lambda scene, path: stripped.append(path) or 1)
 
     belt.dress("conveyorbelt_a05")
 
     assert stripped == [c["prim_path"] for c in fake.calls], (
-        "every dressed section must have its physics stripped, in the "
-        "order it was spawned")
+        "every dressed section must have its physics stripped, in the order it was spawned"
+    )
 
 
 def test_a_width_mismatch_against_the_belt_is_reported(dressable) -> None:

@@ -49,8 +49,7 @@ class LeggedRobot(Robot):
         for index in self.leg_indices:
             name = names[index].upper()
             key = next(
-                (token for token in ("FL", "FR", "RL", "RR", "HL", "HR", "LF", "RF", "LH", "RH")
-                 if token in name),
+                (token for token in ("FL", "FR", "RL", "RR", "HL", "HR", "LF", "RF", "LH", "RH") if token in name),
                 "left" if "LEFT" in name else "right" if "RIGHT" in name else "unknown",
             )
             limbs.setdefault(key, []).append(index)
@@ -93,9 +92,7 @@ class LeggedRobot(Robot):
         """Angle between the base's up axis and world up."""
         w, x, y, z = self.base_orientation
         # Third column of the rotation matrix = the body's local +Z in world space.
-        up = np.array(
-            [2.0 * (x * z + w * y), 2.0 * (y * z - w * x), 1.0 - 2.0 * (x * x + y * y)]
-        )
+        up = np.array([2.0 * (x * z + w * y), 2.0 * (y * z - w * x), 1.0 - 2.0 * (x * x + y * y)])
         cosine = float(np.clip(np.dot(up, np.array([0.0, 0.0, 1.0])), -1.0, 1.0))
         return float(np.degrees(np.arccos(cosine)))
 

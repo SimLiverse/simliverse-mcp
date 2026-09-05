@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import numpy as np
+if TYPE_CHECKING:  # pragma: no cover -- annotations only; objects imports scene at runtime
+    from .objects import RigidObject
 
 from ._compat import (
     as_quat,
@@ -103,15 +104,13 @@ class Scene:
     def stage(self) -> Any:
         return get_stage()
 
-    def configure_physics(
-        self, config: PhysicsConfig | None = None, **overrides: Any
-    ) -> PhysicsConfig:
+    def configure_physics(self, config: PhysicsConfig | None = None, **overrides: Any) -> PhysicsConfig:
         """Apply gravity, timestep and solver settings, and create a ground plane.
 
         The MCP `set_physics_params` verb silently discards every one of these
         (ADR 012 §1.5) and returns success regardless. This actually applies them.
         """
-        from pxr import PhysxSchema, UsdGeom, UsdPhysics
+        from pxr import PhysxSchema, UsdPhysics
 
         # Accept `configure_physics(gravity=-9.81)` as well as a PhysicsConfig.
         # Requiring the wrapper type cost a turn every time: the keyword call is
@@ -217,7 +216,8 @@ class Scene:
         for path in extras:
             logger.warning(
                 "Removing duplicate physics scene at %s; PhysX cannot step two, "
-                "and a second one stalls the simulator without raising.", path,
+                "and a second one stalls the simulator without raising.",
+                path,
             )
             stage.RemovePrim(path)
             removed.append(path)
@@ -247,9 +247,7 @@ class Scene:
         world = stage.GetPrimAtPath("/World")
         if not world or not world.IsValid():
             return []
-        doomed = [child.GetPath().pathString
-                  for child in world.GetChildren()
-                  if child.GetName() not in keep_set]
+        doomed = [child.GetPath().pathString for child in world.GetChildren() if child.GetName() not in keep_set]
         for path in doomed:
             stage.RemovePrim(path)
         if doomed:
@@ -269,9 +267,7 @@ class Scene:
         return self.clear_world(keep)
 
     def ensure_ground_plane(self, path: str = "/World/GroundPlane", z: float = 0.0) -> str:
-        from pxr import UsdGeom, UsdPhysics
-
-        from pxr import Gf, Sdf, UsdShade
+        from pxr import Gf, Sdf, UsdGeom, UsdPhysics, UsdShade
 
         stage = self.stage
         prim = stage.GetPrimAtPath(path)
@@ -504,25 +500,47 @@ class Scene:
         prim = mesh.GetPrim()
 
         points = [
-            (-hx, -hy, -hz), (hx, -hy, -hz), (hx, hy, -hz), (-hx, hy, -hz),
-            (-hx, -hy, hz), (hx, -hy, hz), (hx, hy, hz), (-hx, hy, hz),
+            (-hx, -hy, -hz),
+            (hx, -hy, -hz),
+            (hx, hy, -hz),
+            (-hx, hy, -hz),
+            (-hx, -hy, hz),
+            (hx, -hy, hz),
+            (hx, hy, hz),
+            (-hx, hy, hz),
         ]
         # Counter-clockwise seen from outside, so the normals face out. A box
         # wound the other way renders inside-out and reads as a missing object.
         faces = [
-            0, 3, 2, 1,   # bottom
-            4, 5, 6, 7,   # top
-            0, 1, 5, 4,   # -Y
-            1, 2, 6, 5,   # +X
-            2, 3, 7, 6,   # +Y
-            3, 0, 4, 7,   # -X
+            0,
+            3,
+            2,
+            1,  # bottom
+            4,
+            5,
+            6,
+            7,  # top
+            0,
+            1,
+            5,
+            4,  # -Y
+            1,
+            2,
+            6,
+            5,  # +X
+            2,
+            3,
+            7,
+            6,  # +Y
+            3,
+            0,
+            4,
+            7,  # -X
         ]
         mesh.CreatePointsAttr(Vt.Vec3fArray([Gf.Vec3f(*p) for p in points]))
         mesh.CreateFaceVertexCountsAttr(Vt.IntArray([4] * 6))
         mesh.CreateFaceVertexIndicesAttr(Vt.IntArray(faces))
-        mesh.CreateExtentAttr(
-            Vt.Vec3fArray([Gf.Vec3f(-hx, -hy, -hz), Gf.Vec3f(hx, hy, hz)])
-        )
+        mesh.CreateExtentAttr(Vt.Vec3fArray([Gf.Vec3f(-hx, -hy, -hz), Gf.Vec3f(hx, hy, hz)]))
         # Flat shading; a smoothed carton catches the light like a pillow.
         mesh.CreateSubdivisionSchemeAttr().Set(UsdGeom.Tokens.none)
 
@@ -531,14 +549,10 @@ class Scene:
         xform.AddTranslateOp().Set(Gf.Vec3d(*as_vec3(position, name="position")))
         if orientation is not None:
             w, x, y, z = as_quat(orientation)
-            xform.AddOrientOp().Set(
-                Gf.Quatf(float(w), Gf.Vec3f(float(x), float(y), float(z)))
-            )
+            xform.AddOrientOp().Set(Gf.Quatf(float(w), Gf.Vec3f(float(x), float(y), float(z))))
 
         if color is not None:
-            mesh.CreateDisplayColorAttr().Set(
-                [Gf.Vec3f(*as_vec3(color, name="color"))]
-            )
+            mesh.CreateDisplayColorAttr().Set([Gf.Vec3f(*as_vec3(color, name="color"))])
 
         collision = UsdPhysics.CollisionAPI.Apply(prim)
         # A convex hull of eight points *is* the box, exactly. Left at the
@@ -554,9 +568,7 @@ class Scene:
             UsdPhysics.RigidBodyAPI.Apply(prim)
             UsdPhysics.MassAPI.Apply(prim).CreateMassAttr().Set(float(mass))
 
-        self.apply_physics_material(
-            prim_path, friction=friction, restitution=restitution
-        )
+        self.apply_physics_material(prim_path, friction=friction, restitution=restitution)
         return RigidObject(prim_path, scene=self)
 
     def spawn_rigid(
@@ -651,9 +663,7 @@ class Scene:
             mass_api = UsdPhysics.MassAPI.Apply(prim)
             mass_api.CreateMassAttr().Set(float(mass))
 
-        self.apply_physics_material(
-            prim_path, friction=friction, restitution=restitution
-        )
+        self.apply_physics_material(prim_path, friction=friction, restitution=restitution)
         return RigidObject(prim_path, scene=self)
 
     def apply_physics_material(
@@ -671,9 +681,7 @@ class Scene:
         material_path = material_path or f"/World/PhysicsMaterials/mu{int(friction * 100)}"
         mat_prim = stage.GetPrimAtPath(material_path)
         if not mat_prim.IsValid():
-            material = UsdPhysics.MaterialAPI.Apply(
-                UsdShade.Material.Define(stage, material_path).GetPrim()
-            )
+            material = UsdPhysics.MaterialAPI.Apply(UsdShade.Material.Define(stage, material_path).GetPrim())
             material.CreateStaticFrictionAttr().Set(float(friction))
             material.CreateDynamicFrictionAttr().Set(float(friction))
             material.CreateRestitutionAttr().Set(float(restitution))
@@ -705,11 +713,7 @@ class Scene:
         if not start.IsValid():
             return []
         iterator = Usd.PrimRange(start) if recursive else start.GetChildren()
-        return [
-            {"path": str(p.GetPath()), "type": p.GetTypeName()}
-            for p in iterator
-            if str(p.GetPath()) != root
-        ]
+        return [{"path": str(p.GetPath()), "type": p.GetTypeName()} for p in iterator if str(p.GetPath()) != root]
 
     def find(self, pattern: str, *, root: str = "/World") -> list[str]:
         """Case-insensitive substring search over prim paths."""

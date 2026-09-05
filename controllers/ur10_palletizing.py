@@ -140,8 +140,9 @@ SLOTS = [
     {"index": 3, "place": [-0.08, 0.83, 0.220], "rest": [-0.08, 0.83, 0.2175]},
 ]
 
-(WARMUP, INIT, WAIT_BOX, OVER_BOX, DESCEND, SEAL, LIFT,
- TRAVERSE, OVER_SLOT, RELEASE, RETREAT, NEXT, DONE, FAILED) = range(14)
+(WARMUP, INIT, WAIT_BOX, OVER_BOX, DESCEND, SEAL, LIFT, TRAVERSE, OVER_SLOT, RELEASE, RETREAT, NEXT, DONE, FAILED) = (
+    range(14)
+)
 
 _state = WARMUP
 _frame = 0
@@ -170,9 +171,20 @@ STATUS_PATH = "/tmp/ur10_palletizing.status"
 #: range and SEAL_TRIES (10) shadowed RETREAT (10) - the log then reported a
 #: state the machine had never been in.
 _NAMES = {
-    0: "WARMUP", 1: "INIT", 2: "WAIT_BOX", 3: "OVER_BOX", 4: "DESCEND",
-    5: "SEAL", 6: "LIFT", 7: "TRAVERSE", 8: "OVER_SLOT", 9: "RELEASE",
-    10: "RETREAT", 11: "NEXT", 12: "DONE", 13: "FAILED",
+    0: "WARMUP",
+    1: "INIT",
+    2: "WAIT_BOX",
+    3: "OVER_BOX",
+    4: "DESCEND",
+    5: "SEAL",
+    6: "LIFT",
+    7: "TRAVERSE",
+    8: "OVER_SLOT",
+    9: "RELEASE",
+    10: "RETREAT",
+    11: "NEXT",
+    12: "DONE",
+    13: "FAILED",
 }
 
 
@@ -217,11 +229,17 @@ def _note(tag, spent=None):
         except Exception:  # noqa: BLE001
             held = "?"
         with open(STATUS_PATH, "a", encoding="utf-8") as handle:
-            line = ("%-9s state=%-10s spent=%-5s slot=%d tries=%d %s "
-                    "tool=[%s] carton=[%s] why=%s") % (
-                tag, _NAMES.get(_state, _state),
+            line = ("%-9s state=%-10s spent=%-5s slot=%d tries=%d %s tool=[%s] carton=[%s] why=%s") % (
+                tag,
+                _NAMES.get(_state, _state),
                 "-" if spent is None else spent,
-                _slot, _tries, held, tool, carton, _why)
+                _slot,
+                _tries,
+                held,
+                tool,
+                carton,
+                _why,
+            )
             handle.write(line + chr(10))
     except Exception:  # noqa: BLE001 - reporting must never break the run
         pass
@@ -322,8 +340,7 @@ def compute(db=None):
 
     if _state == OVER_BOX:
         here = np.asarray(_carton.position, dtype=float)
-        target = [float(here[0]), float(here[1]),
-                  _top_of(_carton) + _cup.tip_offset + 0.18]
+        target = [float(here[0]), float(here[1]), _top_of(_carton) + _cup.tip_offset + 0.18]
         if _arm.servo_to(target, DOWN, tolerance=0.02):
             _pick = [float(here[0]), float(here[1])]
             _go(DESCEND)
@@ -332,8 +349,7 @@ def compute(db=None):
         return True
 
     if _state == DESCEND:
-        target = [_pick[0], _pick[1],
-                  _top_of(_carton) + _cup.tip_offset + STANDOFF - _tries * SEAL_STEP]
+        target = [_pick[0], _pick[1], _top_of(_carton) + _cup.tip_offset + STANDOFF - _tries * SEAL_STEP]
         if _arm.servo_to(target, DOWN, tolerance=0.006) or _frame > STATE_LIMIT // 2:
             _go(SEAL)
         return True
@@ -350,8 +366,7 @@ def compute(db=None):
             if _frame > SETTLE_FRAMES + SEAL_FRAMES:
                 _tries += 1
                 if _tries >= SEAL_TRIES:
-                    _fail("cup did not seal on %s after %d descents"
-                          % (_carton.prim_path, SEAL_TRIES))
+                    _fail("cup did not seal on %s after %d descents" % (_carton.prim_path, SEAL_TRIES))
                     return True
                 _cup.open(settle_steps=0)
                 _go(DESCEND)
@@ -390,8 +405,7 @@ def compute(db=None):
             return True
 
         slot = SLOTS[_slot]
-        target = [float(slot["place"][0]), float(slot["place"][1]),
-                  0.55 + _cup.tip_offset + BOX / 2.0]
+        target = [float(slot["place"][0]), float(slot["place"][1]), 0.55 + _cup.tip_offset + BOX / 2.0]
 
         if _plan is None:
             try:
@@ -399,8 +413,7 @@ def compute(db=None):
             except Exception as exc:  # noqa: BLE001 - NoPathFound is an answer
                 # Falling back to servo silently would drive at the same target
                 # and stall against whatever the planner just refused.
-                _fail("no route to slot %d: %s: %s"
-                      % (_slot, type(exc).__name__, exc))
+                _fail("no route to slot %d: %s: %s" % (_slot, type(exc).__name__, exc))
                 return True
 
         if _arm.follow(_plan):
@@ -412,8 +425,11 @@ def compute(db=None):
 
     if _state == OVER_SLOT:
         slot = SLOTS[_slot]
-        target = [float(slot["place"][0]), float(slot["place"][1]),
-                  float(slot["place"][2]) + BOX / 2.0 + _cup.tip_offset]
+        target = [
+            float(slot["place"][0]),
+            float(slot["place"][1]),
+            float(slot["place"][2]) + BOX / 2.0 + _cup.tip_offset,
+        ]
         if _arm.servo_to(target, DOWN, tolerance=0.01) or _frame > STATE_LIMIT:
             _go(RELEASE)
         return True
@@ -424,13 +440,16 @@ def compute(db=None):
         if _frame > 24 and not _cup.holding:
             _go(RETREAT)
         elif _frame > STATE_LIMIT // 4:
-            _go(RETREAT)          # released or not, do not sit here
+            _go(RETREAT)  # released or not, do not sit here
         return True
 
     if _state == RETREAT:
         slot = SLOTS[_slot]
-        target = [float(slot["place"][0]), float(slot["place"][1]),
-                  float(slot["place"][2]) + BOX / 2.0 + _cup.tip_offset + 0.25]
+        target = [
+            float(slot["place"][0]),
+            float(slot["place"][1]),
+            float(slot["place"][2]) + BOX / 2.0 + _cup.tip_offset + 0.25,
+        ]
         if _arm.servo_to(target, DOWN, tolerance=0.04) or _frame > STATE_LIMIT:
             _go(NEXT)
         return True

@@ -66,6 +66,7 @@ def execute_script(adapter: IsaacAdapterBase, code: Optional[str] = None, cwd: O
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
+
 # After:
 def execute_script(adapter: IsaacAdapterBase, code: Optional[str] = None, cwd: Optional[str] = None) -> Dict[str, Any]:
     try:
@@ -119,19 +120,20 @@ git commit -m "fix: flatten execute_script and reload_script response structure 
 In `v5.py`, replace lines 378-390 with dedicated PhysX velocity methods:
 
 ```python
-        # Get velocities via PhysX if simulation is running
-        try:
-            import omni.physx
-            physx_interface = omni.physx.get_physx_interface()
-            linear_vel = physx_interface.get_rigidbody_linear_velocity(prim_path)
-            angular_vel = physx_interface.get_rigidbody_angular_velocity(prim_path)
-            result["linear_velocity"] = list(linear_vel) if linear_vel else [0.0, 0.0, 0.0]
-            result["angular_velocity"] = list(angular_vel) if angular_vel else [0.0, 0.0, 0.0]
-        except Exception:
-            # Velocities not available when simulation isn't running
-            if has_rb:
-                result["linear_velocity"] = [0.0, 0.0, 0.0]
-                result["angular_velocity"] = [0.0, 0.0, 0.0]
+# Get velocities via PhysX if simulation is running
+try:
+    import omni.physx
+
+    physx_interface = omni.physx.get_physx_interface()
+    linear_vel = physx_interface.get_rigidbody_linear_velocity(prim_path)
+    angular_vel = physx_interface.get_rigidbody_angular_velocity(prim_path)
+    result["linear_velocity"] = list(linear_vel) if linear_vel else [0.0, 0.0, 0.0]
+    result["angular_velocity"] = list(angular_vel) if angular_vel else [0.0, 0.0, 0.0]
+except Exception:
+    # Velocities not available when simulation isn't running
+    if has_rb:
+        result["linear_velocity"] = [0.0, 0.0, 0.0]
+        result["angular_velocity"] = [0.0, 0.0, 0.0]
 ```
 
 This removes the `get_rigidbody_transformation` call which was only used here for (broken) velocity extraction.

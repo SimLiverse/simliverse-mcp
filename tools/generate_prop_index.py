@@ -51,8 +51,8 @@ _SUPPORT_FILES = {
     "physics_material.usd",
 }
 _SUPPORT_SUFFIXES = (
-    "_visual.usd",            # render-only twin of a physics asset
-    "_collisions.usd",        # collision-only twin
+    "_visual.usd",  # render-only twin of a physics asset
+    "_collisions.usd",  # collision-only twin
     "_visual_collision.usd",
 )
 
@@ -148,10 +148,10 @@ def _classify(scan: dict) -> str:
     if scan.get("error"):
         return "unknown"
     if scan.get("rigid", 0) > 0:
-        return "dynamic"      # has mass, falls, can be picked up
+        return "dynamic"  # has mass, falls, can be picked up
     if scan.get("collision", 0) > 0:
-        return "static"       # collides, cannot be moved by contact
-    return "visual"           # geometry only: no collider, no rigid body
+        return "static"  # collides, cannot be moved by contact
+    return "visual"  # geometry only: no collider, no rigid body
 
 
 def _keywords_for(directory: str, key: str) -> list[str]:
@@ -233,7 +233,7 @@ def main() -> int:
         print(WALK_SNIPPET)
         return 0
     raw = sys.stdin.read()
-    walked = json.loads(raw[raw.index("{"):])
+    walked = json.loads(raw[raw.index("{") :])
     scanned = None
     for arg in sys.argv[1:]:
         if arg.startswith("--scan="):

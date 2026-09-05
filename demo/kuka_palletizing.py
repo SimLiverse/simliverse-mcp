@@ -62,13 +62,13 @@ ARM = "/World/Arm"
 BELT = "/World/Conveyor"
 PALLET = "/World/Pallet"
 
-BOX = (0.30, 0.30, 0.30)      # full size, metres. Sized to the KR210's wrist.
+BOX = (0.30, 0.30, 0.30)  # full size, metres. Sized to the KR210's wrist.
 BOX_MASS = 5.0
 
-BELT_DECK = 0.90              # height of the belt surface
+BELT_DECK = 0.90  # height of the belt surface
 BELT_LENGTH = 3.2
 BELT_WIDTH = 0.70
-BELT_SPEED = 0.30             # m/s. A real palletising infeed runs 0.2-0.5.
+BELT_SPEED = 0.30  # m/s. A real palletising infeed runs 0.2-0.5.
 
 # The cell layout, and the number that matters is BELT_OFFSET_Y.
 #
@@ -82,11 +82,11 @@ BELT_SPEED = 0.30             # m/s. A real palletising infeed runs 0.2-0.5.
 #
 # So the belt runs *past* the arm, offset across its travel, which is also how
 # a real infeed is laid out: the arm stands beside the line, not on it.
-BELT_STOP_X = 1.30            # where the stop is, and so where a box waits
-BELT_OFFSET_Y = -1.05         # belt centre-line, clear of the arm's base
-PALLET_REACH = 1.70           # pallet centre, on +Y
+BELT_STOP_X = 1.30  # where the stop is, and so where a box waits
+BELT_OFFSET_Y = -1.05  # belt centre-line, clear of the arm's base
+PALLET_REACH = 1.70  # pallet centre, on +Y
 
-PALLET_DECK_Z = 0.1425        # measured from Isaac's pallet.usd
+PALLET_DECK_Z = 0.1425  # measured from Isaac's pallet.usd
 PALLET_DECK = (1.2132, 0.8023)
 
 ROWS, COLS, LAYERS = 2, 2, 2  # eight boxes
@@ -136,13 +136,14 @@ def build(scene: Scene | None = None, *, asset: bool = True, boxes: int = 4) -> 
     )
 
     # The pallet is a static collider and stays where it is put.
-    spawn_prop("pallet", prim_path=PALLET,
-               position=[0.0, PALLET_REACH, 0.0], scene=scene)
+    spawn_prop("pallet", prim_path=PALLET, position=[0.0, PALLET_REACH, 0.0], scene=scene)
 
     slots = pallet_slots(
         origin=[0.0, PALLET_REACH, PALLET_DECK_Z],
         box=BOX,
-        rows=ROWS, cols=COLS, layers=LAYERS,
+        rows=ROWS,
+        cols=COLS,
+        layers=LAYERS,
         gap=0.01,
         deck=PALLET_DECK,
     )
@@ -150,9 +151,7 @@ def build(scene: Scene | None = None, *, asset: bool = True, boxes: int = 4) -> 
     # Authored before anything starts physics. A surface gripper created while
     # the timeline runs is never registered: the plugin logs "Gripper not found"
     # every frame while the Python side keeps reporting a healthy Open.
-    cup = arm.attach_suction_gripper(
-        max_grip_distance=0.06, cup_radius=0.10, cup_length=0.05
-    )
+    cup = arm.attach_suction_gripper(max_grip_distance=0.06, cup_radius=0.10, cup_length=0.05)
 
     return {
         "arm": ARM,
@@ -181,7 +180,6 @@ if __name__ == "__main__":
     for key in ("arm", "gripper", "pallet", "pick_height", "carry_z"):
         print("  %-13s %s" % (key, info[key]))
     print("  %-13s %s" % ("belt", info["belt"]["mechanism"]))
-    print("  %-13s %d queued, %d slots" % (
-        "load", len(info["boxes"]), len(info["slots"])))
+    print("  %-13s %d queued, %d slots" % ("load", len(info["boxes"]), len(info["slots"])))
 
     print("  first slot     %s" % info["slots"][0]["rest"])

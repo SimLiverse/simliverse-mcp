@@ -7,8 +7,6 @@ it runs without Isaac: a two-frame "arm" whose elbow moves along a straight
 line, and a box placed either on that line or beside it.
 """
 
-import importlib.util
-import sys
 import types
 from pathlib import Path
 
@@ -81,7 +79,7 @@ def test_margin_is_link_thickness():
 def test_the_carried_carton_counts():
     """The last frame is extended downward by `carry`: a carton hanging under
     the cup sweeps a box the flange itself would clear."""
-    box = ([0.9, -0.1, -0.2], [1.1, 0.1, 0.3], "belt frame")   # below the elbow at z=1
+    box = ([0.9, -0.1, -0.2], [1.1, 0.1, 0.3], "belt frame")  # below the elbow at z=1
     assert _arm().route_clearance(_Route(), [box], margin=0.0) is None
     assert _arm().route_clearance(_Route(), [box], margin=0.0, carry=0.8) is not None
 
@@ -98,7 +96,7 @@ def test_starting_inside_a_box_is_not_a_sweep():
     A contact present at the start is where the arm already is; only an
     entry counts.
     """
-    box = ([-0.1, -0.1, 0.5], [0.3, 0.1, 1.5], "panel")   # the elbow starts inside, leaves
+    box = ([-0.1, -0.1, 0.5], [0.3, 0.1, 1.5], "panel")  # the elbow starts inside, leaves
     assert _arm().route_clearance(_Route(), [box], margin=0.0) is None
 
 
@@ -108,7 +106,7 @@ def test_leaving_and_re_entering_is_a_sweep():
     class _Bounce:
         duration = 1.0
 
-        def sample(self, t):        # elbow x: 0 -> 2 -> 0
+        def sample(self, t):  # elbow x: 0 -> 2 -> 0
             x = 2.0 * t if t <= 0.5 else 2.0 * (1.0 - t)
             return np.array([x / 2.0, 0.0]), np.zeros(2)
 
@@ -121,6 +119,7 @@ def test_solve_ik_exists_and_builds_no_trajectory():
     """Ranking candidates needs goal joints, not trajectories; building a
     trajectory per candidate froze the sim for seconds after every lift."""
     import ast
+
     src = _root.read_text()
     tree = ast.parse(src)
     fn = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "solve_ik")

@@ -137,6 +137,7 @@ def get_adapter():
     Future versions will detect the runtime version and return the matching adapter.
     """
     from .v5 import IsaacAdapterV5
+
     return IsaacAdapterV5()
 ```
 
@@ -344,7 +345,9 @@ class IsaacAdapterBase(ABC):
         ...
 
     @abstractmethod
-    def modify_light(self, prim_path: str, intensity: Optional[float] = None, color: Optional[List[float]] = None) -> None:
+    def modify_light(
+        self, prim_path: str, intensity: Optional[float] = None, color: Optional[List[float]] = None
+    ) -> None:
         """Modify properties of an existing light."""
         ...
 
@@ -403,29 +406,35 @@ class IsaacAdapterV5(IsaacAdapterBase):
 
     def get_stage(self):
         import omni.usd
+
         return omni.usd.get_context().get_stage()
 
     def get_assets_root_path(self) -> str:
         from isaacsim.storage.native import get_assets_root_path
+
         return get_assets_root_path()
 
     # ── Prims ──────────────────────────────────────────────
 
     def create_prim(self, prim_path: str, prim_type: str = "Xform", **kwargs):
         from isaacsim.core.utils.prims import create_prim
+
         return create_prim(prim_path, prim_type, **kwargs)
 
     def delete_prim(self, prim_path: str) -> bool:
         import omni.kit.commands
+
         omni.kit.commands.execute("DeletePrims", paths=[prim_path])
         return True
 
     def add_reference_to_stage(self, usd_path: str, prim_path: str):
         from isaacsim.core.utils.stage import add_reference_to_stage
+
         return add_reference_to_stage(usd_path, prim_path)
 
     def set_prim_transform(self, prim_path, position=None, rotation=None, scale=None):
         from pxr import UsdGeom, Gf
+
         stage = self.get_stage()
         prim = stage.GetPrimAtPath(prim_path)
         if not prim.IsValid():
@@ -441,6 +450,7 @@ class IsaacAdapterV5(IsaacAdapterBase):
 
     def get_prim_transform(self, prim_path: str) -> Dict[str, Any]:
         from pxr import UsdGeom, Gf
+
         stage = self.get_stage()
         prim = stage.GetPrimAtPath(prim_path)
         if not prim.IsValid():
@@ -481,14 +491,17 @@ class IsaacAdapterV5(IsaacAdapterBase):
 
     def create_xform_prim(self, prim_path):
         from isaacsim.core.prims import SingleXFormPrim
+
         return SingleXFormPrim(prim_path=prim_path)
 
     def create_articulation(self, prim_path, name):
         from isaacsim.core.prims import SingleArticulation
+
         return SingleArticulation(prim_path=prim_path, name=name)
 
     def get_robot_joint_info(self, prim_path: str) -> Dict[str, Any]:
         from isaacsim.core.prims import SingleArticulation
+
         art = SingleArticulation(prim_path=prim_path)
         return {
             "joint_names": art.dof_names if art.dof_names else [],
@@ -499,13 +512,17 @@ class IsaacAdapterV5(IsaacAdapterBase):
         from isaacsim.core.prims import SingleArticulation
         from isaacsim.core.utils.types import ArticulationAction
         import numpy as np
+
         art = SingleArticulation(prim_path=prim_path)
-        action = ArticulationAction(joint_positions=np.array(positions), joint_indices=np.array(joint_indices) if joint_indices else None)
+        action = ArticulationAction(
+            joint_positions=np.array(positions), joint_indices=np.array(joint_indices) if joint_indices else None
+        )
         controller = art.get_articulation_controller()
         controller.apply_action(action)
 
     def get_joint_positions(self, prim_path: str) -> List[float]:
         from isaacsim.core.prims import SingleArticulation
+
         art = SingleArticulation(prim_path=prim_path)
         positions = art.get_joint_positions()
         return positions.tolist() if positions is not None else []
@@ -514,14 +531,17 @@ class IsaacAdapterV5(IsaacAdapterBase):
 
     def create_world(self, **kwargs):
         from isaacsim.core.api import World
+
         return World(**kwargs)
 
     def create_simulation_context(self, **kwargs):
         from isaacsim.core.api import SimulationContext
+
         return SimulationContext(**kwargs)
 
     def create_physics_scene(self, gravity=None, scene_name="PhysicsScene"):
         import omni.kit.commands
+
         scene_path = f"/World/{scene_name}"
         omni.kit.commands.execute("CreatePrim", prim_path=scene_path, prim_type="PhysicsScene")
         return scene_path
@@ -530,19 +550,23 @@ class IsaacAdapterV5(IsaacAdapterBase):
 
     def create_camera(self, prim_path, resolution=(1280, 720), **kwargs):
         from isaacsim.sensors.camera import Camera
+
         return Camera(prim_path=prim_path, resolution=resolution, **kwargs)
 
     def capture_camera_image(self, prim_path):
         from isaacsim.sensors.camera import Camera
+
         cam = Camera(prim_path=prim_path)
         return cam.get_rgba()
 
     def create_lidar(self, prim_path, config=None, **kwargs):
         from isaacsim.sensors.rtx import LidarRtx
+
         return LidarRtx(prim_path=prim_path, config=config or "Example_Rotary", **kwargs)
 
     def get_lidar_point_cloud(self, prim_path):
         from isaacsim.sensors.rtx import LidarRtx
+
         lidar = LidarRtx(prim_path=prim_path)
         return lidar.get_point_cloud()
 
@@ -550,6 +574,7 @@ class IsaacAdapterV5(IsaacAdapterBase):
 
     def create_pbr_material(self, prim_path, color=None, roughness=0.5, metallic=0.0):
         from pxr import UsdShade, Sdf, Gf
+
         stage = self.get_stage()
         material = UsdShade.Material.Define(stage, prim_path)
         shader = UsdShade.Shader.Define(stage, f"{prim_path}/Shader")
@@ -563,6 +588,7 @@ class IsaacAdapterV5(IsaacAdapterBase):
 
     def create_physics_material(self, prim_path, static_friction=0.5, dynamic_friction=0.5, restitution=0.0):
         from pxr import UsdPhysics
+
         stage = self.get_stage()
         material = UsdPhysics.MaterialAPI.Apply(stage.DefinePrim(prim_path))
         material.CreateStaticFrictionAttr(static_friction)
@@ -572,6 +598,7 @@ class IsaacAdapterV5(IsaacAdapterBase):
 
     def apply_material(self, material_path, target_prim_path):
         from pxr import UsdShade
+
         stage = self.get_stage()
         material = UsdShade.Material(stage.GetPrimAtPath(material_path))
         target = stage.GetPrimAtPath(target_prim_path)
@@ -581,6 +608,7 @@ class IsaacAdapterV5(IsaacAdapterBase):
 
     def create_light(self, light_type, prim_path, intensity=1000.0, color=None, **kwargs):
         from pxr import UsdLux, Gf
+
         stage = self.get_stage()
         light_classes = {
             "DistantLight": UsdLux.DistantLight,
@@ -607,6 +635,7 @@ class IsaacAdapterV5(IsaacAdapterBase):
 
     def modify_light(self, prim_path, intensity=None, color=None):
         from pxr import UsdLux, Gf
+
         stage = self.get_stage()
         prim = stage.GetPrimAtPath(prim_path)
         if not prim.IsValid():
@@ -620,6 +649,7 @@ class IsaacAdapterV5(IsaacAdapterBase):
 
     def import_urdf(self, urdf_path, prim_path="/World/robot", **kwargs):
         import omni.kit.commands
+
         status, import_config = omni.kit.commands.execute("URDFCreateImportConfig")
         omni.kit.commands.execute("URDFParseFile", urdf_path=urdf_path, import_config=import_config)
         result = omni.kit.commands.execute(
@@ -634,18 +664,22 @@ class IsaacAdapterV5(IsaacAdapterBase):
 
     def play(self):
         import omni.timeline
+
         omni.timeline.get_timeline_interface().play()
 
     def pause(self):
         import omni.timeline
+
         omni.timeline.get_timeline_interface().pause()
 
     def stop(self):
         import omni.timeline
+
         omni.timeline.get_timeline_interface().stop()
 
     def step(self, num_steps=1):
         import omni.kit.app
+
         for _ in range(num_steps):
             omni.kit.app.get_app().update()
 
@@ -653,6 +687,7 @@ class IsaacAdapterV5(IsaacAdapterBase):
         import omni
         import carb
         from pxr import Usd, UsdGeom, Sdf, Gf
+
         local_ns = {"omni": omni, "carb": carb, "Usd": Usd, "UsdGeom": UsdGeom, "Sdf": Sdf, "Gf": Gf}
         try:
             exec(code, local_ns)
@@ -671,9 +706,7 @@ Create `tests/test_handler_structure.py`:
 import ast
 import os
 
-EXTENSION_ROOT = os.path.join(
-    os.path.dirname(__file__), "..", "isaac.sim.mcp_extension", "isaac_sim_mcp_extension"
-)
+EXTENSION_ROOT = os.path.join(os.path.dirname(__file__), "..", "isaac.sim.mcp_extension", "isaac_sim_mcp_extension")
 
 
 def _parse_file(path):
@@ -693,17 +726,38 @@ def test_adapter_base_has_all_abstract_methods():
                 elif isinstance(decorator, ast.Attribute) and decorator.attr == "abstractmethod":
                     methods.add(node.name)
     expected = {
-        "get_stage", "get_assets_root_path",
-        "create_prim", "delete_prim", "add_reference_to_stage",
-        "set_prim_transform", "get_prim_transform", "list_prims", "get_prim_info",
-        "create_xform_prim", "create_articulation",
-        "get_robot_joint_info", "set_joint_positions", "get_joint_positions",
-        "create_world", "create_simulation_context", "create_physics_scene",
-        "create_camera", "capture_camera_image", "create_lidar", "get_lidar_point_cloud",
-        "create_pbr_material", "create_physics_material", "apply_material",
-        "create_light", "modify_light",
+        "get_stage",
+        "get_assets_root_path",
+        "create_prim",
+        "delete_prim",
+        "add_reference_to_stage",
+        "set_prim_transform",
+        "get_prim_transform",
+        "list_prims",
+        "get_prim_info",
+        "create_xform_prim",
+        "create_articulation",
+        "get_robot_joint_info",
+        "set_joint_positions",
+        "get_joint_positions",
+        "create_world",
+        "create_simulation_context",
+        "create_physics_scene",
+        "create_camera",
+        "capture_camera_image",
+        "create_lidar",
+        "get_lidar_point_cloud",
+        "create_pbr_material",
+        "create_physics_material",
+        "apply_material",
+        "create_light",
+        "modify_light",
         "import_urdf",
-        "play", "pause", "stop", "step", "execute_script",
+        "play",
+        "pause",
+        "stop",
+        "step",
+        "execute_script",
     }
     assert methods == expected, f"Missing: {expected - methods}, Extra: {methods - expected}"
 
@@ -717,8 +771,9 @@ def test_v5_adapter_implements_all_methods():
     for node in ast.walk(base_tree):
         if isinstance(node, ast.FunctionDef) and node.name != "__init__":
             for decorator in node.decorator_list:
-                if (isinstance(decorator, ast.Name) and decorator.id == "abstractmethod") or \
-                   (isinstance(decorator, ast.Attribute) and decorator.attr == "abstractmethod"):
+                if (isinstance(decorator, ast.Name) and decorator.id == "abstractmethod") or (
+                    isinstance(decorator, ast.Attribute) and decorator.attr == "abstractmethod"
+                ):
                     base_methods.add(node.name)
 
     v5_methods = set()
@@ -734,8 +789,14 @@ def test_all_handler_modules_have_register():
     """Verify every handler module exposes a register(registry, adapter) function."""
     handlers_dir = os.path.join(EXTENSION_ROOT, "handlers")
     handler_files = [
-        "scene.py", "objects.py", "lighting.py", "robots.py",
-        "sensors.py", "materials.py", "assets.py", "simulation.py",
+        "scene.py",
+        "objects.py",
+        "lighting.py",
+        "robots.py",
+        "sensors.py",
+        "materials.py",
+        "assets.py",
+        "simulation.py",
     ]
     for filename in handler_files:
         filepath = os.path.join(handlers_dir, filename)
@@ -1011,6 +1072,7 @@ def create_physics(adapter, gravity=None, scene_name="PhysicsScene"):
         scene_path = adapter.create_physics_scene(gravity=gravity, scene_name=scene_name)
         # Create ground plane
         import omni.kit.commands
+
         floor_path = "/World/groundPlane"
         omni.kit.commands.execute("CreatePrim", prim_path=floor_path, prim_type="Plane")
         return {"status": "success", "message": f"Physics scene created at {scene_path}"}
@@ -1063,7 +1125,16 @@ def register(registry, adapter):
     registry["objects.clone"] = lambda **p: clone(adapter, **p)
 
 
-def create(adapter, object_type="Cube", position=None, rotation=None, scale=None, color=None, physics_enabled=False, prim_path=None):
+def create(
+    adapter,
+    object_type="Cube",
+    position=None,
+    rotation=None,
+    scale=None,
+    color=None,
+    physics_enabled=False,
+    prim_path=None,
+):
     try:
         if not prim_path:
             stage = adapter.get_stage()
@@ -1102,6 +1173,7 @@ def clone(adapter, source_path=None, target_path=None, position=None):
         if not source_path or not target_path:
             return {"status": "error", "message": "source_path and target_path are required"}
         import omni.kit.commands
+
         omni.kit.commands.execute("CopyPrim", path_from=source_path, path_to=target_path)
         if position:
             adapter.set_prim_transform(target_path, position=position)
@@ -1121,13 +1193,17 @@ def register(registry, adapter):
     registry["lighting.modify"] = lambda **p: modify(adapter, **p)
 
 
-def create(adapter, light_type="DistantLight", position=None, intensity=1000.0, color=None, rotation=None, prim_path=None):
+def create(
+    adapter, light_type="DistantLight", position=None, intensity=1000.0, color=None, rotation=None, prim_path=None
+):
     try:
         if not prim_path:
             stage = adapter.get_stage()
             count = len(list(stage.TraverseAll()))
             prim_path = f"/World/{light_type}_{count}"
-        adapter.create_light(light_type, prim_path, intensity=intensity, color=color, position=position, rotation=rotation)
+        adapter.create_light(
+            light_type, prim_path, intensity=intensity, color=color, position=position, rotation=rotation
+        )
         return {"status": "success", "message": f"Created {light_type}", "prim_path": prim_path}
     except Exception as e:
         return {"status": "error", "message": str(e)}
@@ -1152,7 +1228,10 @@ import numpy as np
 
 
 ROBOT_LIBRARY = {
-    "franka": {"asset_path": "/Isaac/Robots/Franka/franka_alt_fingers.usd", "description": "Franka Emika Panda manipulator"},
+    "franka": {
+        "asset_path": "/Isaac/Robots/Franka/franka_alt_fingers.usd",
+        "description": "Franka Emika Panda manipulator",
+    },
     "jetbot": {"asset_path": "/Isaac/Robots/Jetbot/jetbot.usd", "description": "NVIDIA JetBot mobile robot"},
     "carter": {"asset_path": "/Isaac/Robots/Carter/carter.usd", "description": "Carter delivery robot"},
     "g1": {"asset_path": "/Isaac/Robots/Unitree/G1/g1.usd", "description": "Unitree G1 humanoid robot"},
@@ -1253,10 +1332,15 @@ def capture_image(adapter, prim_path="/World/Camera", output_path=None):
         if output_path:
             import numpy as np
             from PIL import Image
+
             img = Image.fromarray(image_data)
             img.save(output_path)
             return {"status": "success", "message": f"Image saved to {output_path}", "output_path": output_path}
-        return {"status": "success", "message": "Image captured", "shape": list(image_data.shape) if hasattr(image_data, "shape") else None}
+        return {
+            "status": "success",
+            "message": "Image captured",
+            "shape": list(image_data.shape) if hasattr(image_data, "shape") else None,
+        }
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
@@ -1291,8 +1375,17 @@ def register(registry, adapter):
     registry["materials.apply"] = lambda **p: apply_material(adapter, **p)
 
 
-def create(adapter, material_type="pbr", prim_path=None, color=None, roughness=0.5, metallic=0.0,
-           static_friction=0.5, dynamic_friction=0.5, restitution=0.0):
+def create(
+    adapter,
+    material_type="pbr",
+    prim_path=None,
+    color=None,
+    roughness=0.5,
+    metallic=0.0,
+    static_friction=0.5,
+    dynamic_friction=0.5,
+    restitution=0.0,
+):
     try:
         if not prim_path:
             stage = adapter.get_stage()
@@ -1301,8 +1394,9 @@ def create(adapter, material_type="pbr", prim_path=None, color=None, roughness=0
         if material_type == "pbr":
             adapter.create_pbr_material(prim_path, color=color, roughness=roughness, metallic=metallic)
         elif material_type == "physics":
-            adapter.create_physics_material(prim_path, static_friction=static_friction,
-                                            dynamic_friction=dynamic_friction, restitution=restitution)
+            adapter.create_physics_material(
+                prim_path, static_friction=static_friction, dynamic_friction=dynamic_friction, restitution=restitution
+            )
         else:
             return {"status": "error", "message": f"Unknown material type: {material_type}. Options: pbr, physics"}
         return {"status": "success", "message": f"Created {material_type} material", "prim_path": prim_path}
@@ -1367,7 +1461,12 @@ def search_usd(adapter, text_prompt=None, target_path="/World/my_usd", position=
         url = searcher.search(text_prompt)
         loader = USDLoader()
         prim_path = loader.load_usd_from_url(url_path=url, target_path=target_path)
-        return {"status": "success", "message": f"Found and loaded USD for '{text_prompt}'", "prim_path": prim_path, "url": url}
+        return {
+            "status": "success",
+            "message": f"Found and loaded USD for '{text_prompt}'",
+            "prim_path": prim_path,
+            "url": url,
+        }
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
@@ -1394,6 +1493,7 @@ def generate_3d(adapter, text_prompt=None, image_url=None, position=None, scale=
                 loader.transform(position=position or (0, 0, 50), scale=scale or (10, 10, 10))
 
         from omni.kit.async_engine import run_coroutine
+
         run_coroutine(beaver.monitor_task_status_async(task_id, on_complete_callback=on_complete))
         return {"status": "success", "message": f"3D generation started", "task_id": task_id}
     except Exception as e:
@@ -1513,8 +1613,14 @@ import os
 TOOLS_DIR = os.path.join(os.path.dirname(__file__), "..", "isaac_mcp", "tools")
 
 EXPECTED_MODULES = [
-    "scene.py", "objects.py", "lighting.py", "robots.py",
-    "sensors.py", "materials.py", "assets.py", "simulation.py",
+    "scene.py",
+    "objects.py",
+    "lighting.py",
+    "robots.py",
+    "sensors.py",
+    "materials.py",
+    "assets.py",
+    "simulation.py",
 ]
 
 
@@ -1664,11 +1770,16 @@ def register_tools(mcp: FastMCP, get_connection):
         try:
             conn = get_connection()
             params = {"object_type": object_type, "physics_enabled": physics_enabled}
-            if position: params["position"] = position
-            if rotation: params["rotation"] = rotation
-            if scale: params["scale"] = scale
-            if color: params["color"] = color
-            if prim_path: params["prim_path"] = prim_path
+            if position:
+                params["position"] = position
+            if rotation:
+                params["rotation"] = rotation
+            if scale:
+                params["scale"] = scale
+            if color:
+                params["color"] = color
+            if prim_path:
+                params["prim_path"] = prim_path
             result = conn.send_command("objects.create", params)
             return json.dumps(result, indent=2)
         except Exception as e:
@@ -1706,9 +1817,12 @@ def register_tools(mcp: FastMCP, get_connection):
         try:
             conn = get_connection()
             params = {"prim_path": prim_path}
-            if position: params["position"] = position
-            if rotation: params["rotation"] = rotation
-            if scale: params["scale"] = scale
+            if position:
+                params["position"] = position
+            if rotation:
+                params["rotation"] = rotation
+            if scale:
+                params["scale"] = scale
             result = conn.send_command("objects.transform", params)
             return json.dumps(result, indent=2)
         except Exception as e:
@@ -1726,7 +1840,8 @@ def register_tools(mcp: FastMCP, get_connection):
         try:
             conn = get_connection()
             params = {"source_path": source_path, "target_path": target_path}
-            if position: params["position"] = position
+            if position:
+                params["position"] = position
             result = conn.send_command("objects.clone", params)
             return json.dumps(result, indent=2)
         except Exception as e:
@@ -1767,10 +1882,14 @@ def register_tools(mcp: FastMCP, get_connection):
         try:
             conn = get_connection()
             params = {"light_type": light_type, "intensity": intensity}
-            if position: params["position"] = position
-            if color: params["color"] = color
-            if rotation: params["rotation"] = rotation
-            if prim_path: params["prim_path"] = prim_path
+            if position:
+                params["position"] = position
+            if color:
+                params["color"] = color
+            if rotation:
+                params["rotation"] = rotation
+            if prim_path:
+                params["prim_path"] = prim_path
             result = conn.send_command("lighting.create", params)
             return json.dumps(result, indent=2)
         except Exception as e:
@@ -1788,8 +1907,10 @@ def register_tools(mcp: FastMCP, get_connection):
         try:
             conn = get_connection()
             params = {"prim_path": prim_path}
-            if intensity is not None: params["intensity"] = intensity
-            if color: params["color"] = color
+            if intensity is not None:
+                params["intensity"] = intensity
+            if color:
+                params["color"] = color
             result = conn.send_command("lighting.modify", params)
             return json.dumps(result, indent=2)
         except Exception as e:
@@ -1809,7 +1930,9 @@ from mcp.server.fastmcp import FastMCP
 def register_tools(mcp: FastMCP, get_connection):
 
     @mcp.tool("create_robot")
-    def create_robot(robot_type: str = "franka", position: Optional[List[float]] = None, name: Optional[str] = None) -> str:
+    def create_robot(
+        robot_type: str = "franka", position: Optional[List[float]] = None, name: Optional[str] = None
+    ) -> str:
         """Create a robot from the built-in library. Call create_physics_scene first.
 
         Args:
@@ -1820,8 +1943,10 @@ def register_tools(mcp: FastMCP, get_connection):
         try:
             conn = get_connection()
             params = {"robot_type": robot_type}
-            if position: params["position"] = position
-            if name: params["name"] = name
+            if position:
+                params["position"] = position
+            if name:
+                params["name"] = name
             result = conn.send_command("robots.create", params)
             return json.dumps(result, indent=2)
         except Exception as e:
@@ -1852,7 +1977,9 @@ def register_tools(mcp: FastMCP, get_connection):
             return json.dumps({"status": "error", "message": str(e)})
 
     @mcp.tool("set_joint_positions")
-    def set_joint_positions(prim_path: str, joint_positions: List[float], joint_indices: Optional[List[int]] = None) -> str:
+    def set_joint_positions(
+        prim_path: str, joint_positions: List[float], joint_indices: Optional[List[int]] = None
+    ) -> str:
         """Set target joint positions on a robot.
 
         Args:
@@ -1863,7 +1990,8 @@ def register_tools(mcp: FastMCP, get_connection):
         try:
             conn = get_connection()
             params = {"prim_path": prim_path, "joint_positions": joint_positions}
-            if joint_indices: params["joint_indices"] = joint_indices
+            if joint_indices:
+                params["joint_indices"] = joint_indices
             result = conn.send_command("robots.set_joints", params)
             return json.dumps(result, indent=2)
         except Exception as e:
@@ -1897,8 +2025,12 @@ from mcp.server.fastmcp import FastMCP
 def register_tools(mcp: FastMCP, get_connection):
 
     @mcp.tool("create_camera")
-    def create_camera(prim_path: str = "/World/Camera", position: Optional[List[float]] = None,
-                      rotation: Optional[List[float]] = None, resolution: Optional[List[int]] = None) -> str:
+    def create_camera(
+        prim_path: str = "/World/Camera",
+        position: Optional[List[float]] = None,
+        rotation: Optional[List[float]] = None,
+        resolution: Optional[List[int]] = None,
+    ) -> str:
         """Add a camera sensor to the scene.
 
         Args:
@@ -1910,9 +2042,12 @@ def register_tools(mcp: FastMCP, get_connection):
         try:
             conn = get_connection()
             params = {"prim_path": prim_path}
-            if position: params["position"] = position
-            if rotation: params["rotation"] = rotation
-            if resolution: params["resolution"] = resolution
+            if position:
+                params["position"] = position
+            if rotation:
+                params["rotation"] = rotation
+            if resolution:
+                params["resolution"] = resolution
             result = conn.send_command("sensors.create_camera", params)
             return json.dumps(result, indent=2)
         except Exception as e:
@@ -1929,15 +2064,20 @@ def register_tools(mcp: FastMCP, get_connection):
         try:
             conn = get_connection()
             params = {"prim_path": prim_path}
-            if output_path: params["output_path"] = output_path
+            if output_path:
+                params["output_path"] = output_path
             result = conn.send_command("sensors.capture_image", params)
             return json.dumps(result, indent=2)
         except Exception as e:
             return json.dumps({"status": "error", "message": str(e)})
 
     @mcp.tool("create_lidar")
-    def create_lidar(prim_path: str = "/World/Lidar", position: Optional[List[float]] = None,
-                     rotation: Optional[List[float]] = None, config: Optional[str] = None) -> str:
+    def create_lidar(
+        prim_path: str = "/World/Lidar",
+        position: Optional[List[float]] = None,
+        rotation: Optional[List[float]] = None,
+        config: Optional[str] = None,
+    ) -> str:
         """Add a lidar sensor to the scene.
 
         Args:
@@ -1949,9 +2089,12 @@ def register_tools(mcp: FastMCP, get_connection):
         try:
             conn = get_connection()
             params = {"prim_path": prim_path}
-            if position: params["position"] = position
-            if rotation: params["rotation"] = rotation
-            if config: params["config"] = config
+            if position:
+                params["position"] = position
+            if rotation:
+                params["rotation"] = rotation
+            if config:
+                params["config"] = config
             result = conn.send_command("sensors.create_lidar", params)
             return json.dumps(result, indent=2)
         except Exception as e:
@@ -2004,8 +2147,10 @@ def register_tools(mcp: FastMCP, get_connection):
         try:
             conn = get_connection()
             params = {"material_type": material_type, "roughness": roughness, "metallic": metallic}
-            if prim_path: params["prim_path"] = prim_path
-            if color: params["color"] = color
+            if prim_path:
+                params["prim_path"] = prim_path
+            if color:
+                params["color"] = color
             result = conn.send_command("materials.create", params)
             return json.dumps(result, indent=2)
         except Exception as e:
@@ -2021,7 +2166,9 @@ def register_tools(mcp: FastMCP, get_connection):
         """
         try:
             conn = get_connection()
-            result = conn.send_command("materials.apply", {"material_path": material_path, "target_prim_path": target_prim_path})
+            result = conn.send_command(
+                "materials.apply", {"material_path": material_path, "target_prim_path": target_prim_path}
+            )
             return json.dumps(result, indent=2)
         except Exception as e:
             return json.dumps({"status": "error", "message": str(e)})
@@ -2051,15 +2198,20 @@ def register_tools(mcp: FastMCP, get_connection):
         try:
             conn = get_connection()
             params = {"urdf_path": urdf_path, "prim_path": prim_path}
-            if position: params["position"] = position
+            if position:
+                params["position"] = position
             result = conn.send_command("assets.import_urdf", params)
             return json.dumps(result, indent=2)
         except Exception as e:
             return json.dumps({"status": "error", "message": str(e)})
 
     @mcp.tool("load_usd")
-    def load_usd(usd_url: str, prim_path: str = "/World/my_usd",
-                 position: Optional[List[float]] = None, scale: Optional[List[float]] = None) -> str:
+    def load_usd(
+        usd_url: str,
+        prim_path: str = "/World/my_usd",
+        position: Optional[List[float]] = None,
+        scale: Optional[List[float]] = None,
+    ) -> str:
         """Load a USD asset from a URL or file path into the scene.
 
         Args:
@@ -2071,16 +2223,22 @@ def register_tools(mcp: FastMCP, get_connection):
         try:
             conn = get_connection()
             params = {"usd_url": usd_url, "prim_path": prim_path}
-            if position: params["position"] = position
-            if scale: params["scale"] = scale
+            if position:
+                params["position"] = position
+            if scale:
+                params["scale"] = scale
             result = conn.send_command("assets.load_usd", params)
             return json.dumps(result, indent=2)
         except Exception as e:
             return json.dumps({"status": "error", "message": str(e)})
 
     @mcp.tool("search_usd")
-    def search_usd(text_prompt: str, target_path: str = "/World/my_usd",
-                   position: Optional[List[float]] = None, scale: Optional[List[float]] = None) -> str:
+    def search_usd(
+        text_prompt: str,
+        target_path: str = "/World/my_usd",
+        position: Optional[List[float]] = None,
+        scale: Optional[List[float]] = None,
+    ) -> str:
         """Search the NVIDIA USD asset library by text description, then load the best match.
 
         Args:
@@ -2092,16 +2250,22 @@ def register_tools(mcp: FastMCP, get_connection):
         try:
             conn = get_connection()
             params = {"text_prompt": text_prompt, "target_path": target_path}
-            if position: params["position"] = position
-            if scale: params["scale"] = scale
+            if position:
+                params["position"] = position
+            if scale:
+                params["scale"] = scale
             result = conn.send_command("assets.search_usd", params)
             return json.dumps(result, indent=2)
         except Exception as e:
             return json.dumps({"status": "error", "message": str(e)})
 
     @mcp.tool("generate_3d")
-    def generate_3d(text_prompt: Optional[str] = None, image_url: Optional[str] = None,
-                    position: Optional[List[float]] = None, scale: Optional[List[float]] = None) -> str:
+    def generate_3d(
+        text_prompt: Optional[str] = None,
+        image_url: Optional[str] = None,
+        position: Optional[List[float]] = None,
+        scale: Optional[List[float]] = None,
+    ) -> str:
         """Generate a 3D model from text or image using Beaver3D, then load it into the scene.
 
         Args:
@@ -2113,10 +2277,14 @@ def register_tools(mcp: FastMCP, get_connection):
         try:
             conn = get_connection()
             params = {}
-            if text_prompt: params["text_prompt"] = text_prompt
-            if image_url: params["image_url"] = image_url
-            if position: params["position"] = position
-            if scale: params["scale"] = scale
+            if text_prompt:
+                params["text_prompt"] = text_prompt
+            if image_url:
+                params["image_url"] = image_url
+            if position:
+                params["position"] = position
+            if scale:
+                params["scale"] = scale
             result = conn.send_command("assets.generate_3d", params)
             return json.dumps(result, indent=2)
         except Exception as e:
@@ -2180,8 +2348,9 @@ def register_tools(mcp: FastMCP, get_connection):
             return json.dumps({"status": "error", "message": str(e)})
 
     @mcp.tool("set_physics_params")
-    def set_physics_params(gravity: Optional[List[float]] = None, time_step: Optional[float] = None,
-                           gpu_enabled: Optional[bool] = None) -> str:
+    def set_physics_params(
+        gravity: Optional[List[float]] = None, time_step: Optional[float] = None, gpu_enabled: Optional[bool] = None
+    ) -> str:
         """Configure physics engine parameters.
 
         Args:
@@ -2192,9 +2361,12 @@ def register_tools(mcp: FastMCP, get_connection):
         try:
             conn = get_connection()
             params = {}
-            if gravity is not None: params["gravity"] = gravity
-            if time_step is not None: params["time_step"] = time_step
-            if gpu_enabled is not None: params["gpu_enabled"] = gpu_enabled
+            if gravity is not None:
+                params["gravity"] = gravity
+            if time_step is not None:
+                params["time_step"] = time_step
+            if gpu_enabled is not None:
+                params["gpu_enabled"] = gpu_enabled
             result = conn.send_command("simulation.set_physics", params)
             return json.dumps(result, indent=2)
         except Exception as e:
@@ -2354,7 +2526,6 @@ from .handlers import register_all_handlers
 
 
 class MCPExtension(omni.ext.IExt):
-
     def __init__(self):
         super().__init__()
         self.ext_id = None
@@ -2470,6 +2641,7 @@ class MCPExtension(omni.ext.IExt):
                     pass
 
         from omni.kit.async_engine import run_coroutine
+
         run_coroutine(execute_wrapper())
 
     # ── Command routing ────────────────────────────────────
@@ -2484,7 +2656,10 @@ class MCPExtension(omni.ext.IExt):
                 if result and result.get("status") == "success":
                     return {"status": "success", "result": result}
                 else:
-                    return {"status": "error", "message": result.get("message", "Unknown error") if result else "No result"}
+                    return {
+                        "status": "error",
+                        "message": result.get("message", "Unknown error") if result else "No result",
+                    }
             except Exception as e:
                 traceback.print_exc()
                 return {"status": "error", "message": str(e)}

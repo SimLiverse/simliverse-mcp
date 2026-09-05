@@ -54,23 +54,30 @@ def _sides(centre: np.ndarray, size: np.ndarray) -> dict[str, dict[str, Any]]:
     """
     half = size / 2.0
     return {
-        "north": {"axis": 0, "fixed": float(centre[1] + half[1]),
-                  "span": (float(centre[0] - half[0]),
-                           float(centre[0] + half[0]))},
-        "south": {"axis": 0, "fixed": float(centre[1] - half[1]),
-                  "span": (float(centre[0] - half[0]),
-                           float(centre[0] + half[0]))},
-        "east": {"axis": 1, "fixed": float(centre[0] + half[0]),
-                 "span": (float(centre[1] - half[1]),
-                          float(centre[1] + half[1]))},
-        "west": {"axis": 1, "fixed": float(centre[0] - half[0]),
-                 "span": (float(centre[1] - half[1]),
-                          float(centre[1] + half[1]))},
+        "north": {
+            "axis": 0,
+            "fixed": float(centre[1] + half[1]),
+            "span": (float(centre[0] - half[0]), float(centre[0] + half[0])),
+        },
+        "south": {
+            "axis": 0,
+            "fixed": float(centre[1] - half[1]),
+            "span": (float(centre[0] - half[0]), float(centre[0] + half[0])),
+        },
+        "east": {
+            "axis": 1,
+            "fixed": float(centre[0] + half[0]),
+            "span": (float(centre[1] - half[1]), float(centre[1] + half[1])),
+        },
+        "west": {
+            "axis": 1,
+            "fixed": float(centre[0] - half[0]),
+            "span": (float(centre[1] - half[1]), float(centre[1] + half[1])),
+        },
     }
 
 
-def _runs(span: tuple[float, float],
-          openings: list[tuple[float, float]]) -> list[tuple[float, float]]:
+def _runs(span: tuple[float, float], openings: list[tuple[float, float]]) -> list[tuple[float, float]]:
     """Split a fence line into the stretches that actually get panelled.
 
     An opening is a gap in the guarding - a gate, or the slot a conveyor runs
@@ -95,8 +102,7 @@ def _runs(span: tuple[float, float],
     return [(a, b) for a, b in keep if (b - a) > 1e-6]
 
 
-def _translucent(scene: Any, prim_path: str, opacity: float,
-                 colour: Any = (0.62, 0.70, 0.76)) -> bool:
+def _translucent(scene: Any, prim_path: str, opacity: float, colour: Any = (0.62, 0.70, 0.76)) -> bool:
     """Make a panel see-through, so the guarding does not hide the cell.
 
     Guarding is mesh. Opaque panels are not a cosmetic problem: the render is
@@ -128,17 +134,14 @@ def _translucent(scene: Any, prim_path: str, opacity: float,
             material = UsdShade.Material.Define(stage, material_path)
             shader = UsdShade.Shader.Define(stage, material_path + "/Surface")
             shader.CreateIdAttr("UsdPreviewSurface")
-            shader.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).Set(
-                Gf.Vec3f(*(float(c) for c in colour)))
-            shader.CreateInput("opacity", Sdf.ValueTypeNames.Float).Set(
-                float(opacity))
+            shader.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f(*(float(c) for c in colour)))
+            shader.CreateInput("opacity", Sdf.ValueTypeNames.Float).Set(float(opacity))
             # Near-smooth on purpose. At 0.25 the panels came out frosted:
             # translucent by the numbers, and the cell behind them was a blur.
             # Guarding mesh reads as clear at this distance.
             shader.CreateInput("roughness", Sdf.ValueTypeNames.Float).Set(0.05)
             shader.CreateInput("metallic", Sdf.ValueTypeNames.Float).Set(0.0)
-            material.CreateSurfaceOutput().ConnectToSource(
-                shader.ConnectableAPI(), "surface")
+            material.CreateSurfaceOutput().ConnectToSource(shader.ConnectableAPI(), "surface")
 
         UsdShade.MaterialBindingAPI.Apply(prim)
         UsdShade.MaterialBindingAPI(prim).Bind(material)
@@ -155,9 +158,16 @@ class SafetyFence:
     A cell is specified by the floor it occupies, so that is what this takes.
     """
 
-    def __init__(self, prim_path: str, *, centre: Any, size: Any,
-                 height: float, openings: dict[str, list[tuple[float, float]]],
-                 scene: Any = None) -> None:
+    def __init__(
+        self,
+        prim_path: str,
+        *,
+        centre: Any,
+        size: Any,
+        height: float,
+        openings: dict[str, list[tuple[float, float]]],
+        scene: Any = None,
+    ) -> None:
         self.prim_path = prim_path
         self.centre = np.asarray(centre, dtype=float).reshape(2)
         self.size = np.asarray(size, dtype=float).reshape(2)
@@ -168,9 +178,7 @@ class SafetyFence:
         self.posts: list[str] = []
 
     def __repr__(self) -> str:
-        return (f"SafetyFence({self.prim_path!r}, "
-                f"{self.size[0]:.2f} x {self.size[1]:.2f} m, "
-                f"{len(self.panels)} panels)")
+        return f"SafetyFence({self.prim_path!r}, {self.size[0]:.2f} x {self.size[1]:.2f} m, {len(self.panels)} panels)"
 
     @classmethod
     def build(
@@ -208,20 +216,19 @@ class SafetyFence:
         size = np.asarray(size, dtype=float).reshape(2)
 
         if np.any(size <= 0):
-            raise GuardingError(
-                f"size={size.tolist()}: a guarded area needs positive extents.")
+            raise GuardingError(f"size={size.tolist()}: a guarded area needs positive extents.")
         if height <= 0:
             raise GuardingError(f"height={height}: a fence has positive height.")
 
         sides = _sides(centre, size)
         if gate is not None and gate not in sides:
-            raise GuardingError(
-                f"gate={gate!r}: expected one of {sorted(sides)}.")
+            raise GuardingError(f"gate={gate!r}: expected one of {sorted(sides)}.")
         if gate is not None and gate_width < MIN_GATE_WIDTH:
             raise GuardingError(
                 f"gate_width={gate_width}: a person has to get through it, and "
                 f"{MIN_GATE_WIDTH} m is the least that is a gate rather than a "
-                f"hatch.")
+                f"hatch."
+            )
 
         openings: dict[str, list[tuple[float, float]]] = {k: [] for k in sides}
         if gate is not None:
@@ -232,23 +239,21 @@ class SafetyFence:
                 raise GuardingError(
                     f"A {gate_width:.2f} m gate at offset {gate_offset:.2f} runs "
                     f"off the {gate} side, which spans {lo:.2f}..{hi:.2f}. That "
-                    f"leaves a corner unguarded rather than a doorway.")
+                    f"leaves a corner unguarded rather than a doorway."
+                )
             openings[gate].append(opening)
 
-        for crossing in (crossings or []):
+        for crossing in crossings or []:
             side = crossing["side"]
             if side not in sides:
-                raise GuardingError(
-                    f"crossing side={side!r}: expected one of {sorted(sides)}.")
+                raise GuardingError(f"crossing side={side!r}: expected one of {sorted(sides)}.")
             width = float(crossing["width"])
             if width <= 0:
-                raise GuardingError(
-                    f"crossing width={width}: a gap has positive width.")
+                raise GuardingError(f"crossing width={width}: a gap has positive width.")
             mid = float(crossing["centre"])
             openings[side].append((mid - width / 2.0, mid + width / 2.0))
 
-        fence = cls(prim_path, centre=centre, size=size, height=height,
-                    openings=openings, scene=scene)
+        fence = cls(prim_path, centre=centre, size=size, height=height, openings=openings, scene=scene)
 
         z = PANEL_GROUND_GAP + height / 2.0
         for name, line in sides.items():
@@ -266,8 +271,14 @@ class SafetyFence:
                         scale = [0.01, along, height / 2.0]
                         pos = [line["fixed"], mid, z]
                     scene.spawn_rigid(
-                        path, shape="cube", scale=scale, position=pos,
-                        mass=0.0, static=True, friction=0.4, restitution=0.0,
+                        path,
+                        shape="cube",
+                        scale=scale,
+                        position=pos,
+                        mass=0.0,
+                        static=True,
+                        friction=0.4,
+                        restitution=0.0,
                         color=(0.55, 0.60, 0.65),
                     )
                     _translucent(scene, path, panel_opacity)
@@ -286,15 +297,18 @@ class SafetyFence:
         for name, line in sides.items():
             for a, b in openings[name]:
                 for edge in (a, b):
-                    stations.append((edge, line["fixed"]) if line["axis"] == 0
-                                    else (line["fixed"], edge))
+                    stations.append((edge, line["fixed"]) if line["axis"] == 0 else (line["fixed"], edge))
         for index, (x, y) in enumerate(stations):
             path = f"{prim_path}_Post{index}"
             scene.spawn_rigid(
-                path, shape="cube",
+                path,
+                shape="cube",
                 scale=[POST_SIDE / 2.0, POST_SIDE / 2.0, height / 2.0],
                 position=[float(x), float(y), z],
-                mass=0.0, static=True, friction=0.4, restitution=0.0,
+                mass=0.0,
+                static=True,
+                friction=0.4,
+                restitution=0.0,
                 color=colour,
             )
             fence.posts.append(path)
@@ -348,18 +362,20 @@ class SafetyFence:
             "centre": self.centre.tolist(),
             "size": self.size.tolist(),
             "height": self.height,
-            "openings": {k: [list(o) for o in v]
-                         for k, v in self.openings.items() if v},
+            "openings": {k: [list(o) for o in v] for k, v in self.openings.items() if v},
             "panels": len(self.panels),
             "posts": len(self.posts),
         }
 
 
-def spawn_cabinet(prim_path: str = "/World/Cabinet", *,
-                  position: Any = (0.0, 0.0, 0.0),
-                  size: Any = (0.6, 0.5, 1.0),
-                  colour: Any = (0.85, 0.35, 0.05),
-                  scene: Any = None) -> str:
+def spawn_cabinet(
+    prim_path: str = "/World/Cabinet",
+    *,
+    position: Any = (0.0, 0.0, 0.0),
+    size: Any = (0.6, 0.5, 1.0),
+    colour: Any = (0.85, 0.35, 0.05),
+    scene: Any = None,
+) -> str:
     """The control cabinet. Positioned by its footprint on the floor.
 
     `position` is where it stands, not where its centre floats: a cabinet
@@ -372,38 +388,56 @@ def spawn_cabinet(prim_path: str = "/World/Cabinet", *,
     extent = np.asarray(size, dtype=float).reshape(3)
     at = np.asarray(position, dtype=float).reshape(3)
     scene.spawn_rigid(
-        prim_path, shape="cube",
+        prim_path,
+        shape="cube",
         scale=(extent / 2.0).tolist(),
         position=[float(at[0]), float(at[1]), float(at[2] + extent[2] / 2.0)],
-        mass=0.0, static=True, friction=0.6, restitution=0.0, color=colour,
+        mass=0.0,
+        static=True,
+        friction=0.6,
+        restitution=0.0,
+        color=colour,
     )
     return prim_path
 
 
-def spawn_beacon(prim_path: str = "/World/Beacon", *,
-                 position: Any = (0.0, 0.0, 0.0),
-                 height: float = 1.0,
-                 colour: Any = (0.10, 0.25, 0.90),
-                 scene: Any = None) -> str:
+def spawn_beacon(
+    prim_path: str = "/World/Beacon",
+    *,
+    position: Any = (0.0, 0.0, 0.0),
+    height: float = 1.0,
+    colour: Any = (0.10, 0.25, 0.90),
+    scene: Any = None,
+) -> str:
     """A stack light on a post. Stands on the floor at `position`."""
     from .scene import Scene
 
     scene = scene or Scene.get()
     at = np.asarray(position, dtype=float).reshape(3)
     scene.spawn_rigid(
-        prim_path, shape="cylinder", radius=0.05, size=float(height),
+        prim_path,
+        shape="cylinder",
+        radius=0.05,
+        size=float(height),
         position=[float(at[0]), float(at[1]), float(at[2] + height / 2.0)],
-        mass=0.0, static=True, friction=0.4, restitution=0.0, color=colour,
+        mass=0.0,
+        static=True,
+        friction=0.4,
+        restitution=0.0,
+        color=colour,
     )
     return prim_path
 
 
-def spawn_operator_platform(prim_path: str = "/World/OperatorPlatform", *,
-                            position: Any = (0.0, 0.0, 0.0),
-                            size: Any = (1.2, 1.6),
-                            thickness: float = 0.05,
-                            colour: Any = (0.90, 0.80, 0.10),
-                            scene: Any = None) -> str:
+def spawn_operator_platform(
+    prim_path: str = "/World/OperatorPlatform",
+    *,
+    position: Any = (0.0, 0.0, 0.0),
+    size: Any = (1.2, 1.6),
+    thickness: float = 0.05,
+    colour: Any = (0.90, 0.80, 0.10),
+    scene: Any = None,
+) -> str:
     """The marked-out standing area outside the gate.
 
     Sits on the floor rather than in it, so it reads as a platform in a render
@@ -415,21 +449,28 @@ def spawn_operator_platform(prim_path: str = "/World/OperatorPlatform", *,
     at = np.asarray(position, dtype=float).reshape(3)
     extent = np.asarray(size, dtype=float).reshape(2)
     scene.spawn_rigid(
-        prim_path, shape="cube",
-        scale=[float(extent[0] / 2.0), float(extent[1] / 2.0),
-               float(thickness / 2.0)],
+        prim_path,
+        shape="cube",
+        scale=[float(extent[0] / 2.0), float(extent[1] / 2.0), float(thickness / 2.0)],
         position=[float(at[0]), float(at[1]), float(at[2] + thickness / 2.0)],
-        mass=0.0, static=True, friction=0.8, restitution=0.0, color=colour,
+        mass=0.0,
+        static=True,
+        friction=0.8,
+        restitution=0.0,
+        color=colour,
     )
     return prim_path
 
 
-def spawn_pedestal(prim_path: str = "/World/Pedestal", *,
-                   position: Any = (0.0, 0.0, 0.0),
-                   height: float = 0.40,
-                   size: Any = (0.45, 0.45),
-                   colour: Any = (0.30, 0.32, 0.35),
-                   scene: Any = None) -> dict[str, Any]:
+def spawn_pedestal(
+    prim_path: str = "/World/Pedestal",
+    *,
+    position: Any = (0.0, 0.0, 0.0),
+    height: float = 0.40,
+    size: Any = (0.45, 0.45),
+    colour: Any = (0.30, 0.32, 0.35),
+    scene: Any = None,
+) -> dict[str, Any]:
     """The plinth an arm is bolted to. Its *top* is the robot's base height.
 
     This is structure, not scenery. A pedestal that is drawn under an arm
@@ -447,19 +488,22 @@ def spawn_pedestal(prim_path: str = "/World/Pedestal", *,
     scene = scene or Scene.get()
     if height <= 0:
         raise GuardingError(
-            f"height={height}: a pedestal with no height is not a mounting, "
-            f"and an arm bolted to it sits on the floor.")
+            f"height={height}: a pedestal with no height is not a mounting, and an arm bolted to it sits on the floor."
+        )
     at = np.asarray(position, dtype=float).reshape(3)
     extent = np.asarray(size, dtype=float).reshape(2)
     scene.spawn_rigid(
-        prim_path, shape="cube",
-        scale=[float(extent[0] / 2.0), float(extent[1] / 2.0),
-               float(height / 2.0)],
+        prim_path,
+        shape="cube",
+        scale=[float(extent[0] / 2.0), float(extent[1] / 2.0), float(height / 2.0)],
         position=[float(at[0]), float(at[1]), float(at[2] + height / 2.0)],
-        mass=0.0, static=True, friction=0.6, restitution=0.0, color=colour,
+        mass=0.0,
+        static=True,
+        friction=0.6,
+        restitution=0.0,
+        color=colour,
     )
-    return {"prim_path": prim_path, "top": float(at[2] + height),
-            "height": float(height)}
+    return {"prim_path": prim_path, "top": float(at[2] + height), "height": float(height)}
 
 
 def _stand_on_floor(scene: Any, prim_path: str, floor_z: float) -> float:
@@ -480,8 +524,7 @@ def _stand_on_floor(scene: Any, prim_path: str, floor_z: float) -> float:
     prim = stage.GetPrimAtPath(prim_path)
     if not prim or not prim.IsValid():
         return floor_z
-    cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(),
-                              [UsdGeom.Tokens.default_, UsdGeom.Tokens.render])
+    cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_, UsdGeom.Tokens.render])
     rng = cache.ComputeWorldBound(prim).ComputeAlignedRange()
     if rng.IsEmpty():
         return floor_z
@@ -504,12 +547,15 @@ def _stand_on_floor(scene: Any, prim_path: str, floor_z: float) -> float:
 DEFAULT_OPERATOR = "male_adult_construction_01_new"
 
 
-def spawn_operator(prim_path: str = "/World/Operator", *,
-                   position: Any = (0.0, 0.0, 0.0),
-                   character: str = DEFAULT_OPERATOR,
-                   facing: float = 0.0,
-                   fence: "SafetyFence | None" = None,
-                   scene: Any = None) -> dict[str, Any]:
+def spawn_operator(
+    prim_path: str = "/World/Operator",
+    *,
+    position: Any = (0.0, 0.0, 0.0),
+    character: str = DEFAULT_OPERATOR,
+    facing: float = 0.0,
+    fence: "SafetyFence | None" = None,
+    scene: Any = None,
+) -> dict[str, Any]:
     """A person, from the asset library, standing where you put them.
 
     `fence`, when given, is checked: a person authored inside the guarding is
@@ -523,12 +569,10 @@ def spawn_operator(prim_path: str = "/World/Operator", *,
 
     scene = scene or Scene.get()
     at = np.asarray(position, dtype=float).reshape(3)
-    entry = spawn_prop(character, prim_path=prim_path,
-                       position=[float(at[0]), float(at[1]), float(at[2])],
-                       scene=scene)
+    entry = spawn_prop(character, prim_path=prim_path, position=[float(at[0]), float(at[1]), float(at[2])], scene=scene)
 
     if facing:
-        from pxr import Gf, UsdGeom
+        from pxr import UsdGeom
 
         prim = scene.stage.GetPrimAtPath(prim_path)
         UsdGeom.Xformable(prim).AddRotateZOp().Set(float(facing))
@@ -549,6 +593,8 @@ def spawn_operator(prim_path: str = "/World/Operator", *,
                 "The operator at (%.2f, %.2f) is inside the guarding at %s. "
                 "That is a cell nobody is allowed to run with the robot live, "
                 "so it wants to be a choice rather than an accident.",
-                float(at[0]), float(at[1]), fence.prim_path,
+                float(at[0]),
+                float(at[1]),
+                fence.prim_path,
             )
     return report

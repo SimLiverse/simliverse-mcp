@@ -120,8 +120,7 @@ def since(path: Optional[str], start: int, limit: int = 20) -> List[str]:
 
     ordered = sorted(counts, key=lambda k: (rank[k], -counts[k]))
     out = [
-        "[%s] %s%s"
-        % (_LABELS[rank[key]], first[key], f"  (x{counts[key]})" if counts[key] > 1 else "")
+        "[%s] %s%s" % (_LABELS[rank[key]], first[key], f"  (x{counts[key]})" if counts[key] > 1 else "")
         for key in ordered[:limit]
     ]
     if len(ordered) > limit:

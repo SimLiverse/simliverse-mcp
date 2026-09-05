@@ -222,7 +222,8 @@ def drive_surface(prim_path: str, velocity: Any, *, enabled: bool = True) -> dic
             "Belt speed %.2f m/s is outside the %.0f-%.0f m/s range real "
             "conveyors run at. Check the units — this is metres per second, "
             "not per minute.",
-            speed, *_SANE_SPEED,
+            speed,
+            *_SANE_SPEED,
         )
 
     applied = api.Apply(prim)
@@ -340,10 +341,7 @@ class Conveyor:
         # Centre of the belt deck and the across-travel axis. Set here so every
         # reader can rely on them; `build`/`from_prop` overwrite them with the
         # measured values rather than leaving later code to `getattr` a default.
-        self._origin = (
-            np.zeros(3) if centre is None
-            else as_vec3(centre, name="centre").astype(float)
-        )
+        self._origin = np.zeros(3) if centre is None else as_vec3(centre, name="centre").astype(float)
         self._across = np.array([-self.direction[1], self.direction[0], 0.0])
         self.box_size: np.ndarray | None = None
         self.asset: dict[str, Any] | None = None
@@ -401,9 +399,7 @@ class Conveyor:
         deck = 0.06  # slab thickness; the belt is a deck, not a block
 
         if length <= 0 or width <= 0:
-            raise ConveyorError(
-                f"length={length} width={width}: a belt needs positive extents."
-            )
+            raise ConveyorError(f"length={length} width={width}: a belt needs positive extents.")
 
         # `spawn_rigid` scales a Cube whose default size is 2.0, so a half-extent
         # is what goes in. Getting this wrong by the factor of two is the single
@@ -433,12 +429,14 @@ class Conveyor:
                     f"{prim_path}_Guide{side}",
                     shape="cube",
                     scale=[length / 2.0, 0.015, guide_height / 2.0],
-                    position=[centre[0] + sign * offset[0],
-                              centre[1] + sign * offset[1],
-                              centre[2] + guide_height / 2.0],
+                    position=[
+                        centre[0] + sign * offset[0],
+                        centre[1] + sign * offset[1],
+                        centre[2] + guide_height / 2.0,
+                    ],
                     orientation=[0.0, 0.0, yaw],
                     mass=0.0,
-                    friction=0.2,   # rails guide; they must not also brake
+                    friction=0.2,  # rails guide; they must not also brake
                     restitution=0.0,
                     static=True,
                     color=color,
@@ -447,9 +445,15 @@ class Conveyor:
         gate_path = None
         if gate:
             gate_path = _build_gate(
-                scene, f"{prim_path}Gate", centre=centre, heading=heading,
-                length=length, width=width, yaw=yaw,
-                height=gate_height, thickness=gate_thickness,
+                scene,
+                f"{prim_path}Gate",
+                centre=centre,
+                heading=heading,
+                length=length,
+                width=width,
+                yaw=yaw,
+                height=gate_height,
+                thickness=gate_thickness,
             )
 
         belt = cls(
@@ -478,7 +482,10 @@ class Conveyor:
                     "'outside the workspace'. Measured on a KR210 — commanded "
                     "home, joints did not move, end effector pinned at the deck "
                     "height. Offset the belt across its travel, or shorten it.",
-                    prim_path, hit["robot"], hit["offset"], hit["half_width"],
+                    prim_path,
+                    hit["robot"],
+                    hit["offset"],
+                    hit["half_width"],
                 )
         if dressing:
             belt.dress(dressing, deck=dressing_deck)
@@ -487,9 +494,13 @@ class Conveyor:
         belt._stamp()
         return belt
 
-    def dress(self, prop: str = "conveyorbelt_a05", *,
-              deck: float = DRESSING_DECK,
-              section_length: float = DRESSING_SECTION_LENGTH) -> dict[str, Any]:
+    def dress(
+        self,
+        prop: str = "conveyorbelt_a05",
+        *,
+        deck: float = DRESSING_DECK,
+        section_length: float = DRESSING_SECTION_LENGTH,
+    ) -> dict[str, Any]:
         """Put a real conveyor over the slab, and hide the slab.
 
         The slab is the physics: a kinematic body with a surface velocity, a
@@ -535,12 +546,11 @@ class Conveyor:
         key = prop
         for index in range(count):
             at = far_end + heading[:2] * (index * section_length)
-            path = (f"{self.belt_path}_Dressing{index}" if count > 1
-                    else f"{self.belt_path}_Dressing")
+            path = f"{self.belt_path}_Dressing{index}" if count > 1 else f"{self.belt_path}_Dressing"
             entry = spawn_prop(
-                prop, prim_path=path,
-                position=[float(at[0]), float(at[1]),
-                          float(self.top_z) - float(deck)],
+                prop,
+                prim_path=path,
+                position=[float(at[0]), float(at[1]), float(self.top_z) - float(deck)],
                 orientation=[0.0, 0.0, yaw],
                 scene=self.scene,
             )
@@ -565,11 +575,12 @@ class Conveyor:
                     "%s dresses at %.2f m wide but the belt itself is %.2f m; "
                     "a fence crossing sized off the belt will be narrower "
                     "than what actually has to pass through it.",
-                    prop, real_width, self.width,
+                    prop,
+                    real_width,
+                    self.width,
                 )
 
-        return {"prim_paths": paths, "prop": key, "sections": count,
-                "deck": float(deck), "width": real_width}
+        return {"prim_paths": paths, "prop": key, "sections": count, "deck": float(deck), "width": real_width}
 
     def _hide(self, prim_path: str) -> bool:
         """Make a prim invisible without touching its collider.
@@ -623,12 +634,14 @@ class Conveyor:
             along = abs(float(np.dot(delta, self.direction[:2])))
             across = abs(float(np.dot(delta, self._across[:2])))
             if along <= half_length and across <= half_width:
-                hits.append({
-                    "robot": path,
-                    "offset": round(across, 4),
-                    "along": round(along, 4),
-                    "half_width": round(half_width, 4),
-                })
+                hits.append(
+                    {
+                        "robot": path,
+                        "offset": round(across, 4),
+                        "along": round(along, 4),
+                        "half_width": round(half_width, 4),
+                    }
+                )
         return hits
 
     @classmethod
@@ -710,7 +723,9 @@ class Conveyor:
                 "driven by one world-space velocity — boxes leave over the side. "
                 "Pick a straight variant such as conveyorbelt_a09, or build the "
                 "belt with Conveyor.build().",
-                entry["key"], along, across,
+                entry["key"],
+                along,
+                across,
             )
 
         # `position` means the centre of the belt's deck footprint -- the thing
@@ -723,8 +738,7 @@ class Conveyor:
         # belong on the floor.
         want = as_vec3(position, name="position")
         deck_centre = np.array([(low[0] + high[0]) / 2.0, (low[1] + high[1]) / 2.0])
-        delta = np.array([float(want[0]) - deck_centre[0],
-                          float(want[1]) - deck_centre[1], 0.0])
+        delta = np.array([float(want[0]) - deck_centre[0], float(want[1]) - deck_centre[1], 0.0])
         if float(np.abs(delta).max()) > 1e-4:
             from pxr import Gf, UsdGeom
 
@@ -754,9 +768,7 @@ class Conveyor:
         # The belt surface is what gets driven and what boxes are laid on, so
         # every measurement below comes off it rather than off the wrapper.
         belt.body_path = deck_path
-        belt._origin = np.array(
-            [(low[0] + high[0]) / 2.0, (low[1] + high[1]) / 2.0, float(high[2])]
-        )
+        belt._origin = np.array([(low[0] + high[0]) / 2.0, (low[1] + high[1]) / 2.0, float(high[2])])
         belt._across = across_v
         belt.asset = entry
         if gate:
@@ -764,11 +776,15 @@ class Conveyor:
             # the far end and fall. Measured on A09: three boxes travelled the
             # full length and dropped 0.88 m onto the floor.
             belt.gate_path = _build_gate(
-                scene, f"{prim_path}Gate",
-                centre=belt._origin, heading=heading,
-                length=along, width=across,
+                scene,
+                f"{prim_path}Gate",
+                centre=belt._origin,
+                heading=heading,
+                length=along,
+                width=across,
                 yaw=float(np.degrees(np.arctan2(heading[1], heading[0]))),
-                height=gate_height, thickness=gate_thickness,
+                height=gate_height,
+                thickness=gate_thickness,
             )
 
         belt.start()
@@ -848,9 +864,7 @@ class Conveyor:
         if np.any(size <= 0):
             raise ConveyorError(f"box={list(size)}: every dimension must be positive.")
         if self.length is not None and size[0] >= self.length:
-            raise ConveyorError(
-                f"A {size[0]:.2f} m box does not fit on a {self.length:.2f} m belt."
-            )
+            raise ConveyorError(f"A {size[0]:.2f} m box does not fit on a {self.length:.2f} m belt.")
 
         gap = float(spacing) if spacing is not None else float(size[0]) * 1.6
         origin = self._origin
@@ -1038,10 +1052,14 @@ class Conveyor:
             # the gate, the arm was sent to fetch it 1.08 m away, and `pose_to`
             # reported the target as outside the workspace - which is true, and
             # names the arm rather than the belt that handed it a fallen box.
-            across = abs(float(np.cross(
-                np.append(self.direction[:2], 0.0),
-                np.append(position[:2] - origin[:2], 0.0),
-            )[2]))
+            across = abs(
+                float(
+                    np.cross(
+                        np.append(self.direction[:2], 0.0),
+                        np.append(position[:2] - origin[:2], 0.0),
+                    )[2]
+                )
+            )
             half_width = (self.width or 0.0) / 2.0
             half_box = float(self.box_size[1]) / 2.0 if self.box_size is not None else 0.0
             if half_width and across > half_width + half_box:
@@ -1200,7 +1218,8 @@ def _belt_surface(prim_path: str) -> str:
         "whole prop is being treated as the belt. If this asset is a frame with "
         "a belt inside it, the deck height is wrong by the height of the frame "
         "and boxes will be spawned in the air.",
-        prim_path, ", ".join(_DECK_NAMES),
+        prim_path,
+        ", ".join(_DECK_NAMES),
     )
     return prim_path
 

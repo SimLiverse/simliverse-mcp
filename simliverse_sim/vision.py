@@ -127,9 +127,7 @@ def png(
     try:
         from omni.kit.viewport.utility import capture_viewport_to_file
     except ImportError as exc:  # pragma: no cover - needs Kit
-        raise VisionUnavailable(
-            "omni.kit.viewport.utility.capture_viewport_to_file is unavailable."
-        ) from exc
+        raise VisionUnavailable("omni.kit.viewport.utility.capture_viewport_to_file is unavailable.") from exc
 
     viewport = _viewport()
     target = path or os.path.join(tempfile.gettempdir(), "simliverse_view.png")
@@ -181,9 +179,7 @@ def capture(*, settle_frames: int = DEFAULT_SETTLE_FRAMES) -> Any:
         import numpy as np
         from PIL import Image
     except ImportError as exc:  # pragma: no cover - needs Kit
-        raise VisionUnavailable(
-            "Pillow/numpy unavailable, so the frame cannot be decoded."
-        ) from exc
+        raise VisionUnavailable("Pillow/numpy unavailable, so the frame cannot be decoded.") from exc
     return np.asarray(Image.open(report["path"]).convert("RGB"))
 
 
@@ -245,17 +241,13 @@ def views(
     try:
         from isaacsim.core.rendering_manager import ViewportManager
     except ImportError as exc:  # pragma: no cover - needs Kit
-        raise VisionUnavailable(
-            "isaacsim.core.rendering_manager is unavailable."
-        ) from exc
+        raise VisionUnavailable("isaacsim.core.rendering_manager is unavailable.") from exc
 
     origin = np.asarray(centre, dtype=float).reshape(3)
     wanted = list(names) if names else list(STANDARD_VIEWS)
     unknown = [n for n in wanted if n not in STANDARD_VIEWS]
     if unknown:
-        raise ValueError(
-            f"Unknown view(s) {unknown}. Known: {sorted(STANDARD_VIEWS)}"
-        )
+        raise ValueError(f"Unknown view(s) {unknown}. Known: {sorted(STANDARD_VIEWS)}")
 
     manager = ViewportManager()
     viewport = _viewport()
@@ -270,9 +262,7 @@ def views(
 
         prim = get_stage().GetPrimAtPath(camera)
         if prim:
-            before = UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(
-                Usd.TimeCode.Default()
-            )
+            before = UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(Usd.TimeCode.Default())
     except Exception:  # pragma: no cover - restoring is best effort
         before = None
 

@@ -55,11 +55,26 @@ class Morphology(str, Enum):
 # those come from the robot's own URDF/USD and are far more stable than the prim
 # path a user happened to spawn it at.
 GRIPPER_TOKENS = (
-    "finger", "gripper", "knuckle", "jaw", "grip_", "claw",
+    "finger",
+    "gripper",
+    "knuckle",
+    "jaw",
+    "grip_",
+    "claw",
     # Per-finger naming used by dexterous hands (Allegro, Shadow, LEAP).
-    "thumb", "index", "middle", "ring", "pinky", "little", "forefinger",
+    "thumb",
+    "index",
+    "middle",
+    "ring",
+    "pinky",
+    "little",
+    "forefinger",
     # Shadow Hand's abbreviated joints: FFJ1, MFJ2, RFJ3, LFJ4, THJ5.
-    "ffj", "mfj", "rfj", "lfj", "thj",
+    "ffj",
+    "mfj",
+    "rfj",
+    "lfj",
+    "thj",
 )
 WHEEL_TOKENS = ("wheel", "caster", "roller")
 STEER_TOKENS = ("steer", "steering")
@@ -146,7 +161,7 @@ def classify_morphology(
     if len(groups.rotors) >= 3 or len(rotor_links) >= 3:
         return Morphology.AERIAL
 
-    has_legs = len(groups.legs) >= 8      # four limbs x >= 2 joints
+    has_legs = len(groups.legs) >= 8  # four limbs x >= 2 joints
     has_arms = len(groups.arms) >= 4
     has_wheels = len(groups.wheels) >= 2
 
@@ -237,9 +252,7 @@ class Robot:
         """Load a robot from the Isaac asset library and return a typed handle."""
         from .library import spawn_robot
 
-        return spawn_robot(
-            robot_type, prim_path=prim_path, position=position, scene=scene, **kwargs
-        )
+        return spawn_robot(robot_type, prim_path=prim_path, position=position, scene=scene, **kwargs)
 
     # ── Joint state ───────────────────────────────────────────────────────────
 
@@ -390,22 +403,15 @@ class Robot:
             )
             return [(None, None)] * self.dof
 
-        return [
-            (float(low), float(high)) if has else (None, None)
-            for low, high, has in zip(lower, upper, limited)
-        ]
+        return [(float(low), float(high)) if has else (None, None) for low, high, has in zip(lower, upper, limited)]
 
     def joint_index(self, name: str) -> int:
         try:
             return self.joint_names.index(name)
         except ValueError as exc:
-            raise ValueError(
-                f"No joint {name!r} on {self.prim_path}. Joints: {self.joint_names}"
-            ) from exc
+            raise ValueError(f"No joint {name!r} on {self.prim_path}. Joints: {self.joint_names}") from exc
 
-    def set_joint_positions(
-        self, targets: Any, *, indices: list[int] | None = None, settle_steps: int = 0
-    ) -> None:
+    def set_joint_positions(self, targets: Any, *, indices: list[int] | None = None, settle_steps: int = 0) -> None:
         """Command joint position targets, optionally for a subset of joints.
 
         A subset command addresses only those joints. The previous version built
@@ -441,9 +447,7 @@ class Robot:
         if settle_steps:
             self.scene.step(settle_steps)
 
-    def set_joint_velocities(
-        self, targets: Any, *, indices: list[int] | None = None, settle_steps: int = 0
-    ) -> None:
+    def set_joint_velocities(self, targets: Any, *, indices: list[int] | None = None, settle_steps: int = 0) -> None:
         current = np.zeros(self.dof)
         values = np.asarray(targets, dtype=float).reshape(-1)
         if indices is None:
@@ -488,8 +492,7 @@ class Robot:
             self._pose_source = "articulation"
             return np.asarray(position, dtype=float), np.asarray(quaternion, dtype=float)
         except Exception:
-            logger.debug("Articulation view has no root pose for %s", self.prim_path,
-                         exc_info=True)
+            logger.debug("Articulation view has no root pose for %s", self.prim_path, exc_info=True)
 
         try:
             from .._compat import articulation_root
@@ -513,16 +516,12 @@ class Robot:
         self._pose_source = "usd (authored)"
         from pxr import Gf, UsdGeom
 
-        matrix = UsdGeom.Xformable(
-            get_stage().GetPrimAtPath(self.prim_path)
-        ).ComputeLocalToWorldTransform(0)
+        matrix = UsdGeom.Xformable(get_stage().GetPrimAtPath(self.prim_path)).ComputeLocalToWorldTransform(0)
         rotation = Gf.Transform(matrix).GetRotation().GetQuat()
         imaginary = rotation.GetImaginary()
         return (
             np.asarray(matrix.ExtractTranslation(), dtype=float),
-            np.asarray(
-                [rotation.GetReal(), imaginary[0], imaginary[1], imaginary[2]], dtype=float
-            ),
+            np.asarray([rotation.GetReal(), imaginary[0], imaginary[1], imaginary[2]], dtype=float),
         )
 
     @property
@@ -651,11 +650,7 @@ class Robot:
         from pxr import Usd, UsdPhysics
 
         root = get_stage().GetPrimAtPath(self.prim_path)
-        return [
-            str(prim.GetPath())
-            for prim in Usd.PrimRange(root)
-            if prim.HasAPI(UsdPhysics.RigidBodyAPI)
-        ]
+        return [str(prim.GetPath()) for prim in Usd.PrimRange(root) if prim.HasAPI(UsdPhysics.RigidBodyAPI)]
 
     def touching(self, other_path_prefix: str) -> bool:
         """True when any link of this robot is in contact with the given prim."""
@@ -741,51 +736,57 @@ class Robot:
         # everything downstream treats as a working hand.
         end_effector = getattr(self, "gripper", None)
         if end_effector is not None and not getattr(end_effector, "joint_indices", None):
-            problems.append({
-                "issue": "this arm has no end effector",
-                "detail": (
-                    "the articulation declares no finger or jaw joints, so there is "
-                    "nothing on the flange that can hold an object"
-                ),
-                "consequence": (
-                    "open() and close() raise MotionError, and grasp() cannot form "
-                    "a grasp. Any task that involves picking something up needs a "
-                    "gripper fitted, or a different arm. Fitting one changes the "
-                    "robot, so it is the user's decision — ask rather than "
-                    "authoring one."
-                ),
-            })
+            problems.append(
+                {
+                    "issue": "this arm has no end effector",
+                    "detail": (
+                        "the articulation declares no finger or jaw joints, so there is "
+                        "nothing on the flange that can hold an object"
+                    ),
+                    "consequence": (
+                        "open() and close() raise MotionError, and grasp() cannot form "
+                        "a grasp. Any task that involves picking something up needs a "
+                        "gripper fitted, or a different arm. Fitting one changes the "
+                        "robot, so it is the user's decision — ask rather than "
+                        "authoring one."
+                    ),
+                }
+            )
 
         gripper = getattr(end_effector, "joint_indices", None) or []
         unbounded = [names[i] for i in gripper if limits[i][0] is None or limits[i][1] is None]
         if unbounded:
-            problems.append({
-                "issue": "gripper joints have no travel limits",
-                "detail": ", ".join(unbounded),
-                "consequence": (
-                    "open() and close() have nothing to open or close *to*, so "
-                    "they fall back to 0.0 and 0.04 m. If this gripper's real "
-                    "travel differs, it will close past the object or stop short "
-                    "of it, and a grasp will look like it formed and then drop."
-                ),
-            })
+            problems.append(
+                {
+                    "issue": "gripper joints have no travel limits",
+                    "detail": ", ".join(unbounded),
+                    "consequence": (
+                        "open() and close() have nothing to open or close *to*, so "
+                        "they fall back to 0.0 and 0.04 m. If this gripper's real "
+                        "travel differs, it will close past the object or stop short "
+                        "of it, and a grasp will look like it formed and then drop."
+                    ),
+                }
+            )
 
         self.base_position  # refresh `_pose_source`
         if self._pose_source == "usd (authored)":
-            problems.append({
-                "issue": "physics cannot see this robot",
-                "detail": (
-                    "neither the articulation view nor the root body would report a "
-                    "pose, so positions come from the authored USD transform"
-                ),
-                "consequence": (
-                    "Every pose reading is the value the scene was built with, not "
-                    "where the robot is: it will report itself upright and at its "
-                    "spawn height forever, including while it falls over. Joint "
-                    "commands will not be tracked either. The articulation is not "
-                    "registered with PhysX."
-                ),
-            })
+            problems.append(
+                {
+                    "issue": "physics cannot see this robot",
+                    "detail": (
+                        "neither the articulation view nor the root body would report a "
+                        "pose, so positions come from the authored USD transform"
+                    ),
+                    "consequence": (
+                        "Every pose reading is the value the scene was built with, not "
+                        "where the robot is: it will report itself upright and at its "
+                        "spawn height forever, including while it falls over. Joint "
+                        "commands will not be tracked either. The articulation is not "
+                        "registered with PhysX."
+                    ),
+                }
+            )
         problems.extend(self._inertia_problems())
         problems.extend(self._pose_feedback_problems())
         return problems
@@ -832,18 +833,20 @@ class Robot:
 
         if not suspect:
             return []
-        return [{
-            "issue": "links carry a placeholder inertia tensor",
-            "detail": ", ".join(suspect),
-            "consequence": (
-                "PhysX reports these as possibly invalid and substitutes a small "
-                "sphere approximation, so they are simulated with dynamics the "
-                "asset never specified. Expect joints that oscillate or refuse to "
-                "settle, worst on a wrist carrying a tool. Fixing it means editing "
-                "the asset, which changes what is being simulated — the user's "
-                "call, not a repair to make in passing."
-            ),
-        }]
+        return [
+            {
+                "issue": "links carry a placeholder inertia tensor",
+                "detail": ", ".join(suspect),
+                "consequence": (
+                    "PhysX reports these as possibly invalid and substitutes a small "
+                    "sphere approximation, so they are simulated with dynamics the "
+                    "asset never specified. Expect joints that oscillate or refuse to "
+                    "settle, worst on a wrist carrying a tool. Fixing it means editing "
+                    "the asset, which changes what is being simulated — the user's "
+                    "call, not a repair to make in passing."
+                ),
+            }
+        ]
 
     def _pose_feedback_problems(self) -> list[dict[str, str]]:
         """Links whose USD transform disagrees with where physics has them.
@@ -860,9 +863,8 @@ class Robot:
         the robot has driven somewhere if the answer matters.
         """
         try:
-            from pxr import UsdGeom
-
             from isaacsim.core.prims import SingleRigidPrim
+            from pxr import UsdGeom
 
             from .._compat import get_stage
 
@@ -884,16 +886,18 @@ class Robot:
                 if gap > worst:
                     worst_name, worst = path, gap
             if worst > 0.02:
-                return [{
-                    "issue": "link transforms are not written back from physics",
-                    "detail": f"{worst_name} is {worst:.3f} m from where physics has it",
-                    "consequence": (
-                        "The viewport will show this robot in the wrong place, and "
-                        "anything measured from a link transform — distance "
-                        "travelled, where the base is — reads the stale value. "
-                        "Read poses through the physics view instead."
-                    ),
-                }]
+                return [
+                    {
+                        "issue": "link transforms are not written back from physics",
+                        "detail": f"{worst_name} is {worst:.3f} m from where physics has it",
+                        "consequence": (
+                            "The viewport will show this robot in the wrong place, and "
+                            "anything measured from a link transform — distance "
+                            "travelled, where the base is — reads the stale value. "
+                            "Read poses through the physics view instead."
+                        ),
+                    }
+                ]
         except Exception:
             logger.debug("Could not compare USD and physics poses", exc_info=True)
         return []
@@ -904,7 +908,5 @@ class Robot:
         return sorted(
             name
             for name in dir(self)
-            if not name.startswith("_")
-            and name not in skip
-            and callable(getattr(type(self), name, None))
+            if not name.startswith("_") and name not in skip and callable(getattr(type(self), name, None))
         )

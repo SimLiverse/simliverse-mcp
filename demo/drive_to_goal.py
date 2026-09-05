@@ -15,13 +15,13 @@ NAMES = ["WARMUP", "INIT", "TURN", "DRIVE", "HALT", "DONE", "FAILED"]
 TRACE_PATH = "/tmp/ctl_trace.log"
 
 GOAL = [2.0, 0.0]
-ARRIVED = 0.08          # metres
-AIMED = 0.05            # radians
+ARRIVED = 0.08  # metres
+AIMED = 0.05  # radians
 MAX_LINEAR = 0.5
 MAX_ANGULAR = 1.0
 WARMUP_FRAMES = 30
 HALT_FRAMES = 60
-LIMIT = 2000            # driving 2 m takes longer than an arm reach
+LIMIT = 2000  # driving 2 m takes longer than an arm reach
 
 _state = WARMUP
 _frame = 0
@@ -105,8 +105,7 @@ def _compute(db=None):
         from simliverse_sim import Robot, Scene
 
         _rover = Robot.attach("/World/Rover", scene=Scene.get())
-        _trace("init: %s dof=%d wheels=%s" % (type(_rover).__name__, _rover.dof,
-                                              _rover.wheel_indices))
+        _trace("init: %s dof=%d wheels=%s" % (type(_rover).__name__, _rover.dof, _rover.wheel_indices))
         _go(TURN)
         return True
 

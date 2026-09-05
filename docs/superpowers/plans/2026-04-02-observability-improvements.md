@@ -184,6 +184,7 @@ def get_simulation_state(self) -> Dict[str, Any]:
     current_time = timeline.get_current_time()
     # Get physics dt from physics scene if available
     from pxr import UsdPhysics
+
     stage = self.get_stage()
     physics_dt = 1.0 / 60.0  # default
     for prim in stage.Traverse():
@@ -279,6 +280,7 @@ In `adapters/v5.py`, add:
 ```python
 def get_physics_state(self, prim_path: str) -> Dict[str, Any]:
     from pxr import UsdPhysics, Gf
+
     stage = self.get_stage()
     prim = stage.GetPrimAtPath(prim_path)
     if not prim.IsValid():
@@ -309,6 +311,7 @@ def get_physics_state(self, prim_path: str) -> Dict[str, Any]:
     # Get velocities via PhysX if simulation is running
     try:
         import omni.physx
+
         physx_interface = omni.physx.get_physx_interface()
         rigid_body_handle = physx_interface.get_rigidbody_transformation(prim_path)
         if rigid_body_handle:
@@ -323,6 +326,7 @@ def get_physics_state(self, prim_path: str) -> Dict[str, Any]:
     # Get contact info if available
     try:
         from omni.physx import get_physx_scene_query_interface
+
         contacts = []
         # Contact reporting requires the simulation to be running
         result["contacts"] = contacts
@@ -599,8 +603,16 @@ def reload_script(self, file_path: str, module_name: Optional[str] = None) -> Di
             import omni
             import carb
             from pxr import Usd, UsdGeom, Sdf, Gf
-            local_ns = {"omni": omni, "carb": carb, "Usd": Usd, "UsdGeom": UsdGeom,
-                         "Sdf": Sdf, "Gf": Gf, "__file__": file_path}
+
+            local_ns = {
+                "omni": omni,
+                "carb": carb,
+                "Usd": Usd,
+                "UsdGeom": UsdGeom,
+                "Sdf": Sdf,
+                "Gf": Gf,
+                "__file__": file_path,
+            }
             exec(code, local_ns)
             msg = f"Script '{os.path.basename(file_path)}' executed successfully"
 
@@ -633,7 +645,9 @@ registry["simulation.reload_script"] = lambda **p: reload_script_handler(adapter
 Add the handler:
 
 ```python
-def reload_script_handler(adapter: IsaacAdapterBase, file_path: Optional[str] = None, module_name: Optional[str] = None) -> Dict[str, Any]:
+def reload_script_handler(
+    adapter: IsaacAdapterBase, file_path: Optional[str] = None, module_name: Optional[str] = None
+) -> Dict[str, Any]:
     try:
         if not file_path:
             return {"status": "error", "message": "file_path is required"}
@@ -700,8 +714,9 @@ In `adapters/base.py`, update the `step` abstract method:
 
 ```python
 @abstractmethod
-def step(self, num_steps: int = 1, observe_prims: Optional[List[str]] = None,
-         observe_joints: Optional[List[str]] = None) -> Dict[str, Any]:
+def step(
+    self, num_steps: int = 1, observe_prims: Optional[List[str]] = None, observe_joints: Optional[List[str]] = None
+) -> Dict[str, Any]:
     """Step the simulation forward and optionally observe prim/joint states.
 
     Args:
@@ -717,8 +732,9 @@ def step(self, num_steps: int = 1, observe_prims: Optional[List[str]] = None,
 In `adapters/v5.py`, replace the `step` method:
 
 ```python
-def step(self, num_steps: int = 1, observe_prims: Optional[List[str]] = None,
-         observe_joints: Optional[List[str]] = None) -> Dict[str, Any]:
+def step(
+    self, num_steps: int = 1, observe_prims: Optional[List[str]] = None, observe_joints: Optional[List[str]] = None
+) -> Dict[str, Any]:
     import omni.kit.app
 
     for _ in range(num_steps):
@@ -729,6 +745,7 @@ def step(self, num_steps: int = 1, observe_prims: Optional[List[str]] = None,
     # Observe prim states
     if observe_prims:
         from pxr import UsdPhysics
+
         prim_states = []
         stage = self.get_stage()
         for path in observe_prims:
@@ -757,6 +774,7 @@ def step(self, num_steps: int = 1, observe_prims: Optional[List[str]] = None,
             try:
                 positions = self.get_joint_positions(path)
                 from isaacsim.core.prims import SingleArticulation
+
                 art = SingleArticulation(prim_path=path)
                 names = art.dof_names if art.dof_names else []
                 joints_dict = dict(zip(names, positions)) if names else {"positions": positions}
@@ -773,12 +791,14 @@ def step(self, num_steps: int = 1, observe_prims: Optional[List[str]] = None,
 In `handlers/simulation.py`, update the `step` function:
 
 ```python
-def step(adapter: IsaacAdapterBase, num_steps: int = 1,
-         observe_prims: Optional[Sequence[str]] = None,
-         observe_joints: Optional[Sequence[str]] = None) -> Dict[str, Any]:
+def step(
+    adapter: IsaacAdapterBase,
+    num_steps: int = 1,
+    observe_prims: Optional[Sequence[str]] = None,
+    observe_joints: Optional[Sequence[str]] = None,
+) -> Dict[str, Any]:
     try:
-        result = adapter.step(num_steps=num_steps, observe_prims=observe_prims,
-                              observe_joints=observe_joints)
+        result = adapter.step(num_steps=num_steps, observe_prims=observe_prims, observe_joints=observe_joints)
         return {"status": "success", "message": f"Stepped {num_steps} frames", **result}
     except Exception as e:
         return {"status": "error", "message": str(e)}
@@ -790,8 +810,9 @@ In `isaac_mcp/tools/simulation.py`, update the `step_simulation` tool:
 
 ```python
 @mcp.tool("step_simulation")
-def step_simulation(num_steps: int = 1, observe_prims: Optional[List[str]] = None,
-                    observe_joints: Optional[List[str]] = None) -> str:
+def step_simulation(
+    num_steps: int = 1, observe_prims: Optional[List[str]] = None, observe_joints: Optional[List[str]] = None
+) -> str:
     """Step the simulation forward by N frames, optionally observing prim and joint states after stepping.
 
     Args:
@@ -843,19 +864,47 @@ In `tests/test_handler_structure.py`, update the `expected` set in `test_adapter
 
 ```python
 expected = {
-    "get_stage", "get_assets_root_path", "discover_environments", "load_environment",
-    "create_prim", "delete_prim", "add_reference_to_stage",
-    "set_prim_transform", "get_prim_transform", "list_prims", "get_prim_info",
-    "create_xform_prim", "create_articulation",
-    "discover_robots", "get_robot_joint_info", "set_joint_positions", "get_joint_positions",
-    "create_world", "create_simulation_context", "create_physics_scene",
-    "create_camera", "capture_camera_image", "create_lidar", "get_lidar_point_cloud",
-    "create_pbr_material", "create_physics_material", "apply_material",
-    "create_light", "modify_light",
-    "clone_prim", "import_urdf",
-    "play", "pause", "stop", "step", "execute_script",
+    "get_stage",
+    "get_assets_root_path",
+    "discover_environments",
+    "load_environment",
+    "create_prim",
+    "delete_prim",
+    "add_reference_to_stage",
+    "set_prim_transform",
+    "get_prim_transform",
+    "list_prims",
+    "get_prim_info",
+    "create_xform_prim",
+    "create_articulation",
+    "discover_robots",
+    "get_robot_joint_info",
+    "set_joint_positions",
+    "get_joint_positions",
+    "create_world",
+    "create_simulation_context",
+    "create_physics_scene",
+    "create_camera",
+    "capture_camera_image",
+    "create_lidar",
+    "get_lidar_point_cloud",
+    "create_pbr_material",
+    "create_physics_material",
+    "apply_material",
+    "create_light",
+    "modify_light",
+    "clone_prim",
+    "import_urdf",
+    "play",
+    "pause",
+    "stop",
+    "step",
+    "execute_script",
     # New observability methods
-    "get_simulation_state", "get_physics_state", "get_joint_config", "reload_script",
+    "get_simulation_state",
+    "get_physics_state",
+    "get_joint_config",
+    "reload_script",
 }
 ```
 

@@ -183,6 +183,7 @@ class MCPExtension(omni.ext.IExt):
         self.adapter = IsaacAdapterV5()
         self.registry = {}
         from .handlers import scene, objects, lighting, robots, sensors, materials, assets, simulation
+
         for module in [scene, objects, lighting, robots, sensors, materials, assets, simulation]:
             module.register(self.registry, self.adapter)
 
@@ -199,8 +200,8 @@ def register(registry, adapter):
     registry["lighting.create"] = lambda **p: create_light(adapter, **p)
     registry["lighting.modify"] = lambda **p: modify_light(adapter, **p)
 
-def create_light(adapter, light_type="DistantLight", position=None, intensity=1000, color=None, rotation=None):
-    ...
+
+def create_light(adapter, light_type="DistantLight", position=None, intensity=1000, color=None, rotation=None): ...
 ```
 
 ## Tool Catalog

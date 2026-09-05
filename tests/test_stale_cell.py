@@ -8,9 +8,8 @@ palletising cell's carton queue with 26 N, while the belt reported a
 kinematic body, `surfaceVelocityEnabled True`, surface velocity (0.2, 0, 0)
 and friction 0.9 on both sides. Every conveyor observable was correct.
 """
-from __future__ import annotations
 
-import pytest
+from __future__ import annotations
 
 from simliverse_sim.scene import Scene
 
@@ -70,37 +69,47 @@ def _scene(children):
 
 
 def test_a_previous_cells_prims_are_removed() -> None:
-    scene, stage = _scene([
-        "PhysicsScene", "GroundPlane", "PhysicsMaterials",
-        "Escapement", "Plate", "Plate_Stop", "Belt", "Box0", "UR",
-    ])
+    scene, stage = _scene(
+        [
+            "PhysicsScene",
+            "GroundPlane",
+            "PhysicsMaterials",
+            "Escapement",
+            "Plate",
+            "Plate_Stop",
+            "Belt",
+            "Box0",
+            "UR",
+        ]
+    )
 
     removed = scene.clear_world()
 
-    assert "/World/Escapement" in removed, (
-        "the blade that held the queue must not survive a rebuild")
-    for path in ("/World/Plate", "/World/Plate_Stop", "/World/Belt",
-                 "/World/Box0", "/World/UR"):
+    assert "/World/Escapement" in removed, "the blade that held the queue must not survive a rebuild"
+    for path in ("/World/Plate", "/World/Plate_Stop", "/World/Belt", "/World/Box0", "/World/UR"):
         assert path in removed
 
 
 def test_physics_configuration_and_the_floor_survive() -> None:
     """Re-authoring these mid-session invalidates handles that are still live."""
-    scene, stage = _scene([
-        "PhysicsScene", "GroundPlane", "PhysicsMaterials", "Escapement",
-    ])
+    scene, stage = _scene(
+        [
+            "PhysicsScene",
+            "GroundPlane",
+            "PhysicsMaterials",
+            "Escapement",
+        ]
+    )
 
     removed = scene.clear_world()
 
     assert removed == ["/World/Escapement"]
-    assert set(stage.children) == {
-        "PhysicsScene", "GroundPlane", "PhysicsMaterials"}
+    assert set(stage.children) == {"PhysicsScene", "GroundPlane", "PhysicsMaterials"}
 
 
 def test_the_sweep_is_by_what_is_there_not_by_a_kept_list() -> None:
     """A name nobody wrote down is exactly the one that outlives its cell."""
-    scene, stage = _scene(
-        ["PhysicsScene", "SomethingNobodyListed", "FutureFixture"])
+    scene, stage = _scene(["PhysicsScene", "SomethingNobodyListed", "FutureFixture"])
 
     removed = scene.clear_world()
 

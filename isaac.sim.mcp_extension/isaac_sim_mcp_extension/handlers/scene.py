@@ -176,6 +176,7 @@ def clear(adapter: IsaacAdapterBase, keep_physics: bool = True) -> Dict[str, Any
                     # own delete command tells OmniGraph about it.
                     try:
                         import omni.kit.commands
+
                         omni.kit.commands.execute("DeletePrims", paths=[path], destructive=True)
                     except Exception:  # noqa: BLE001 -- fall through to the plain delete
                         pass

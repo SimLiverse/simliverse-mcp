@@ -19,24 +19,26 @@ import ast
 import os
 
 HANDLER = os.path.join(
-    os.path.dirname(__file__), "..", "isaac.sim.mcp_extension",
-    "isaac_sim_mcp_extension", "handlers", "control.py",
+    os.path.dirname(__file__),
+    "..",
+    "isaac.sim.mcp_extension",
+    "isaac_sim_mcp_extension",
+    "handlers",
+    "control.py",
 )
 
 
 def _capture_view():
     with open(HANDLER) as f:
         tree = ast.parse(f.read())
-    fn = next(n for n in ast.walk(tree)
-              if isinstance(n, ast.FunctionDef) and n.name == "capture_view")
+    fn = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "capture_view")
     return fn
 
 
 def test_an_aim_is_honoured_even_when_a_camera_path_is_given():
     """The branch on the aim must come first, so `camera_path` cannot shadow it."""
     fn = _capture_view()
-    branches = [n for n in ast.walk(fn)
-                if isinstance(n, ast.If) and "viewport.camera_path" in ast.unparse(n)]
+    branches = [n for n in ast.walk(fn) if isinstance(n, ast.If) and "viewport.camera_path" in ast.unparse(n)]
     assert branches, "capture_view no longer chooses a camera in an if/elif"
     first = min(branches, key=lambda n: n.lineno)
     names = {n.id for n in ast.walk(first.test) if isinstance(n, ast.Name)}
@@ -46,8 +48,7 @@ def test_an_aim_is_honoured_even_when_a_camera_path_is_given():
         "how an agent ends up looking somewhere it did not ask to look."
     )
     # And the aim must actually be applied to the requested path.
-    aim = next(n for n in ast.walk(first)
-               if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "_aim_camera")
+    aim = next(n for n in ast.walk(first) if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "_aim_camera")
     assert any(getattr(a, "id", "") == "target_path" for a in aim.args), (
         "_aim_camera must aim the camera at the path the caller named"
     )
@@ -61,8 +62,7 @@ def test_a_camera_path_that_does_not_exist_is_reported_not_timed_out():
     """
     src = ast.unparse(_capture_view())
     assert "No camera at" in src, (
-        "a camera_path naming no prim must say so, not fall through to the "
-        "frame-wait and report a capture timeout"
+        "a camera_path naming no prim must say so, not fall through to the frame-wait and report a capture timeout"
     )
 
 
@@ -73,7 +73,12 @@ def test_the_frame_wait_outlasts_a_cold_first_capture():
     longer costs a second; a blind agent costs a session.
     """
     fn = _capture_view()
-    waits = [n.args[0].value for n in ast.walk(fn)
-             if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "range"
-             and n.args and isinstance(n.args[0], ast.Constant)]
+    waits = [
+        n.args[0].value
+        for n in ast.walk(fn)
+        if isinstance(n, ast.Call)
+        and getattr(n.func, "id", "") == "range"
+        and n.args
+        and isinstance(n.args[0], ast.Constant)
+    ]
     assert max(waits) >= 200, f"frame-wait loops are {waits}, too short for a cold capture"

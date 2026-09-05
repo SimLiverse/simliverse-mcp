@@ -37,9 +37,20 @@ OPEN_GRIPPER, APPROACH_PICK, DESCEND_PICK, CLOSE_GRIPPER = 3, 4, 5, 6
 LIFT, APPROACH_PLACE, DESCEND_PLACE, RELEASE, RETREAT = 7, 8, 9, 10, 11
 SETTLE, DONE = 12, 13
 _NAMES = [
-    "WARMUP", "INIT", "NEXT_CUBE", "OPEN_GRIPPER", "APPROACH_PICK",
-    "DESCEND_PICK", "CLOSE_GRIPPER", "LIFT", "APPROACH_PLACE", "DESCEND_PLACE",
-    "RELEASE", "RETREAT", "SETTLE", "DONE",
+    "WARMUP",
+    "INIT",
+    "NEXT_CUBE",
+    "OPEN_GRIPPER",
+    "APPROACH_PICK",
+    "DESCEND_PICK",
+    "CLOSE_GRIPPER",
+    "LIFT",
+    "APPROACH_PLACE",
+    "DESCEND_PLACE",
+    "RELEASE",
+    "RETREAT",
+    "SETTLE",
+    "DONE",
 ]
 
 # ── Persistent state ─────────────────────────────────────────────────────────

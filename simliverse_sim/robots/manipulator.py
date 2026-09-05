@@ -8,9 +8,8 @@ manipulation became expressible — see ADR 012 §1.2.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -93,26 +92,27 @@ def _slerp(start: Any, end: Any, fraction: float) -> np.ndarray:
     a = a / (np.linalg.norm(a) or 1.0)
     b = b / (np.linalg.norm(b) or 1.0)
     dot = float(a @ b)
-    if dot < 0.0:          # take the short way round
+    if dot < 0.0:  # take the short way round
         b, dot = -b, -dot
-    if dot > 0.9995:       # nearly parallel: lerp is exact enough and stable
+    if dot > 0.9995:  # nearly parallel: lerp is exact enough and stable
         result = a + (b - a) * fraction
         return result / (np.linalg.norm(result) or 1.0)
     theta = float(np.arccos(np.clip(dot, -1.0, 1.0)))
     sin_theta = float(np.sin(theta))
-    return (a * float(np.sin((1.0 - fraction) * theta)) / sin_theta
-            + b * float(np.sin(fraction * theta)) / sin_theta)
+    return a * float(np.sin((1.0 - fraction) * theta)) / sin_theta + b * float(np.sin(fraction * theta)) / sin_theta
 
 
 def _angle_between(rotation: Any, quaternion: Any) -> float:
     """Degrees between an achieved 3x3 rotation and a requested (w,x,y,z) quaternion."""
     achieved = np.asarray(rotation, dtype=float).reshape(3, 3)
     w, x, y, z = [float(v) for v in np.asarray(quaternion, dtype=float).reshape(4)]
-    wanted = np.array([
-        [1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)],
-        [2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)],
-        [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)],
-    ])
+    wanted = np.array(
+        [
+            [1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)],
+            [2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)],
+            [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)],
+        ]
+    )
     trace = float(np.trace(achieved.T @ wanted))
     return float(np.degrees(np.arccos(np.clip((trace - 1.0) / 2.0, -1.0, 1.0))))
 
@@ -129,10 +129,7 @@ def _quaternion_from_matrix(rotation: Any) -> np.ndarray:
     trace = float(np.trace(m))
     if trace > 0.0:
         scale = np.sqrt(trace + 1.0) * 2.0
-        quat = [0.25 * scale,
-                (m[2][1] - m[1][2]) / scale,
-                (m[0][2] - m[2][0]) / scale,
-                (m[1][0] - m[0][1]) / scale]
+        quat = [0.25 * scale, (m[2][1] - m[1][2]) / scale, (m[0][2] - m[2][0]) / scale, (m[1][0] - m[0][1]) / scale]
     else:
         i = int(np.argmax([m[0][0], m[1][1], m[2][2]]))
         j, k = (i + 1) % 3, (i + 2) % 3
@@ -175,9 +172,7 @@ def _is_sided(joint_name: str) -> bool:
     return any(token in lowered for token in _SIDE_TOKENS)
 
 
-def _match_motion_config(
-    supported: Any, joints: str, asset: str, leaf: str
-) -> str | None:
+def _match_motion_config(supported: Any, joints: str, asset: str, leaf: str) -> str | None:
     """Pick the RMPflow config for a robot from three normalised identifiers.
 
     Ordered by how much each is worth trusting. Joint names come from the
@@ -249,11 +244,7 @@ class Gripper:
         """
         if len(self.joint_indices) < 3:
             return None
-        unsided = [
-            index
-            for index, name in zip(self.joint_indices, self.joint_names)
-            if not _is_sided(name)
-        ]
+        unsided = [index for index, name in zip(self.joint_indices, self.joint_names) if not _is_sided(name)]
         return unsided[0] if len(unsided) == 1 else None
 
     @property
@@ -266,10 +257,7 @@ class Gripper:
             path
             for path in self._robot.links()
             if "knuckle" not in path.lower()
-            and any(
-                token in path.rsplit("/", 1)[-1].lower()
-                for token in ("finger", "pad", "jaw", "tip")
-            )
+            and any(token in path.rsplit("/", 1)[-1].lower() for token in ("finger", "pad", "jaw", "tip"))
         ]
         return pads[:2]
 
@@ -322,8 +310,7 @@ class Gripper:
         closed = min(gaps, key=lambda end: gaps[end])
         opened = high if closed == low else low
         logger.info(
-            "%s: jaw closes toward %.4f (pads %.4f m apart) and opens toward "
-            "%.4f (%.4f m apart).",
+            "%s: jaw closes toward %.4f (pads %.4f m apart) and opens toward %.4f (%.4f m apart).",
             self._robot.prim_path,
             closed,
             gaps[closed],
@@ -359,9 +346,7 @@ class Gripper:
                 primary = self.primary_index
                 low, high = limits[primary]
                 try:
-                    self._open_value, self._closed_value = self._ends_by_measurement(
-                        float(low), float(high)
-                    )
+                    self._open_value, self._closed_value = self._ends_by_measurement(float(low), float(high))
                 except Exception as exc:  # noqa: BLE001 - measuring needs live physics
                     logger.warning(
                         "%s: could not measure which end of the jaw closes (%s: "
@@ -399,9 +384,7 @@ class Gripper:
         """
         names = set(self.joint_names)
         disabled = [
-            problem["joint"]
-            for problem in self._robot.drive_health()
-            if problem["joint"].rsplit("/", 1)[-1] in names
+            problem["joint"] for problem in self._robot.drive_health() if problem["joint"].rsplit("/", 1)[-1] in names
         ]
         if not disabled:
             return
@@ -556,20 +539,14 @@ class SuctionGripper:
         try:
             from pxr import Gf, Usd, UsdGeom
 
-            cache = UsdGeom.BBoxCache(
-                Usd.TimeCode.Default(), [UsdGeom.Tokens.default_]
-            )
+            cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_])
             prim = scene.stage.GetPrimAtPath(link_path)
             if not prim or not prim.IsValid():
                 return 0.0
 
-            xf = UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(
-                Usd.TimeCode.Default()
-            )
+            xf = UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(Usd.TimeCode.Default())
             origin = np.array(xf.ExtractTranslation())
-            world_dir = np.array(
-                xf.TransformDir(Gf.Vec3d(*[float(v) for v in direction]))
-            )
+            world_dir = np.array(xf.TransformDir(Gf.Vec3d(*[float(v) for v in direction])))
             norm = float(np.linalg.norm(world_dir))
             if norm < 1e-9:
                 return 0.0
@@ -676,9 +653,7 @@ class SuctionGripper:
             def create_surface_gripper(stage, parent_path):
                 import omni.usd
 
-                path = omni.usd.get_stage_next_free_path(
-                    stage, parent_path + "/SurfaceGripper", False
-                )
+                path = omni.usd.get_stage_next_free_path(stage, parent_path + "/SurfaceGripper", False)
                 return robot_schema.CreateSurfaceGripper(stage, path)
 
         from ..scene import Scene as _Scene
@@ -702,9 +677,7 @@ class SuctionGripper:
 
         axis = str(approach_axis).upper()
         if axis not in cls._Z_ONTO:
-            raise ValueError(
-                f"approach_axis must be one of {sorted(cls._Z_ONTO)}, not {approach_axis!r}"
-            )
+            raise ValueError(f"approach_axis must be one of {sorted(cls._Z_ONTO)}, not {approach_axis!r}")
         rot = Gf.Quatf(*cls._Z_ONTO[axis])
         direction = np.zeros(3)
         direction["XYZ".index(axis[-1])] = -1.0 if axis.startswith("-") else 1.0
@@ -729,9 +702,11 @@ class SuctionGripper:
         # Clear a previous cup before measuring, never after: on a rebuild the
         # old cup is still a child of the mount link, and measuring it as the
         # geometry to clear walks the new one further out every single build.
-        for stale in (f"{parent_prim_path}/SuctionCup",
-                      f"{parent_prim_path}/SuctionStem",
-                      f"{parent_prim_path}/SuctionCup_AttachPoint"):
+        for stale in (
+            f"{parent_prim_path}/SuctionCup",
+            f"{parent_prim_path}/SuctionStem",
+            f"{parent_prim_path}/SuctionCup_AttachPoint",
+        ):
             if scene.stage.GetPrimAtPath(stale):
                 scene.stage.RemovePrim(stale)
 
@@ -761,29 +736,29 @@ class SuctionGripper:
             stem.CreateRadiusAttr(stem_radius)
             stem.CreateHeightAttr(float(stand_off))
             stem.CreateAxisAttr("Z")
-            stem.CreateExtentAttr([
-                (-stem_radius, -stem_radius, -float(stand_off) / 2.0),
-                (stem_radius, stem_radius, float(stand_off) / 2.0),
-            ])
+            stem.CreateExtentAttr(
+                [
+                    (-stem_radius, -stem_radius, -float(stand_off) / 2.0),
+                    (stem_radius, stem_radius, float(stand_off) / 2.0),
+                ]
+            )
             stem_xform = UsdGeom.Xformable(stem.GetPrim())
             stem_xform.ClearXformOpOrder()
-            stem_xform.AddTranslateOp().Set(
-                Gf.Vec3d(*[float(v) for v in direction * (float(stand_off) / 2.0)])
-            )
+            stem_xform.AddTranslateOp().Set(Gf.Vec3d(*[float(v) for v in direction * (float(stand_off) / 2.0)]))
             stem_xform.AddOrientOp().Set(rot)
-            UsdGeom.Gprim(stem.GetPrim()).CreateDisplayColorAttr(
-                [Gf.Vec3f(0.25, 0.25, 0.28)]
-            )
+            UsdGeom.Gprim(stem.GetPrim()).CreateDisplayColorAttr([Gf.Vec3f(0.25, 0.25, 0.28)])
 
         cup_path = f"{parent_prim_path}/SuctionCup"
         cup = UsdGeom.Cylinder.Define(scene.stage, cup_path)
         cup.CreateRadiusAttr(float(cup_radius))
         cup.CreateHeightAttr(float(cup_length))
         cup.CreateAxisAttr("Z")
-        cup.CreateExtentAttr([
-            (-cup_radius, -cup_radius, -cup_length / 2.0),
-            (cup_radius, cup_radius, cup_length / 2.0),
-        ])
+        cup.CreateExtentAttr(
+            [
+                (-cup_radius, -cup_radius, -cup_length / 2.0),
+                (cup_radius, cup_radius, cup_length / 2.0),
+            ]
+        )
         cup_prim = cup.GetPrim()
         xform = UsdGeom.Xformable(cup_prim)
         # Clear first. `Define` returns the *existing* prim when one is already
@@ -904,8 +879,10 @@ class SuctionGripper:
         # NVIDIA runs every axis at the same 1000 / 100. Ours were tuned by hand
         # against the all-locked joint above and no longer describe anything.
         for name, stiffness, damping in (
-            ("rotX", 1000.0, 100.0), ("rotY", 1000.0, 100.0),
-            ("rotZ", 1000.0, 100.0), ("transZ", 1000.0, 100.0),
+            ("rotX", 1000.0, 100.0),
+            ("rotY", 1000.0, 100.0),
+            ("rotZ", 1000.0, 100.0),
+            ("transZ", 1000.0, 100.0),
         ):
             drive = UsdPhysics.DriveAPI.Apply(joint.GetPrim(), name)
             drive.CreateStiffnessAttr().Set(stiffness)
@@ -921,15 +898,17 @@ class SuctionGripper:
         # SurfaceGripper in place and made SurfaceGripper_01 beside it, and the
         # arm then had two grippers with no way to tell which one was live.
         for existing in list(scene.stage.GetPrimAtPath(cup_path).GetChildren()):
-            if "SurfaceGripper" in str(existing.GetTypeName()) or                     existing.GetName().startswith("SurfaceGripper"):
+            if "SurfaceGripper" in str(existing.GetTypeName()) or existing.GetName().startswith("SurfaceGripper"):
                 scene.stage.RemovePrim(existing.GetPath())
 
         prim = create_surface_gripper(scene.stage, cup_path)
         prim.GetRelationship("isaac:attachmentPoints").SetTargets([attach_path])
 
         gripper = cls(
-            prim.GetPath().pathString, scene=scene,
-            max_grip_distance=float(max_grip_distance), **kwargs,
+            prim.GetPath().pathString,
+            scene=scene,
+            max_grip_distance=float(max_grip_distance),
+            **kwargs,
         )
         gripper.approach_axis = axis
         gripper.cup_path = cup_path
@@ -947,16 +926,12 @@ class SuctionGripper:
         try:
             from pxr import Sdf as _Sdf
 
-            prim.CreateAttribute(
-                "simliverse:tip_offset", _Sdf.ValueTypeNames.Float
-            ).Set(float(gripper.tip_offset))
+            prim.CreateAttribute("simliverse:tip_offset", _Sdf.ValueTypeNames.Float).Set(float(gripper.tip_offset))
             # And which axis it was mounted on. `rebind_suction` builds a
             # fresh handle whose default is "Z", so an X-mounted tool came
             # back claiming Z -- and the arm then aimed the wrong axis at the
             # floor while the cup pointed sideways. Recorded, not inferred.
-            prim.CreateAttribute(
-                "simliverse:approach_axis", _Sdf.ValueTypeNames.String
-            ).Set(str(gripper.approach_axis))
+            prim.CreateAttribute("simliverse:approach_axis", _Sdf.ValueTypeNames.String).Set(str(gripper.approach_axis))
         except Exception:  # noqa: BLE001 -- a stamp that cannot be written is a warning
             logger.debug("Could not stamp tip_offset on %s", cup_path, exc_info=True)
         # Author the schema attributes as well as setting them through the view:
@@ -1082,8 +1057,7 @@ class LulaRoute:
     surface, so a route made without cuMotion is followed by the same code.
     """
 
-    def __init__(self, trajectory: Any, joint_names: Any,
-                 start: Any = None, goal: Any = None) -> None:
+    def __init__(self, trajectory: Any, joint_names: Any, start: Any = None, goal: Any = None) -> None:
         self._trajectory = trajectory
         self.joint_names = list(joint_names)
         self._start = float(trajectory.start_time)
@@ -1117,8 +1091,10 @@ class LulaRoute:
         return float(np.max(np.abs(self.goal - self.start)))
 
     def __repr__(self) -> str:
-        return (f"<LulaRoute {self.duration:.2f}s, {len(self.joint_names)} joints, "
-                f"base {np.degrees(self.base_turn):.0f} deg>")
+        return (
+            f"<LulaRoute {self.duration:.2f}s, {len(self.joint_names)} joints, "
+            f"base {np.degrees(self.base_turn):.0f} deg>"
+        )
 
     def sample(self, t: float) -> tuple[np.ndarray, np.ndarray]:
         at = self._start + float(np.clip(t, 0.0, self.duration))
@@ -1179,9 +1155,7 @@ class Manipulator(Robot):
         self._pose_phase = 0
         self.gripper = Gripper(self, self.groups.gripper)
 
-    def attach_suction_gripper(
-        self, parent_prim_path: str | None = None, **kwargs: Any
-    ) -> "SuctionGripper":
+    def attach_suction_gripper(self, parent_prim_path: str | None = None, **kwargs: Any) -> "SuctionGripper":
         """Fit a suction gripper to this arm and use it as the end effector.
 
         Mounts on the **tool flange** and casts out along whichever of that
@@ -1218,9 +1192,7 @@ class Manipulator(Robot):
             kwargs["approach_axis"] = axis
             # Outside the robot's own hierarchy - see `SuctionGripper.create`.
             kwargs.setdefault("cup_parent", self.prim_path.rsplit("/", 1)[0])
-        self.suction = SuctionGripper.create(
-            parent_prim_path, scene=self.scene, **kwargs
-        )
+        self.suction = SuctionGripper.create(parent_prim_path, scene=self.scene, **kwargs)
         return self.suction
 
     def tune_drives(
@@ -1280,7 +1252,8 @@ class Manipulator(Robot):
         if not touched:
             logger.warning(
                 "%s: no revolute joints with an angular drive were found, so no "
-                "gains were changed. Check the prim path.", self.prim_path,
+                "gains were changed. Check the prim path.",
+                self.prim_path,
             )
         return {
             "joints": touched,
@@ -1421,8 +1394,12 @@ class Manipulator(Robot):
         if gripper is None or not gripper.cup_path:
             return
         stage = get_stage()
-        for path in (gripper.prim_path, f"{gripper.cup_path}_AttachPoint",
-                     f"{gripper.cup_path}_Mount", gripper.cup_path):
+        for path in (
+            gripper.prim_path,
+            f"{gripper.cup_path}_AttachPoint",
+            f"{gripper.cup_path}_Mount",
+            gripper.cup_path,
+        ):
             stage.RemovePrim(path)
         self.suction = None
 
@@ -1439,10 +1416,7 @@ class Manipulator(Robot):
                 if link.rsplit("/", 1)[-1] == frame:
                     return link
         if not links:
-            raise MotionError(
-                f"{self.prim_path} reports no links, so there is nothing to mount "
-                f"a gripper on."
-            )
+            raise MotionError(f"{self.prim_path} reports no links, so there is nothing to mount a gripper on.")
         return links[-1]
 
     def _approach_axis(self, tool_link: str) -> str:
@@ -1519,9 +1493,7 @@ class Manipulator(Robot):
         and a handle built any way at all can find it.
         """
         try:
-            attr = get_stage().GetPrimAtPath(self.prim_path).GetAttribute(
-                "simliverse:motion_config"
-            )
+            attr = get_stage().GetPrimAtPath(self.prim_path).GetAttribute("simliverse:motion_config")
             value = attr.Get() if attr and attr.IsValid() else None
             return str(value) if value else None
         except Exception:  # noqa: BLE001 — absence is the normal case
@@ -1560,10 +1532,7 @@ class Manipulator(Robot):
                 prim = stage.GetPrimAtPath(path)
                 if prim and prim.IsValid():
                     for spec in prim.GetPrimStack():
-                        paths.extend(
-                            str(item.assetPath)
-                            for item in spec.referenceList.prependedItems
-                        )
+                        paths.extend(str(item.assetPath) for item in spec.referenceList.prependedItems)
                 path = path.rsplit("/", 1)[0]
             return " ".join(paths).lower().replace("_", "")
         except Exception:  # noqa: BLE001 - identity is a hint, the caller still raises
@@ -1666,7 +1635,7 @@ class Manipulator(Robot):
             return self._arm_base_view
 
         self._arm_base_view = None
-        candidates = [str(l) for l in self.links()]
+        candidates = [str(link) for link in self.links()]
         # `*_link0` is the convention for an arm's root frame (panda_link0,
         # ur_link0); `base_link` is the usual fallback for the body an arm is
         # bolted to. Anything else and the articulation root is as good a guess
@@ -1904,10 +1873,9 @@ class Manipulator(Robot):
                 raise MotionError(
                     f"{self.prim_path}: no inverse-kinematics solution for position "
                     f"{np.round(target, 4).tolist()}"
-                    + (f" with orientation {np.round(rotation, 4).tolist()}"
-                       if rotation is not None else "")
+                    + (f" with orientation {np.round(rotation, 4).tolist()}" if rotation is not None else "")
                     + ". The pose is out of reach or the orientation cannot be held "
-                      "there. This is a property of the arm, not of this run."
+                    "there. This is a property of the arm, not of this run."
                 )
             return False
 
@@ -1921,9 +1889,7 @@ class Manipulator(Robot):
         self._pose_from = self.ee_position.copy()
         self._pose_from_quat = self.ee_orientation
         current = np.asarray(self.joint_positions, dtype=float)
-        self._pose_seed = np.asarray(
-            [current[i] for i in self._solver_indices()], dtype=float
-        )
+        self._pose_seed = np.asarray([current[i] for i in self._solver_indices()], dtype=float)
         self._pose_ramp = max(0, int(ramp))
         self._pose_phase = 0
         if self._pose_ramp:
@@ -1939,9 +1905,7 @@ class Manipulator(Robot):
         `compute` without ever stepping physics itself.
         """
         if self._pose_command is None:
-            raise MotionError(
-                f"{self.prim_path}: advance_pose() before any command_pose()."
-            )
+            raise MotionError(f"{self.prim_path}: advance_pose() before any command_pose().")
         if not self._pose_ramp:
             return True
         self._pose_phase = min(self._pose_phase + 1, self._pose_ramp)
@@ -1974,7 +1938,8 @@ class Manipulator(Robot):
             logger.warning(
                 "%s: no IK solution for waypoint %s on the way to %s; holding. "
                 "The straight path between these poses leaves the workspace.",
-                self.prim_path, np.round(waypoint, 3).tolist(),
+                self.prim_path,
+                np.round(waypoint, 3).tolist(),
                 np.round(self._pose_goal, 3).tolist(),
             )
         return False
@@ -1995,9 +1960,7 @@ class Manipulator(Robot):
         rather than merely measured.
         """
         if self._pose_command is None:
-            raise MotionError(
-                f"{self.prim_path}: refine_pose() before any command_pose()."
-            )
+            raise MotionError(f"{self.prim_path}: refine_pose() before any command_pose().")
         achieved = np.asarray(self.joint_positions, dtype=float)
         size = self._pose_solution.size
         error = self._pose_solution - achieved[:size]
@@ -2008,9 +1971,7 @@ class Manipulator(Robot):
     def pose_error(self) -> dict[str, float]:
         """How far the tool is from the last commanded pose, as measured."""
         if self._pose_command is None:
-            raise MotionError(
-                f"{self.prim_path}: pose_error() before any command_pose()."
-            )
+            raise MotionError(f"{self.prim_path}: pose_error() before any command_pose().")
         achieved = np.asarray(self.joint_positions, dtype=float)
         size = self._pose_solution.size
         joint = float(np.max(np.abs(self._pose_solution - achieved[:size])))
@@ -2040,8 +2001,7 @@ class Manipulator(Robot):
         reactive policy and will not hold an orientation; this will, or will say
         it could not.
         """
-        if not self.command_pose(position, orientation, ramp=ramp,
-                                 raise_on_fail=raise_on_fail):
+        if not self.command_pose(position, orientation, ramp=ramp, raise_on_fail=raise_on_fail):
             return MotionResult(False, 0, float("inf"), list(as_vec3(position)), 180.0)
 
         steps = 0
@@ -2053,8 +2013,7 @@ class Manipulator(Robot):
             steps += settle_steps
             error = self.pose_error()
             if error["position"] <= tolerance and error["angle"] <= angle_tolerance:
-                return MotionResult(True, steps, error["position"],
-                                    self._pose_goal.tolist(), error["angle"])
+                return MotionResult(True, steps, error["position"], self._pose_goal.tolist(), error["angle"])
             if attempt < corrections:
                 self.refine_pose()
 
@@ -2066,8 +2025,7 @@ class Manipulator(Robot):
                 f"{np.round(self._pose_goal, 4).tolist()}. The solution exists (IK "
                 f"found it); the drives are not tracking it."
             )
-        return MotionResult(False, steps, error["position"],
-                            self._pose_goal.tolist(), error["angle"])
+        return MotionResult(False, steps, error["position"], self._pose_goal.tolist(), error["angle"])
 
     def move_ee_to(
         self,
@@ -2099,9 +2057,7 @@ class Manipulator(Robot):
         best = float("inf")
 
         for step in range(max_steps):
-            reached = self.servo_to(
-                target, orientation, tolerance=tolerance, hold=hold_steps
-            )
+            reached = self.servo_to(target, orientation, tolerance=tolerance, hold=hold_steps)
             self.scene.step(1)
             best = min(best, self._servo_error)
             if reached:
@@ -2124,8 +2080,7 @@ class Manipulator(Robot):
             raise MotionError(
                 f"End effector did not reach {target.round(3).tolist()} within "
                 f"{max_steps} steps (closest approach {best:.4f} m, last "
-                f"{error:.4f} m, tolerance {tolerance} m)."
-                + self._why_it_could_not_reach(orientation)
+                f"{error:.4f} m, tolerance {tolerance} m)." + self._why_it_could_not_reach(orientation)
             )
         return result
 
@@ -2179,7 +2134,7 @@ class Manipulator(Robot):
         for index, (low, high) in enumerate(limits):
             if index in finger or index >= len(positions) or low is None or high is None:
                 continue
-            if high - low <= 0:          # `low > high` is USD for "locked"
+            if high - low <= 0:  # `low > high` is USD for "locked"
                 continue
             value = float(positions[index])
             if value - low < margin or high - value < margin:
@@ -2222,8 +2177,7 @@ class Manipulator(Robot):
         axis = self.approach_axis.upper().lstrip("-")
         if axis == "X":
             root = math.sqrt(0.5)
-            return [root * math.cos(half), -root * math.sin(half),
-                    root * math.cos(half), root * math.sin(half)]
+            return [root * math.cos(half), -root * math.sin(half), root * math.cos(half), root * math.sin(half)]
         return [0.0, math.cos(half), math.sin(half), 0.0]
 
     def downward_orientation(self, target: Any) -> list:
@@ -2241,8 +2195,7 @@ class Manipulator(Robot):
 
         base, _ = self._arm_base_pose()
         goal = as_vec3(target, name="target")
-        yaw = math.atan2(float(goal[1]) - float(base[1]),
-                         float(goal[0]) - float(base[0]))
+        yaw = math.atan2(float(goal[1]) - float(base[1]), float(goal[0]) - float(base[0]))
         return self.down_at_yaw(math.degrees(yaw))
 
     def servo_to(
@@ -2290,9 +2243,7 @@ class Manipulator(Robot):
             self._servo_target = target
             self._servo_orientation = rotation
             self._servo_settled = 0
-            self._rmpflow.set_end_effector_target(
-                target_position=target, target_orientation=rotation
-            )
+            self._rmpflow.set_end_effector_target(target_position=target, target_orientation=rotation)
 
         self._rmpflow.update_world()
         self._controller().apply_action(self._policy.get_next_articulation_action())
@@ -2303,7 +2254,9 @@ class Manipulator(Robot):
             w, x, y, z = (float(v) for v in rotation)
             want_z = np.array([2 * (x * z + w * y), 2 * (y * z - w * x), 1 - 2 * (x * x + y * y)])
             have_z = np.asarray(self.ee_rotation)[:, 2]
-            cosine = float(np.clip(have_z @ want_z / (np.linalg.norm(have_z) * np.linalg.norm(want_z) + 1e-12), -1.0, 1.0))
+            cosine = float(
+                np.clip(have_z @ want_z / (np.linalg.norm(have_z) * np.linalg.norm(want_z) + 1e-12), -1.0, 1.0)
+            )
             self._servo_tilt = float(np.arccos(cosine))
         arrived = self._servo_error < tolerance and self._servo_tilt < tilt_tolerance
         self._servo_settled = self._servo_settled + 1 if arrived else 0
@@ -2345,8 +2298,7 @@ class Manipulator(Robot):
                 return str(source).lower()
         return self.prim_path.rstrip("/").rsplit("/", 1)[-1].lower()
 
-    def route_to(self, position: Any, orientation: Any = None, *,
-                 seed: Any = None) -> "LulaRoute":
+    def route_to(self, position: Any, orientation: Any = None, *, seed: Any = None) -> "LulaRoute":
         """A joint-space route to a Cartesian pose, without a collision checker.
 
         What a long move needs on an install with no cuMotion (Isaac 5.x ships
@@ -2374,7 +2326,8 @@ class Manipulator(Robot):
         target = as_vec3(position, name="position")
         rotation = as_quat(orientation) if orientation is not None else None
         q_goal, solved = solver.compute_inverse_kinematics(
-            self._end_effector_frame, np.asarray(target, dtype=float),
+            self._end_effector_frame,
+            np.asarray(target, dtype=float),
             np.asarray(rotation, dtype=float) if rotation is not None else None,
             warm_start=warm,
         )
@@ -2418,15 +2371,12 @@ class Manipulator(Robot):
                 f"That pose is reachable only past a joint limit."
             )
 
-        trajectory = generator.compute_c_space_trajectory(
-            np.asarray([start, goal], dtype=float)
-        )
+        trajectory = generator.compute_c_space_trajectory(np.asarray([start, goal], dtype=float))
         if trajectory is None:
             raise MotionError(f"{self.prim_path}: Lula could not time-parameterise the route.")
         return LulaRoute(trajectory, names, start=start, goal=goal)
 
-    def solve_ik(self, position: Any, orientation: Any = None, *,
-                 seed: Any = None) -> np.ndarray | None:
+    def solve_ik(self, position: Any, orientation: Any = None, *, seed: Any = None) -> np.ndarray | None:
         """The joint configuration that reaches a pose, or None. No trajectory.
 
         `route_to` is inverse kinematics followed by a time-parameterised
@@ -2450,7 +2400,8 @@ class Manipulator(Robot):
         target = as_vec3(position, name="position")
         rotation = as_quat(orientation) if orientation is not None else None
         q_goal, solved = solver.compute_inverse_kinematics(
-            self._end_effector_frame, np.asarray(target, dtype=float),
+            self._end_effector_frame,
+            np.asarray(target, dtype=float),
             np.asarray(rotation, dtype=float) if rotation is not None else None,
             warm_start=warm,
         )
@@ -2458,17 +2409,16 @@ class Manipulator(Robot):
             return None
         goal = np.asarray(q_goal, dtype=float)
         try:
-            low, high = (np.asarray(v, dtype=float)
-                         for v in self._cspace_generator().get_c_space_position_limits())
+            low, high = (np.asarray(v, dtype=float) for v in self._cspace_generator().get_c_space_position_limits())
             if np.any(goal < low - 1e-6) or np.any(goal > high + 1e-6):
-                return None          # reachable only past a joint limit
+                return None  # reachable only past a joint limit
         except Exception:  # noqa: BLE001 -- unreadable limits are not a failure
             pass
         return goal
 
-    def route_clearance(self, route: Any, obstacles: Sequence[Any], *,
-                        margin: float = 0.25, samples: int = 24,
-                        carry: float = 0.0) -> dict | None:
+    def route_clearance(
+        self, route: Any, obstacles: Sequence[Any], *, margin: float = 0.25, samples: int = 24, carry: float = 0.0
+    ) -> dict | None:
         """Does this route sweep any link through an obstacle?
 
         Lula's routes are not collision-checked -- the trajectory generator
@@ -2495,8 +2445,9 @@ class Manipulator(Robot):
         self._sync_base_pose()
         solver = self._ik.get_kinematics_solver()
         frames = list(solver.get_all_frame_names())
-        boxes = [(np.asarray(lo, dtype=float) - margin, np.asarray(hi, dtype=float) + margin)
-                 for lo, hi, *_ in obstacles]
+        boxes = [
+            (np.asarray(lo, dtype=float) - margin, np.asarray(hi, dtype=float) + margin) for lo, hi, *_ in obstacles
+        ]
         names = [o[2] if len(o) > 2 else str(i) for i, o in enumerate(obstacles)]
         # A contact that exists at the START of the route is where the arm
         # already is, not something the route sweeps into. After setting a
@@ -2528,8 +2479,7 @@ class Manipulator(Robot):
                             if k == 0:
                                 grace.add(key)
                             elif key not in grace:
-                                return {"t": float(t), "frame": frame, "obstacle": name,
-                                        "point": pt.round(3).tolist()}
+                                return {"t": float(t), "frame": frame, "obstacle": name, "point": pt.round(3).tolist()}
             # Leaving a box ends its grace: coming back into it is an entry.
             grace &= touching
         return None
@@ -2541,13 +2491,10 @@ class Manipulator(Robot):
             )
 
             cfg = self._lula_kinematics_config
-            self._cspace_gen = LulaCSpaceTrajectoryGenerator(
-                cfg["robot_description_path"], cfg["urdf_path"]
-            )
+            self._cspace_gen = LulaCSpaceTrajectoryGenerator(cfg["robot_description_path"], cfg["urdf_path"])
         return self._cspace_gen
 
-    def plan_to(self, position: Any, orientation: Any = None, *,
-                robot_name: str | None = None) -> Any:
+    def plan_to(self, position: Any, orientation: Any = None, *, robot_name: str | None = None) -> Any:
         """Plan a collision-free route to a Cartesian target. Does not move.
 
         `robot_name` names the cuMotion configuration when this arm cannot say
@@ -2565,7 +2512,7 @@ class Manipulator(Robot):
         """
         if robot_name and not getattr(self, "_robot_type", None):
             self._robot_type = str(robot_name).lower()
-            self._planner = None          # rebuild against the named config
+            self._planner = None  # rebuild against the named config
         planner = self.planner()
         planner.set_base_pose(self.base_position, self.base_orientation)
         q_initial = planner.joint_subset(self.joint_positions, self.joint_names)
@@ -2859,9 +2806,7 @@ class Manipulator(Robot):
 
     # ── Grasping ──────────────────────────────────────────────────────────────
 
-    def is_grasping(
-        self, obj: "RigidObject", *, min_contacts: int = 1, min_force: float = 0.05
-    ) -> bool:
+    def is_grasping(self, obj: "RigidObject", *, min_contacts: int = 1, min_force: float = 0.05) -> bool:
         """True when the object is genuinely held — measured from contact reports.
 
         `min_force` (newtons) is what separates holding from touching. A closed
@@ -2871,9 +2816,7 @@ class Manipulator(Robot):
         indistinguishable from a grasp.
         """
         touching = {
-            c["body"]
-            for c in obj.contacts()
-            if c["body"].startswith(self.prim_path) and c["force"] >= min_force
+            c["body"] for c in obj.contacts() if c["body"].startswith(self.prim_path) and c["force"] >= min_force
         }
         return len(touching) >= min_contacts
 
@@ -2926,8 +2869,7 @@ class Manipulator(Robot):
         """
         if not self.is_grasping(obj):
             raise MotionError(
-                "Cannot throw: the object is not currently grasped. Call grasp() "
-                "first and confirm it returned True."
+                "Cannot throw: the object is not currently grasped. Call grasp() first and confirm it returned True."
             )
         if observe_steps < 0:
             raise ValueError("observe_steps must be >= 0")
@@ -3002,11 +2944,7 @@ class Manipulator(Robot):
                     reason = "reached the requested hand speed"
                 elif float(np.dot(current - release_at, unit)) >= 0.0:
                     reason = "passed the geometric release point"
-                elif (
-                    step >= spinup_steps
-                    and stalled >= stall_steps
-                    and (set_dt is None or scale >= max_scale)
-                ):
+                elif step >= spinup_steps and stalled >= stall_steps and (set_dt is None or scale >= max_scale):
                     # The arm is being driven as hard as this will drive it and
                     # it is not getting any faster. Carrying on to the geometric
                     # release point means letting go at a crawl -- which is what
@@ -3016,10 +2954,7 @@ class Manipulator(Robot):
                     # travel. Measured: released at 0.145 m/s against a
                     # requested 2.8, and the ball rolled. Letting go at the peak
                     # is the honest reading of a swing with nothing left.
-                    reason = (
-                        "the arm stopped gaining speed before the release "
-                        "point — this is as fast as it swings"
-                    )
+                    reason = "the arm stopped gaining speed before the release point — this is as fast as it swings"
                 else:
                     continue
 
@@ -3032,7 +2967,6 @@ class Manipulator(Robot):
                 # leaving it set turns the next ordinary move_ee_to into another
                 # one -- including the release fallback below.
                 set_dt(base_dt)
-
 
         if not released:
             self.release()
@@ -3077,11 +3011,7 @@ class Manipulator(Robot):
                 trajectory.append(position.round(4).tolist())
 
         final = obj.position
-        flight = (
-            round(float(np.linalg.norm((landed_at - release_position)[:2])), 4)
-            if landed_at is not None
-            else None
-        )
+        flight = round(float(np.linalg.norm((landed_at - release_position)[:2])), 4) if landed_at is not None else None
         total = float(np.linalg.norm((final - release_position)[:2]))
         return {
             "released": not still_held,
@@ -3139,8 +3069,7 @@ class DexterousHand(Robot):
         for index in indices:
             name = names[index].lower()
             key = next(
-                (token for token in ("thumb", "index", "middle", "ring", "little", "pinky")
-                 if token in name),
+                (token for token in ("thumb", "index", "middle", "ring", "little", "pinky") if token in name),
                 name.split("_")[0],
             )
             fingers.setdefault(key, []).append(index)
@@ -3166,7 +3095,5 @@ class DexterousHand(Robot):
     def describe(self) -> dict[str, Any]:
         info = super().describe()
         names = self.joint_names
-        info["fingers"] = {
-            finger: [names[i] for i in indices] for finger, indices in self.fingers.items()
-        }
+        info["fingers"] = {finger: [names[i] for i in indices] for finger, indices in self.fingers.items()}
         return info

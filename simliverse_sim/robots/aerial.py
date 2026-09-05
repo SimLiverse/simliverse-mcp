@@ -82,8 +82,7 @@ class AerialRobot(Robot):
                 try:
                     body.initialize()
                 except Exception:
-                    logger.debug("Rigid body init deferred for %s", self.body_path,
-                                 exc_info=True)
+                    logger.debug("Rigid body init deferred for %s", self.body_path, exc_info=True)
                 self._body = body
             except Exception:
                 logger.debug("No physics view for %s", self.body_path, exc_info=True)
@@ -158,9 +157,7 @@ class AerialRobot(Robot):
         try:
             body.apply_forces_and_torques_at_pos(
                 forces=vector.reshape(1, 3),
-                torques=as_vec3(torque, name="torque").reshape(1, 3)
-                if torque is not None
-                else None,
+                torques=as_vec3(torque, name="torque").reshape(1, 3) if torque is not None else None,
                 is_global=True,
             )
         except Exception as exc:
@@ -211,9 +208,7 @@ class AerialRobot(Robot):
             )
         return False
 
-    def _position_control_step(
-        self, target: np.ndarray, *, kp: float = 8.0, kd: float = 5.0
-    ) -> None:
+    def _position_control_step(self, target: np.ndarray, *, kp: float = 8.0, kd: float = 5.0) -> None:
         """One PD step: gravity compensation plus position and damping terms."""
         gravity = 9.81
         error = target - self.position

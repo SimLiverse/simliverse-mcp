@@ -24,9 +24,7 @@ import urllib.error
 
 import pytest
 
-from simliverse_sim.robots import library
 from simliverse_sim.robots.library import RobotAssetUnreachable, _check_reachable
-
 
 # ── The asset fetch that could hang the simulator ─────────────────────────────
 
@@ -76,7 +74,11 @@ def test_a_404_is_reported_as_the_catalogue_being_wrong(monkeypatch) -> None:
 
     def not_found(*_a: object, **_k: object) -> None:
         raise urllib.error.HTTPError(
-            "https://assets.example/x.usd", 404, "Not Found", {}, None  # type: ignore[arg-type]
+            "https://assets.example/x.usd",
+            404,
+            "Not Found",
+            {},
+            None,  # type: ignore[arg-type]
         )
 
     monkeypatch.setattr("urllib.request.urlopen", not_found)
@@ -119,9 +121,7 @@ def test_non_http_roots_are_left_alone(url: str, monkeypatch) -> None:
 # The extension imports `omni`, `pxr` and `isaacsim`, so it can only be imported
 # inside Isaac Sim. The suite parses it instead — the same approach
 # `test_handler_structure` takes.
-EXTENSION_ROOT = os.path.join(
-    os.path.dirname(__file__), "..", "isaac.sim.mcp_extension", "isaac_sim_mcp_extension"
-)
+EXTENSION_ROOT = os.path.join(os.path.dirname(__file__), "..", "isaac.sim.mcp_extension", "isaac_sim_mcp_extension")
 
 HANDLERS = os.path.join(EXTENSION_ROOT, "handlers")
 
@@ -375,9 +375,7 @@ def test_the_kept_scene_survives() -> None:
 
 def test_non_physics_prims_are_untouched() -> None:
     """The sweep runs on every `configure_physics`, including mid-scene."""
-    stage = _TraversableStage(
-        [_FakePrim("/World/Table", False), _FakePrim("/World/Ball", False)]
-    )
+    stage = _TraversableStage([_FakePrim("/World/Table", False), _FakePrim("/World/Ball", False)])
     assert _sweeper(stage, "/World/PhysicsScene") == []
     assert stage.removed == []
 
@@ -398,9 +396,7 @@ def test_a_duplicate_is_left_alone_while_physics_is_running() -> None:
     `configure_physics` — which is called at the start of essentially every
     task, with the timeline stopped.
     """
-    stage = _TraversableStage(
-        [_FakePrim("/World/PhysicsScene", True), _FakePrim("/PhysicsScene", True)]
-    )
+    stage = _TraversableStage([_FakePrim("/World/PhysicsScene", True), _FakePrim("/PhysicsScene", True)])
     removed = _sweeper(stage, "/World/PhysicsScene", playing=True)
 
     assert removed == []
@@ -418,9 +414,7 @@ class _StubbornWorld:
 
     @classmethod
     def clear_instance(cls) -> None:
-        raise RuntimeError(
-            "Accessed invalid expired 'PhysicsScene' prim </World/PhysicsScene>"
-        )
+        raise RuntimeError("Accessed invalid expired 'PhysicsScene' prim </World/PhysicsScene>")
 
 
 class _CooperativeWorld:
@@ -468,8 +462,12 @@ import os as _os  # noqa: E402
 _spec = _il.spec_from_file_location(
     "asset_notes",
     _os.path.join(
-        _os.path.dirname(__file__), "..", "isaac.sim.mcp_extension",
-        "isaac_sim_mcp_extension", "handlers", "asset_notes.py",
+        _os.path.dirname(__file__),
+        "..",
+        "isaac.sim.mcp_extension",
+        "isaac_sim_mcp_extension",
+        "handlers",
+        "asset_notes.py",
     ),
 )
 _notes = _il.module_from_spec(_spec)
@@ -485,18 +483,24 @@ def test_a_gripper_only_asset_is_called_an_end_effector():
 
 
 def test_an_arm_with_no_gripper_says_it_cannot_hold_anything():
-    note = _what_this_actually_is(
-        ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"], "lite6"
-    )
+    note = _what_this_actually_is(["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"], "lite6")
 
     assert "no gripper" in note
 
 
 def test_an_arm_with_a_gripper_needs_no_note():
     cobotta = [
-        "joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6",
-        "finger_joint", "left_inner_knuckle_joint", "right_inner_knuckle_joint",
-        "right_outer_knuckle_joint", "left_inner_finger_joint",
+        "joint_1",
+        "joint_2",
+        "joint_3",
+        "joint_4",
+        "joint_5",
+        "joint_6",
+        "finger_joint",
+        "left_inner_knuckle_joint",
+        "right_inner_knuckle_joint",
+        "right_outer_knuckle_joint",
+        "left_inner_finger_joint",
         "right_inner_finger_joint",
     ]
 
@@ -505,9 +509,15 @@ def test_an_arm_with_a_gripper_needs_no_note():
 
 def test_a_franka_needs_no_note():
     franka = [
-        "panda_joint1", "panda_joint2", "panda_joint3", "panda_joint4",
-        "panda_joint5", "panda_joint6", "panda_joint7",
-        "panda_finger_joint1", "panda_finger_joint2",
+        "panda_joint1",
+        "panda_joint2",
+        "panda_joint3",
+        "panda_joint4",
+        "panda_joint5",
+        "panda_joint6",
+        "panda_joint7",
+        "panda_finger_joint1",
+        "panda_finger_joint2",
     ]
 
     assert _what_this_actually_is(franka, "franka") == ""
@@ -526,7 +536,9 @@ def test_spawn_robot_accepts_a_mounting_yaw():
     had no route the controller was allowed to drive. The builder mounts the
     arm facing the work, and needs this to do it.
     """
-    import ast, os
+    import ast
+    import os
+
     path = os.path.join(os.path.dirname(__file__), "..", "simliverse_sim", "robots", "library.py")
     with open(path) as f:
         tree = ast.parse(f.read())
@@ -543,7 +555,9 @@ def test_spawn_box_replaces_a_prim_already_at_the_path():
     cartons 1.57 m apart and got the previous long line's four, 3.36 m
     apart, two of them past the end of the belt on the floor.
     """
-    import ast, os
+    import ast
+    import os
+
     path = os.path.join(os.path.dirname(__file__), "..", "simliverse_sim", "scene.py")
     with open(path) as f:
         tree = ast.parse(f.read())
@@ -558,7 +572,9 @@ def test_scene_clear_scene_is_clear_world_by_another_name():
     """The MCP tool, the prompts and an evaluation harness all say
     `clear_scene`; on the class it was an AttributeError the harness never
     read, and nothing cleared."""
-    import ast, os
+    import ast
+    import os
+
     path = os.path.join(os.path.dirname(__file__), "..", "simliverse_sim", "scene.py")
     with open(path) as f:
         tree = ast.parse(f.read())
@@ -574,7 +590,9 @@ def test_from_prop_turns_the_section_to_face_the_flow_before_measuring_it():
     with 1.5 m of floor between them -- and three of four cartons on the
     floor while the arm waited for them until it gave up.
     """
-    import ast, os
+    import ast
+    import os
+
     path = os.path.join(os.path.dirname(__file__), "..", "simliverse_sim", "conveyor.py")
     with open(path) as f:
         tree = ast.parse(f.read())

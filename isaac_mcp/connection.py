@@ -160,9 +160,7 @@ class IsaacConnection:
                 # code) says nothing about the socket — keep the connection and
                 # carry the full payload so the caller still gets the traceback
                 # and captured output.
-                raise IsaacCommandError(
-                    response.get("message", "Unknown error from Isaac"), response
-                )
+                raise IsaacCommandError(response.get("message", "Unknown error from Isaac"), response)
             return response.get("result", {})
         except IsaacCommandError:
             raise

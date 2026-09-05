@@ -32,12 +32,41 @@ Three things here are shaped by the conveyor rather than by the arm:
   retreating through the same space.
 """
 
-(WARMUP, INIT, WAIT_FOR_BOX, OVER_BOX, DOWN_TO_BOX, GRIP, LIFT, TRAVERSE,
- OVER_SLOT, PLACE, RELEASE, RETREAT, NEXT, DONE, FAILED) = range(15)
+(
+    WARMUP,
+    INIT,
+    WAIT_FOR_BOX,
+    OVER_BOX,
+    DOWN_TO_BOX,
+    GRIP,
+    LIFT,
+    TRAVERSE,
+    OVER_SLOT,
+    PLACE,
+    RELEASE,
+    RETREAT,
+    NEXT,
+    DONE,
+    FAILED,
+) = range(15)
 
-NAMES = ["WARMUP", "INIT", "WAIT_FOR_BOX", "OVER_BOX", "DOWN_TO_BOX", "GRIP",
-         "LIFT", "TRAVERSE", "OVER_SLOT", "PLACE", "RELEASE", "RETREAT",
-         "NEXT", "DONE", "FAILED"]
+NAMES = [
+    "WARMUP",
+    "INIT",
+    "WAIT_FOR_BOX",
+    "OVER_BOX",
+    "DOWN_TO_BOX",
+    "GRIP",
+    "LIFT",
+    "TRAVERSE",
+    "OVER_SLOT",
+    "PLACE",
+    "RELEASE",
+    "RETREAT",
+    "NEXT",
+    "DONE",
+    "FAILED",
+]
 
 ARM = "/World/Arm"
 BELT = "/World/Conveyor"
@@ -46,23 +75,23 @@ TRACE = "/tmp/kuka_palletizing.log"
 # KR210 flange pointing at the floor.
 DOWN = [0.0, 1.0, 0.0, 0.0]
 
-BOX = 0.30                      # full box size, metres
+BOX = 0.30  # full box size, metres
 PALLET_Y = 1.90
 PALLET_DECK_Z = 0.1425
 ROWS, COLS, LAYERS = 2, 2, 2
 
-CARRY_Z = 1.65                  # travel height: clear of a two-layer stack
-APPROACH = 0.35                 # above a box before descending onto it
-GRIP_LIFT = 0.010               # cup height above the box face when it seals
-COARSE = 0.12                   # first stage of the descent onto the pallet
-FINAL = 0.003                   # release height: set down, do not drop
+CARRY_Z = 1.65  # travel height: clear of a two-layer stack
+APPROACH = 0.35  # above a box before descending onto it
+GRIP_LIFT = 0.010  # cup height above the box face when it seals
+COARSE = 0.12  # first stage of the descent onto the pallet
+FINAL = 0.003  # release height: set down, do not drop
 
 GRIP_FRAMES = 45
 RELEASE_FRAMES = 45
 SETTLE_FRAMES = 30
 WARMUP_FRAMES = 30
-WAIT_LIMIT = 3000               # a box should reach the stop well inside this
-LIMIT = 2000                    # per motion state
+WAIT_LIMIT = 3000  # a box should reach the stop well inside this
+LIMIT = 2000  # per motion state
 
 # The KR210's ready pose. Re-homed before every pick: the wrist winds up over a
 # sequence of solves, and once a joint is against its travel limit a demanded
@@ -164,8 +193,12 @@ def compute(db=None):
         _belt.start()
 
         _slots = pallet_slots(
-            origin=[0.0, PALLET_Y, PALLET_DECK_Z], box=(BOX, BOX, BOX),
-            rows=ROWS, cols=COLS, layers=LAYERS, gap=0.01,
+            origin=[0.0, PALLET_Y, PALLET_DECK_Z],
+            box=(BOX, BOX, BOX),
+            rows=ROWS,
+            cols=COLS,
+            layers=LAYERS,
+            gap=0.01,
         )
         _arm.set_joint_positions(HOME, settle_steps=0)
         _go(WAIT_FOR_BOX)
@@ -219,15 +252,17 @@ def compute(db=None):
             _go(OVER_SLOT)
 
     elif _state == OVER_SLOT:
-        if _arm.servo_to([slot["rest"][0], slot["rest"][1],
-                          slot["rest"][2] + BOX / 2.0 + _tip + COARSE], DOWN, tolerance=0.018):
+        if _arm.servo_to(
+            [slot["rest"][0], slot["rest"][1], slot["rest"][2] + BOX / 2.0 + _tip + COARSE], DOWN, tolerance=0.018
+        ):
             _go(PLACE)
 
     elif _state == PLACE:
         # Two-stage descent. A single move overshoots on arrival and nudges what
         # is already stacked; measured on a three-cube tower that came apart.
-        if _arm.servo_to([slot["rest"][0], slot["rest"][1],
-                          slot["rest"][2] + BOX / 2.0 + _tip + FINAL], DOWN, tolerance=0.008):
+        if _arm.servo_to(
+            [slot["rest"][0], slot["rest"][1], slot["rest"][2] + BOX / 2.0 + _tip + FINAL], DOWN, tolerance=0.008
+        ):
             _arm.suction.open(settle_steps=0)
             _go(RELEASE)
 

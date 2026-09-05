@@ -109,27 +109,20 @@ def set_physics(
             if scene is None:
                 return {
                     "status": "error",
-                    "message": (
-                        "No physics scene on the stage to set time_step or "
-                        "gpu_enabled on. Create one first."
-                    ),
+                    "message": ("No physics scene on the stage to set time_step or gpu_enabled on. Create one first."),
                 }
             if time_step is not None:
                 if not time_step > 0:
-                    return {"status": "error",
-                            "message": f"time_step must be positive, got {time_step}."}
-                scene.CreateAttribute(
-                    "physxScene:timeStepsPerSecond", Sdf.ValueTypeNames.UInt
-                ).Set(int(round(1.0 / float(time_step))))
+                    return {"status": "error", "message": f"time_step must be positive, got {time_step}."}
+                scene.CreateAttribute("physxScene:timeStepsPerSecond", Sdf.ValueTypeNames.UInt).Set(
+                    int(round(1.0 / float(time_step)))
+                )
                 applied.append("time_step")
             if gpu_enabled is not None:
-                scene.CreateAttribute(
-                    "physxScene:enableGPUDynamics", Sdf.ValueTypeNames.Bool
-                ).Set(bool(gpu_enabled))
+                scene.CreateAttribute("physxScene:enableGPUDynamics", Sdf.ValueTypeNames.Bool).Set(bool(gpu_enabled))
                 applied.append("gpu_enabled")
 
-        return {"status": "success", "applied": applied,
-                "message": "Physics parameters updated: " + ", ".join(applied)}
+        return {"status": "success", "applied": applied, "message": "Physics parameters updated: " + ", ".join(applied)}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 

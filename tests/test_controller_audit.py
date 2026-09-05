@@ -135,9 +135,7 @@ def test_a_second_graph_on_the_same_script_voids_the_record(delivered):
 def test_articulation_roots_are_measured_as_robots(monkeypatch):
     """Passing a robot in `objects` is a routing problem, not a caller error."""
     monkeypatch.setattr(controller, "_is_articulation", lambda p: p == "/World/Franka")
-    bodies, robots, rerouted = controller._split_by_kind(
-        ["/World/Cube1", "/World/Franka"], None
-    )
+    bodies, robots, rerouted = controller._split_by_kind(["/World/Cube1", "/World/Franka"], None)
     assert bodies == ["/World/Cube1"]
     assert robots == ["/World/Franka"]
     assert rerouted == ["/World/Franka"]
@@ -167,6 +165,7 @@ def test_every_node_gets_its_own_module_via_the_shim(tmp_path):
     # previous shim is gone: a node recreated at the same prim path must not
     # find its old script
     import time as _t
+
     _t.sleep(0.002)
     again = controller._isolating_shim(str(script), "/World/TaskGraph_x8/ScriptNode")
     assert again != shim and not (tmp_path / shim.rsplit("/", 1)[-1]).exists()

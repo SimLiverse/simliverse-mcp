@@ -187,19 +187,18 @@ class IsaacAdapterV5(IsaacAdapterBase):
                 return add()
             except Exception as exc:
                 raise ValueError(
-                    f"Could not author {name} on {prim_path}: {exc}. "
-                    f"Existing ops: {sorted(existing)}"
+                    f"Could not author {name} on {prim_path}: {exc}. Existing ops: {sorted(existing)}"
                 ) from exc
 
-        _op("xformOp:translate",
-            lambda: xformable.AddTranslateOp(precision=UsdGeom.XformOp.PrecisionDouble)
-            ).Set(Gf.Vec3d(*pos))
-        _op("xformOp:rotateXYZ",
-            lambda: xformable.AddRotateXYZOp(precision=UsdGeom.XformOp.PrecisionDouble)
-            ).Set(Gf.Vec3d(*rot))
-        _op("xformOp:scale",
-            lambda: xformable.AddScaleOp(precision=UsdGeom.XformOp.PrecisionDouble)
-            ).Set(Gf.Vec3d(*scl))
+        _op("xformOp:translate", lambda: xformable.AddTranslateOp(precision=UsdGeom.XformOp.PrecisionDouble)).Set(
+            Gf.Vec3d(*pos)
+        )
+        _op("xformOp:rotateXYZ", lambda: xformable.AddRotateXYZOp(precision=UsdGeom.XformOp.PrecisionDouble)).Set(
+            Gf.Vec3d(*rot)
+        )
+        _op("xformOp:scale", lambda: xformable.AddScaleOp(precision=UsdGeom.XformOp.PrecisionDouble)).Set(
+            Gf.Vec3d(*scl)
+        )
 
     def get_prim_transform(self, prim_path: str) -> Dict[str, Any]:
         from pxr import UsdGeom
@@ -1063,6 +1062,7 @@ class IsaacAdapterV5(IsaacAdapterBase):
             try:
                 import isaacsim
                 import isaacsim.core as isaac_core
+
                 sys.modules["omni.isaac"] = isaacsim
                 sys.modules["omni.isaac.core"] = isaac_core
                 sys.modules["omni.isaac.core.api"] = isaac_core.api
@@ -1075,8 +1075,8 @@ class IsaacAdapterV5(IsaacAdapterBase):
         usd_utils_mod = None
         prim_utils_mod = None
         try:
-            import isaacsim.core.utils.stage as usd_utils_mod
             import isaacsim.core.utils.prims as prim_utils_mod
+            import isaacsim.core.utils.stage as usd_utils_mod
         except Exception:
             pass
 

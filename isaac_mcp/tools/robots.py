@@ -131,7 +131,7 @@ def register_tools(mcp: FastMCP, get_connection: "Callable[[], IsaacConnection]"
         try:
             conn = get_connection()
             info_res = conn.send_command("robots.get_info", {"prim_path": prim_path})
-            
+
             joint_names = info_res.get("joint_names", [])
             num_dof = info_res.get("num_dof", len(joint_names))
             joint_types = info_res.get("joint_types", {})
@@ -139,17 +139,18 @@ def register_tools(mcp: FastMCP, get_connection: "Callable[[], IsaacConnection]"
 
             # Dynamically detect arm vs mobile base vs quadruped vs humanoid
             finger_joints = [
-                j for j in joint_names
-                if any(k in j.lower() for k in ["finger", "gripper", "knuckle", "thumb", "jaw"])
+                j for j in joint_names if any(k in j.lower() for k in ["finger", "gripper", "knuckle", "thumb", "jaw"])
             ]
             arm_joints = [
-                j for j in joint_names
-                if j not in finger_joints and any(k in j.lower() for k in ["joint", "shoulder", "elbow", "wrist", "arm", "a1", "a2", "a3", "a4", "a5", "a6", "a7"])
+                j
+                for j in joint_names
+                if j not in finger_joints
+                and any(
+                    k in j.lower()
+                    for k in ["joint", "shoulder", "elbow", "wrist", "arm", "a1", "a2", "a3", "a4", "a5", "a6", "a7"]
+                )
             ]
-            wheel_joints = [
-                j for j in joint_names
-                if any(k in j.lower() for k in ["wheel", "steer", "drive"])
-            ]
+            wheel_joints = [j for j in joint_names if any(k in j.lower() for k in ["wheel", "steer", "drive"])]
 
             category = "manipulator"
             if len(wheel_joints) >= 2 and len(arm_joints) == 0:

@@ -27,8 +27,11 @@ import ast
 import os
 
 HANDLERS = os.path.join(
-    os.path.dirname(__file__), "..", "isaac.sim.mcp_extension",
-    "isaac_sim_mcp_extension", "handlers",
+    os.path.dirname(__file__),
+    "..",
+    "isaac.sim.mcp_extension",
+    "isaac_sim_mcp_extension",
+    "handlers",
 )
 
 #: Passed by the dispatcher, not by the caller.

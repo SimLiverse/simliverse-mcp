@@ -84,9 +84,7 @@ def test_it_re_homes_the_arm(example_source: str) -> None:
         "the worked example does not home the arm — an agent copying it will wind "
         "the wrist and read the resulting 9-22 cm shortfall as a kinematic limit"
     )
-    assert "set_joint_positions" in example_source, (
-        "HOME is named but never commanded"
-    )
+    assert "set_joint_positions" in example_source, "HOME is named but never commanded"
 
 
 def test_homing_is_not_a_one_off_at_startup(example_source: str) -> None:
@@ -114,8 +112,7 @@ def test_it_does_not_step_physics_from_inside_compute(example_source: str) -> No
     """`move_ee_to` steps the world; a ScriptNode doing that deadlocks the graph."""
     assert "servo_to" in example_source
     assert "move_ee_to" not in example_source.split('"""', 2)[-1], (
-        "the example calls move_ee_to outside its docstring — that double-advances "
-        "the world from inside compute()"
+        "the example calls move_ee_to outside its docstring — that double-advances the world from inside compute()"
     )
 
 

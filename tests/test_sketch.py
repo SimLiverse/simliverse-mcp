@@ -5,6 +5,7 @@ The payloads here are the real thing, header and all, copied from the format
 survive a block of prose followed by shape lines, and a test that feeds it
 only the shape lines would not be testing the case that actually arrives.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -20,11 +21,14 @@ HEADER = """[LAYOUT SKETCH - plan view of the floor, all values in metres.
  Treat them as the requested layout, not as an approximation to re-derive.]
 """
 
-CELL = HEADER + """
+CELL = (
+    HEADER
+    + """
 rect   "cell" centre (0.00, 0.00) 6.50 x 6.50 m (x -3.25..3.25, y -3.25..3.25)
 arrow  "infeed conveyor" (5.00, -0.40) -> (-1.00, -0.40) length 6.00 m heading 180.00 deg (-X)
 circle "pallet" centre (0.00, 0.75) radius 0.60 m
 """
+)
 
 
 class _Spawned:
@@ -120,23 +124,23 @@ def test_a_label_beats_size() -> None:
     'Biggest rectangle' is a fine rule until that happens, and then it fences
     the site instead of the machine and nothing says so.
     """
-    text = HEADER + """
+    text = (
+        HEADER
+        + """
 rect "warehouse floor" centre (0.00, 0.00) 40.00 x 25.00 m
 rect "cell" centre (2.00, 1.00) 6.00 x 6.00 m
 """
+    )
     picked = S.pick_footprint(S.parse_sketch(text)["rects"])
 
     assert picked["label"] == "cell"
     assert picked["chosen_by"] == "label"
 
 
-@pytest.mark.parametrize("word", ["fence", "cell", "guard", "enclosure",
-                                  "perimeter", "cage", "safety"])
+@pytest.mark.parametrize("word", ["fence", "cell", "guard", "enclosure", "perimeter", "cage", "safety"])
 def test_the_words_people_actually_use_are_recognised(word) -> None:
-    text = HEADER + ('\nrect "big" centre (0,0) 30.00 x 30.00 m'
-                     '\nrect "%s line" centre (1,1) 5.00 x 5.00 m\n' % word)
-    assert S.pick_footprint(S.parse_sketch(text)["rects"])["label"].startswith(
-        word)
+    text = HEADER + ('\nrect "big" centre (0,0) 30.00 x 30.00 m\nrect "%s line" centre (1,1) 5.00 x 5.00 m\n' % word)
+    assert S.pick_footprint(S.parse_sketch(text)["rects"])["label"].startswith(word)
 
 
 def test_one_unlabelled_rectangle_is_taken_as_the_cell() -> None:
@@ -148,10 +152,13 @@ def test_one_unlabelled_rectangle_is_taken_as_the_cell() -> None:
 
 def test_guessing_between_unlabelled_rectangles_says_it_guessed() -> None:
     """A guess that does not announce itself is the one that gets trusted."""
-    text = HEADER + """
+    text = (
+        HEADER
+        + """
 rect "unlabelled" centre (0,0) 5.00 x 4.00 m
 rect "unlabelled" centre (0,0) 9.00 x 9.00 m
 """
+    )
     picked = S.pick_footprint(S.parse_sketch(text)["rects"])
 
     assert picked["size"] == pytest.approx((9.0, 9.0))
@@ -198,10 +205,13 @@ def test_an_arrow_crossing_the_line_opens_the_guarding(scene) -> None:
 
 def test_an_arrow_drawn_inside_the_cell_is_not_a_doorway(scene) -> None:
     """Inside, an arrow means travel direction, not an entry point."""
-    text = HEADER + """
+    text = (
+        HEADER
+        + """
 rect  "cell" centre (0.00, 0.00) 6.50 x 6.50 m
 arrow "travel" (-1.00, 0.00) -> (1.00, 0.00) length 2.00 m heading 0.00 deg (+X)
 """
+    )
     out = S.fence_from_sketch(text, scene=scene)
 
     assert out["crossings"] == []
@@ -210,27 +220,33 @@ arrow "travel" (-1.00, 0.00) -> (1.00, 0.00) length 2.00 m heading 0.00 deg (+X)
 
 def test_an_arrow_entering_near_a_corner_still_picks_one_side(scene) -> None:
     """Picking the wrong side puts the gap round the corner from the belt."""
-    text = HEADER + """
+    text = (
+        HEADER
+        + """
 rect  "cell" centre (0.00, 0.00) 6.00 x 6.00 m
 arrow "belt" (4.00, 2.90) -> (0.00, 2.90) length 4.00 m heading 180.00 deg (-X)
 """
+    )
     out = S.fence_from_sketch(text, scene=scene)
 
     assert len(out["crossings"]) == 1
     assert out["crossings"][0]["side"] == "east"
 
 
-@pytest.mark.parametrize("start,side", [
-    ((6.0, 0.0), "east"),
-    ((-6.0, 0.0), "west"),
-    ((0.0, 6.0), "north"),
-    ((0.0, -6.0), "south"),
-])
+@pytest.mark.parametrize(
+    "start,side",
+    [
+        ((6.0, 0.0), "east"),
+        ((-6.0, 0.0), "west"),
+        ((0.0, 6.0), "north"),
+        ((0.0, -6.0), "south"),
+    ],
+)
 def test_a_feed_from_each_direction_opens_the_right_side(scene, start, side) -> None:
     text = HEADER + (
         '\nrect  "cell" centre (0.00, 0.00) 6.00 x 6.00 m'
-        '\narrow "belt" (%.2f, %.2f) -> (0.00, 0.00) length 6.00 m heading 0 deg\n'
-        % start)
+        '\narrow "belt" (%.2f, %.2f) -> (0.00, 0.00) length 6.00 m heading 0 deg\n' % start
+    )
     out = S.fence_from_sketch(text, scene=scene, gate=None)
 
     assert out["crossings"][0]["side"] == side
@@ -290,10 +306,13 @@ def test_the_gate_opens_nearest_the_operator(scene) -> None:
     """The bug this exists for: the gate always opened south, whatever was
     drawn. It only ever matched an operator drawn south of the cell by
     coincidence - the same default would have fired with nobody there."""
-    text = HEADER + """
+    text = (
+        HEADER
+        + """
 rect   "cell" centre (0.00, 0.00) 6.00 x 6.00 m
 circle "operator" centre (5.00, 0.00) radius 0.60 m
 """
+    )
     out = S.fence_from_sketch(text, scene=scene)
 
     assert out["gate"]["side"] == "east"
@@ -301,16 +320,19 @@ circle "operator" centre (5.00, 0.00) radius 0.60 m
     assert out["fence"].openings["south"] == []
 
 
-@pytest.mark.parametrize("point,side", [
-    ((0.0, 5.0), "north"),
-    ((0.0, -5.0), "south"),
-    ((5.0, 0.0), "east"),
-    ((-5.0, 0.0), "west"),
-])
+@pytest.mark.parametrize(
+    "point,side",
+    [
+        ((0.0, 5.0), "north"),
+        ((0.0, -5.0), "south"),
+        ((5.0, 0.0), "east"),
+        ((-5.0, 0.0), "west"),
+    ],
+)
 def test_the_gate_follows_the_operator_to_every_side(scene, point, side) -> None:
     text = HEADER + (
-        '\nrect   "cell" centre (0.00, 0.00) 6.00 x 6.00 m'
-        '\ncircle "worker" centre (%.2f, %.2f) radius 0.60 m\n' % point)
+        '\nrect   "cell" centre (0.00, 0.00) 6.00 x 6.00 m\ncircle "worker" centre (%.2f, %.2f) radius 0.60 m\n' % point
+    )
     out = S.fence_from_sketch(text, scene=scene)
 
     assert out["gate"]["side"] == side
@@ -325,10 +347,13 @@ def test_no_operator_falls_back_to_south_and_says_so(scene) -> None:
 
 def test_an_explicit_gate_wins_over_a_drawn_operator(scene) -> None:
     """A caller that says where the gate goes should never be second-guessed."""
-    text = HEADER + """
+    text = (
+        HEADER
+        + """
 rect   "cell" centre (0.00, 0.00) 6.00 x 6.00 m
 circle "operator" centre (5.00, 0.00) radius 0.60 m
 """
+    )
     out = S.fence_from_sketch(text, scene=scene, gate="north")
 
     assert out["gate"]["side"] == "north"
@@ -337,22 +362,27 @@ circle "operator" centre (5.00, 0.00) radius 0.60 m
 
 def test_explicit_none_still_means_no_gate_at_all(scene) -> None:
     """None is a real answer, not "unset" - it must not be reinterpreted."""
-    text = HEADER + """
+    text = (
+        HEADER
+        + """
 rect   "cell" centre (0.00, 0.00) 6.00 x 6.00 m
 circle "operator" centre (5.00, 0.00) radius 0.60 m
 """
+    )
     out = S.fence_from_sketch(text, scene=scene, gate=None)
 
-    assert out["fence"].openings == {"north": [], "south": [], "east": [],
-                                     "west": []}
+    assert out["fence"].openings == {"north": [], "south": [], "east": [], "west": []}
 
 
 def test_the_operator_used_for_the_gate_is_not_reported_as_ignored(scene) -> None:
     """It was used. Calling it ignored would be a second, quieter lie."""
-    text = HEADER + """
+    text = (
+        HEADER
+        + """
 rect   "cell" centre (0.00, 0.00) 6.00 x 6.00 m
 circle "operator" centre (5.00, 0.00) radius 0.60 m
 """
+    )
     out = S.fence_from_sketch(text, scene=scene)
 
     assert "operator" not in out["ignored"]["circles"]
@@ -360,10 +390,13 @@ circle "operator" centre (5.00, 0.00) radius 0.60 m
 
 def test_a_circle_that_is_not_an_operator_does_not_move_the_gate(scene) -> None:
     """A pallet drawn east of the cell is not a person and must not steer it."""
-    text = HEADER + """
+    text = (
+        HEADER
+        + """
 rect   "cell" centre (0.00, 0.00) 6.00 x 6.00 m
 circle "pallet" centre (5.00, 0.00) radius 0.60 m
 """
+    )
     out = S.fence_from_sketch(text, scene=scene)
 
     assert out["gate"]["side"] == "south"
@@ -371,11 +404,14 @@ circle "pallet" centre (5.00, 0.00) radius 0.60 m
 
 
 def test_the_first_operator_wins_when_more_than_one_is_drawn(scene) -> None:
-    text = HEADER + """
+    text = (
+        HEADER
+        + """
 rect   "cell" centre (0.00, 0.00) 6.00 x 6.00 m
 circle "operator 1" centre (5.00, 0.00) radius 0.60 m
 circle "operator 2" centre (0.00, 5.00) radius 0.60 m
 """
+    )
     out = S.fence_from_sketch(text, scene=scene)
 
     assert out["gate"]["side"] == "east"

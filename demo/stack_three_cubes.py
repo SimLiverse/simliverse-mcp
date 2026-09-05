@@ -11,21 +11,34 @@ The one real hazard, knocking the tower over in passing, is handled by lifting
 clear and traversing above it, which costs nothing.
 """
 
-(WARMUP, INIT, OPEN, HOVER, DESCEND, CLOSE, LIFT, OVER,
- LOWER, RELEASE, RETREAT, NEXT, DONE, FAILED) = range(14)
+(WARMUP, INIT, OPEN, HOVER, DESCEND, CLOSE, LIFT, OVER, LOWER, RELEASE, RETREAT, NEXT, DONE, FAILED) = range(14)
 
-NAMES = ["WARMUP", "INIT", "OPEN", "HOVER", "DESCEND", "CLOSE", "LIFT", "OVER",
-         "LOWER", "RELEASE", "RETREAT", "NEXT", "DONE", "FAILED"]
+NAMES = [
+    "WARMUP",
+    "INIT",
+    "OPEN",
+    "HOVER",
+    "DESCEND",
+    "CLOSE",
+    "LIFT",
+    "OVER",
+    "LOWER",
+    "RELEASE",
+    "RETREAT",
+    "NEXT",
+    "DONE",
+    "FAILED",
+]
 TRACE_PATH = "/tmp/ctl_trace.log"
 
-DOWN = [0.0, 1.0, 0.0, 0.0]     # tool z pointing at the table
-CUBE = 0.05                      # edge length
-TRANSIT = 0.35                   # above a finished three-cube tower (top 0.15)
+DOWN = [0.0, 1.0, 0.0, 0.0]  # tool z pointing at the table
+CUBE = 0.05  # edge length
+TRANSIT = 0.35  # above a finished three-cube tower (top 0.15)
 HOVER_Z = 0.18
-GRASP_Z = 0.035                  # cube centred at 0.025, tool a touch above centre
+GRASP_Z = 0.035  # cube centred at 0.025, tool a touch above centre
 WARMUP_FRAMES = 30
-GRIP_FRAMES = 100                # closing takes real time; the state waits, never steps
-LIMIT = 250                      # a state that cannot converge should say so in ~4 s
+GRIP_FRAMES = 100  # closing takes real time; the state waits, never steps
+LIMIT = 250  # a state that cannot converge should say so in ~4 s
 COARSE = 0.012
 FINE = 0.008
 
@@ -181,13 +194,11 @@ def _compute(db=None):
         b = base.position
         target = 0.05 * job["level"] + GRASP_Z
         if onto.prim_path in cube.contact_bodies():
-            _trace("  touched down on %s at %s"
-                   % (onto.prim_path, [round(float(v), 3) for v in cube.position]))
+            _trace("  touched down on %s at %s" % (onto.prim_path, [round(float(v), 3) for v in cube.position]))
             _go(RELEASE)
             return True
         if _arm.servo_to([float(b[0]), float(b[1]), target], DOWN, tolerance=FINE) or _timeout():
-            _trace("  lowered without contact at %s"
-                   % [round(float(v), 3) for v in cube.position])
+            _trace("  lowered without contact at %s" % [round(float(v), 3) for v in cube.position])
             _go(RELEASE)
         return True
 

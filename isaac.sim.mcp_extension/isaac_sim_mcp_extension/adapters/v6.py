@@ -43,12 +43,14 @@ class IsaacAdapterV6(IsaacAdapterBase):
         super().__init__()
         try:
             from isaacsim.core.simulation_manager import SimulationManager
+
             self._engine = SimulationManager.get_active_physics_engine()
         except ImportError:
             self._engine = "unknown"
-            
+
         try:
             import isaacsim.core.version
+
             self._isaacsim_version = isaacsim.core.version.get_version()
         except Exception:
             self._isaacsim_version = "6.0.0"
@@ -57,20 +59,24 @@ class IsaacAdapterV6(IsaacAdapterBase):
 
     def get_stage(self) -> Usd.Stage:
         import omni.usd
+
         return omni.usd.get_context().get_stage()
 
     def get_assets_root_path(self) -> str:
         from isaacsim.storage.native import get_assets_root_path
+
         return get_assets_root_path()
 
     # ── Prims ──────────────────────────────────────────────
 
     def create_prim(self, prim_path: str, prim_type: str = "Xform", **kwargs) -> Usd.Prim:
         from isaacsim.core.experimental.utils.stage import define_prim
+
         return define_prim(prim_path, prim_type, **kwargs)
 
     def delete_prim(self, prim_path: str) -> bool:
         import omni.kit.commands
+
         omni.kit.commands.execute("DeletePrims", paths=[prim_path])
         return True
 
@@ -120,10 +126,12 @@ class IsaacAdapterV6(IsaacAdapterBase):
 
     def load_environment(self, env_path: str, prim_path: str = "/Environment") -> None:
         from isaacsim.core.experimental.utils.stage import add_reference_to_stage
+
         add_reference_to_stage(env_path, prim_path)
 
     def add_reference_to_stage(self, usd_path: str, prim_path: str) -> Usd.Prim:
         from isaacsim.core.experimental.utils.stage import add_reference_to_stage
+
         return add_reference_to_stage(usd_path, prim_path)
 
     def set_prim_transform(
@@ -216,6 +224,7 @@ class IsaacAdapterV6(IsaacAdapterBase):
 
     def get_prim_actual_size(self, prim_path: str) -> Tuple[List[float], Tuple[List[float], List[float]]]:
         from pxr import UsdGeom
+
         stage = self.get_stage()
         prim = stage.GetPrimAtPath(prim_path)
         if not prim.IsValid():
@@ -284,6 +293,7 @@ class IsaacAdapterV6(IsaacAdapterBase):
             raise ValueError(f"Unsupported prim type for size calculation: {prim_type}")
 
         from pxr import Usd
+
         world_transform = xformable.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
         translation = world_transform.ExtractTranslation()
         pos = [float(translation[0]), float(translation[1]), float(translation[2])]
@@ -297,10 +307,12 @@ class IsaacAdapterV6(IsaacAdapterBase):
 
     def create_xform_prim(self, prim_path: str) -> Any:
         from isaacsim.core.experimental.prims import XformPrim
+
         return XformPrim(prim_paths=[prim_path])
 
     def create_articulation(self, prim_path: str, name: str) -> Any:
         from isaacsim.core.experimental.prims import Articulation
+
         return Articulation(prim_paths=[prim_path])
 
     def get_robot_joint_info(self, prim_path: str) -> Dict[str, Any]:
@@ -310,6 +322,7 @@ class IsaacAdapterV6(IsaacAdapterBase):
         num_dof = 0
         try:
             from isaacsim.core.experimental.prims import Articulation
+
             art = Articulation(prim_paths=[prim_path])
             if not art.initialized:
                 art.initialize()
@@ -367,22 +380,21 @@ class IsaacAdapterV6(IsaacAdapterBase):
         joint_indices: Optional[List[int]] = None,
     ) -> None:
         try:
-            from isaacsim.core.experimental.prims import Articulation
             import warp as wp
+            from isaacsim.core.experimental.prims import Articulation
+
             art = Articulation(prim_paths=[prim_path])
             if not art.initialized:
                 art.initialize()
-            
+
             # Articulation is batched (takes lists of prim paths), so we pass [[pos]]
             if joint_indices:
                 art.set_joint_positions(
-                    positions=wp.array([positions], dtype=wp.float32), 
-                    joint_indices=wp.array(joint_indices, dtype=wp.int32)
+                    positions=wp.array([positions], dtype=wp.float32),
+                    joint_indices=wp.array(joint_indices, dtype=wp.int32),
                 )
             else:
-                art.set_joint_positions(
-                    positions=wp.array([positions], dtype=wp.float32)
-                )
+                art.set_joint_positions(positions=wp.array([positions], dtype=wp.float32))
         except BaseException:
             self._set_joint_drive_targets(prim_path, positions, joint_indices)
 
@@ -426,6 +438,7 @@ class IsaacAdapterV6(IsaacAdapterBase):
     def _get_joint_names(self, prim_path: str) -> List[str]:
         try:
             from isaacsim.core.experimental.prims import Articulation
+
             art = Articulation(prim_paths=[prim_path])
             if not art.initialized:
                 art.initialize()
@@ -436,6 +449,7 @@ class IsaacAdapterV6(IsaacAdapterBase):
             pass
 
         from pxr import Usd, UsdPhysics
+
         stage = self.get_stage()
         root_prim = stage.GetPrimAtPath(prim_path)
         if not root_prim.IsValid():
@@ -449,6 +463,7 @@ class IsaacAdapterV6(IsaacAdapterBase):
     def get_joint_positions(self, prim_path: str) -> List[float]:
         try:
             from isaacsim.core.experimental.prims import Articulation
+
             art = Articulation(prim_paths=[prim_path])
             if not art.initialized:
                 art.initialize()
@@ -459,6 +474,7 @@ class IsaacAdapterV6(IsaacAdapterBase):
             pass
 
         from pxr import Usd, UsdPhysics
+
         stage = self.get_stage()
         root_prim = stage.GetPrimAtPath(prim_path)
         if not root_prim.IsValid():
@@ -497,6 +513,7 @@ class IsaacAdapterV6(IsaacAdapterBase):
         runtime_targets: List[float] = []
         try:
             from isaacsim.core.experimental.prims import Articulation
+
             art = Articulation(prim_paths=[prim_path])
             if not art.initialized:
                 art.initialize()
@@ -504,7 +521,7 @@ class IsaacAdapterV6(IsaacAdapterBase):
             if targets is not None and len(targets) > 0:
                 runtime_targets = targets.numpy()[0].tolist()
         except BaseException:
-            pass 
+            pass
 
         joints_info = []
         for desc in Usd.PrimRange(prim):
@@ -570,20 +587,24 @@ class IsaacAdapterV6(IsaacAdapterBase):
 
     def create_world(self, **kwargs) -> Any:
         from isaacsim.core.simulation_manager import SimulationManager
+
         return SimulationManager()
 
     def create_simulation_context(self, **kwargs) -> Any:
         from isaacsim.core.simulation_manager import SimulationManager
+
         return SimulationManager()
 
     def create_physics_scene(self, gravity: Optional[Sequence[float]] = None, scene_name: str = "PhysicsScene") -> str:
         import omni.kit.commands
+
         scene_path = f"/World/{scene_name}"
         omni.kit.commands.execute("CreatePrim", prim_path=scene_path, prim_type="PhysicsScene")
         return scene_path
 
     def get_physics_state(self, prim_path: str) -> Dict[str, Any]:
         from pxr import UsdPhysics
+
         stage = self.get_stage()
         prim = stage.GetPrimAtPath(prim_path)
         if not prim.IsValid():
@@ -611,9 +632,11 @@ class IsaacAdapterV6(IsaacAdapterBase):
         if has_rb:
             try:
                 from isaacsim.core.simulation_manager import SimulationManager
+
                 sim = SimulationManager()
-                view = sim.get_physics_simulation_view()
+                sim.get_physics_simulation_view()
                 from isaacsim.core.experimental.prims import RigidPrim
+
                 rp = RigidPrim(prim_paths=[prim_path])
                 if not rp.initialized:
                     rp.initialize()
@@ -638,33 +661,39 @@ class IsaacAdapterV6(IsaacAdapterBase):
 
     def create_camera(self, prim_path: str, resolution: Tuple[int, int] = (1280, 720), **kwargs) -> Any:
         from isaacsim.sensors.experimental.rtx import RtxCamera
+
         RtxCamera(prim_paths=[prim_path], resolutions=[resolution])
         return prim_path
 
     def capture_camera_image(self, prim_path: str) -> np.ndarray:
         from isaacsim.sensors.experimental.rtx import CameraSensor
+
         sensor = CameraSensor(prim_path=prim_path)
         sensor.initialize()
         sensor.add_annotator("rgb")
         import omni.kit.app
+
         omni.kit.app.get_app().update()
         data = sensor.get_data()
-        return data["rgb"] if "rgb" in data else np.zeros((0,0,3))
+        return data["rgb"] if "rgb" in data else np.zeros((0, 0, 3))
 
     def create_lidar(self, prim_path: str, config: Optional[str] = None, **kwargs) -> Any:
         from isaacsim.sensors.experimental.rtx import Lidar
+
         Lidar(prim_paths=[prim_path], configs=[config or "Example_Rotary"])
         return prim_path
 
     def get_lidar_point_cloud(self, prim_path: str) -> np.ndarray:
         from isaacsim.sensors.experimental.rtx import LidarSensor
+
         sensor = LidarSensor(prim_path=prim_path)
         sensor.initialize()
         sensor.add_annotator("point_cloud")
         import omni.kit.app
+
         omni.kit.app.get_app().update()
         data = sensor.get_data()
-        return data["point_cloud"] if "point_cloud" in data else np.zeros((0,3))
+        return data["point_cloud"] if "point_cloud" in data else np.zeros((0, 3))
 
     # ── Materials ──────────────────────────────────────────
 
@@ -711,11 +740,11 @@ class IsaacAdapterV6(IsaacAdapterBase):
         material_prim = stage.GetPrimAtPath(material_path)
         if not material_prim.IsValid():
             raise ValueError(f"Material prim not found: {material_path}. Did you create it first?")
-            
+
         target = stage.GetPrimAtPath(target_prim_path)
         if not target.IsValid():
             raise ValueError(f"Target prim not found: {target_prim_path}. You MUST use list_prims to find exact paths.")
-            
+
         material = UsdShade.Material(material_prim)
         # Modern USD requires .Apply() for MaterialBindingAPI
         binding_api = UsdShade.MaterialBindingAPI.Apply(target)
@@ -778,24 +807,27 @@ class IsaacAdapterV6(IsaacAdapterBase):
 
     def clone_prim(self, source_path: str, target_path: str) -> None:
         import omni.kit.commands
+
         omni.kit.commands.execute("CopyPrim", path_from=source_path, path_to=target_path)
 
     def import_urdf(self, urdf_path: str, prim_path: str = "/World/robot", **kwargs) -> Any:
         import os
+
         from isaacsim.asset.importer.urdf import URDFImporter, URDFImporterConfig
 
         if not os.path.isfile(urdf_path):
             raise FileNotFoundError(f"URDF file not found: {urdf_path}")
-            
+
         config = URDFImporterConfig(urdf_path=urdf_path, dest_path=prim_path, **kwargs)
         importer = URDFImporter(config)
         importer.import_urdf()
         return {"prim_path": prim_path}
 
     # ── Simulation ─────────────────────────────────────────
-    
+
     def _ensure_physics_world(self) -> None:
         from isaacsim.core.simulation_manager import SimulationManager
+
         try:
             sim = SimulationManager()
             if not sim.is_playing():
@@ -805,15 +837,18 @@ class IsaacAdapterV6(IsaacAdapterBase):
 
     def play(self) -> None:
         from isaacsim.core.experimental.utils.app import play
+
         self._ensure_physics_world()
         play()
 
     def pause(self) -> None:
         from isaacsim.core.experimental.utils.app import pause
+
         pause()
 
     def stop(self) -> None:
         from isaacsim.core.experimental.utils.app import stop
+
         stop()
 
     def step(
@@ -831,10 +866,10 @@ class IsaacAdapterV6(IsaacAdapterBase):
                 try:
                     physics_state = self.get_physics_state(path)
                     state = {"prim_path": path}
-                    
+
                     transform = self.get_prim_transform(path)
                     state["position"] = transform.get("position", [0, 0, 0])
-                    
+
                     state["linear_velocity"] = physics_state.get("linear_velocity", [0, 0, 0])
                     state["angular_velocity"] = physics_state.get("angular_velocity", [0, 0, 0])
                     prim_states.append(state)
@@ -859,7 +894,7 @@ class IsaacAdapterV6(IsaacAdapterBase):
     def get_simulation_state(self) -> Dict[str, Any]:
         import omni.timeline
         from isaacsim.core.simulation_manager import SimulationManager
-        
+
         timeline = omni.timeline.get_timeline_interface()
         sim = SimulationManager()
 
@@ -878,6 +913,7 @@ class IsaacAdapterV6(IsaacAdapterBase):
 
         physics_dt = 1.0 / 60.0
         from pxr import UsdPhysics
+
         stage = self.get_stage()
         for prim in stage.Traverse():
             if prim.HasAPI(UsdPhysics.Scene):
@@ -912,6 +948,7 @@ class IsaacAdapterV6(IsaacAdapterBase):
             try:
                 import isaacsim
                 import isaacsim.core as isaac_core
+
                 sys.modules["omni.isaac"] = isaacsim
                 sys.modules["omni.isaac.core"] = isaac_core
                 sys.modules["omni.isaac.core.api"] = isaac_core.api
@@ -924,8 +961,8 @@ class IsaacAdapterV6(IsaacAdapterBase):
         usd_utils_mod = None
         prim_utils_mod = None
         try:
-            import isaacsim.core.utils.stage as usd_utils_mod
             import isaacsim.core.utils.prims as prim_utils_mod
+            import isaacsim.core.utils.stage as usd_utils_mod
         except Exception:
             pass
 

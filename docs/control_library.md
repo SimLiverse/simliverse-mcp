@@ -16,9 +16,9 @@ anyone says about it is that it looks wrong.
 ```python
 from simliverse_sim import list_props, find_prop, spawn_prop
 
-list_props("conveyor")     # 47 sections
-list_props("worker")       # people, under /Isaac/People/Characters
-find_prop("pallet")        # 1.21 x 0.80 x 0.1425 m
+list_props("conveyor")  # 47 sections
+list_props("worker")  # people, under /Isaac/People/Characters
+find_prop("pallet")  # 1.21 x 0.80 x 0.1425 m
 ```
 
 **Search before you author.** The index carries `extent` and `physics` for
@@ -83,11 +83,13 @@ from simliverse_sim import SafetyFence, spawn_pedestal, spawn_operator
 
 fence = SafetyFence.build(
     "/World/Fence",
-    centre=(0.0, 0.0), size=(6.0, 6.0),      # the guarded AREA, not a guess
-    gate="south", gate_width=1.0,
+    centre=(0.0, 0.0),
+    size=(6.0, 6.0),  # the guarded AREA, not a guess
+    gate="south",
+    gate_width=1.0,
     crossings=[{"side": "east", "centre": -0.4, "width": 0.7}],
 )
-fence.fits((0.0, 0.0), reach=2.70)   # does the arm stay inside the guarding?
+fence.fits((0.0, 0.0), reach=2.70)  # does the arm stay inside the guarding?
 ```
 
 - `size` is the **footprint**, because a cell is specified by the floor it
@@ -120,8 +122,8 @@ it is what you draw to illustrate a teach pendant, and it should be a choice.
 ```python
 from simliverse_sim import fence_from_sketch, zones_from_sketch
 
-built = fence_from_sketch(sketch_text)      # rect -> fence, arrow -> crossing
-zones = zones_from_sketch(sketch_text)      # every shape, as placeable numbers
+built = fence_from_sketch(sketch_text)  # rect -> fence, arrow -> crossing
+zones = zones_from_sketch(sketch_text)  # every shape, as placeable numbers
 ```
 
 A `[LAYOUT SKETCH ...]` block is plan-view shapes in metres, taken off a grid
@@ -148,12 +150,16 @@ canvas is already the XY plane and nothing needs rescaling or reprojecting.
 
 ```python
 belt = Conveyor.build(
-    "/World/Belt", length=2.0, width=0.4,
-    position=[x, y, 0.767],          # belt TOP, not centre
-    direction=(1, 0, 0), speed=0.2,
-    gate=True, gate_height=box + 0.03,
-    guides=False,                    # see below
-    dressing="conveyorbelt_a05",     # real prop over the physics slab
+    "/World/Belt",
+    length=2.0,
+    width=0.4,
+    position=[x, y, 0.767],  # belt TOP, not centre
+    direction=(1, 0, 0),
+    speed=0.2,
+    gate=True,
+    gate_height=box + 0.03,
+    guides=False,  # see below
+    dressing="conveyorbelt_a05",  # real prop over the physics slab
 )
 ```
 
@@ -275,7 +281,8 @@ gripper releases it**, so do not "test" limits mid-grip.
 
 ```python
 from simliverse_sim import vision
-vision.look(centre=(0, 0, 0.6), scale=3.0)   # four views, not one
+
+vision.look(centre=(0, 0, 0.6), scale=3.0)  # four views, not one
 ```
 
 Four viewpoints by default. Every visual defect found in this cell was visible

@@ -204,10 +204,10 @@ return {
     "status": "success",
     "message": f"Created {object_type}",
     "prim_path": prim_path,
-    "actual_size": actual_size,        # [x, y, z] in meters
+    "actual_size": actual_size,  # [x, y, z] in meters
     "bounding_box": {
-        "min": bbox[0],               # [x, y, z]
-        "max": bbox[1],               # [x, y, z]
+        "min": bbox[0],  # [x, y, z]
+        "max": bbox[1],  # [x, y, z]
     },
 }
 ```
@@ -243,12 +243,12 @@ return {
     "joint_limits": [
         {
             "name": "panda_joint1",
-            "type": "revolute",          # or "prismatic"
+            "type": "revolute",  # or "prismatic"
             "lower": -2.8973,
             "upper": 2.8973,
-            "units": "radians",          # or "meters"
+            "units": "radians",  # or "meters"
         },
-        ...
+        ...,
     ],
 }
 ```

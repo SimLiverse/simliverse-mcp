@@ -15,9 +15,23 @@ from simliverse_sim.robots.library import _infer_motion_config, _tokens
 # A representative slice of what Lula actually ships, including the pairs that
 # differ only by a trailing digit or letter.
 SUPPORTED = [
-    "Franka", "FR3", "UR3", "UR3e", "UR5", "UR5e", "UR10", "UR10e", "UR16e",
-    "Kuka_KR210", "Kinova_Gen3", "RS007N", "RS007L", "Techman_TM12",
-    "Cobotta_Pro_900", "Cobotta_Pro_1300", "Rizon4",
+    "Franka",
+    "FR3",
+    "UR3",
+    "UR3e",
+    "UR5",
+    "UR5e",
+    "UR10",
+    "UR10e",
+    "UR16e",
+    "Kuka_KR210",
+    "Kinova_Gen3",
+    "RS007N",
+    "RS007L",
+    "Techman_TM12",
+    "Cobotta_Pro_900",
+    "Cobotta_Pro_1300",
+    "Rizon4",
 ]
 
 

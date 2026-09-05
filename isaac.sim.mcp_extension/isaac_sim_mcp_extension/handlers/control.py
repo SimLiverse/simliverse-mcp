@@ -35,7 +35,6 @@ Three things differ from the `simulation.execute_script` path these supersede:
 
 from __future__ import annotations
 
-import base64
 import io
 import sys
 import traceback
@@ -161,9 +160,7 @@ def run_control(
             "stdout": stdout.getvalue(),
             "stderr": stderr.getvalue(),
             "bound_names": sorted(
-                name
-                for name in _NAMESPACE
-                if not name.startswith("_") and name not in ("np", "sls")
+                name for name in _NAMESPACE if not name.startswith("_") and name not in ("np", "sls")
             ),
         }
         if import_warning:
@@ -249,9 +246,7 @@ def _aim_camera(stage: Any, path: str, eye: List[float], target: List[float]) ->
     ops = {op.GetOpName(): op for op in xformable.GetOrderedXformOps()}
 
     translate = ops.get("xformOp:translate") or xformable.AddTranslateOp()
-    rotate = ops.get("xformOp:rotateXYZ") or xformable.AddRotateXYZOp(
-        UsdGeom.XformOp.PrecisionFloat
-    )
+    rotate = ops.get("xformOp:rotateXYZ") or xformable.AddRotateXYZOp(UsdGeom.XformOp.PrecisionFloat)
 
     dx, dy, dz = (target[0] - eye[0], target[1] - eye[1], target[2] - eye[2])
     # A USD camera looks down its own -Z. Deriving the rotation from the
@@ -394,9 +389,7 @@ def capture_view(
                     ctypes.c_char_p,
                 ]
                 pointer = ctypes.pythonapi.PyCapsule_GetPointer(buffer, None)
-                raw = bytes(
-                    ctypes.cast(pointer, ctypes.POINTER(ctypes.c_byte * buffer_size)).contents
-                )
+                raw = bytes(ctypes.cast(pointer, ctypes.POINTER(ctypes.c_byte * buffer_size)).contents)
                 image = PILImage.frombytes("RGBA", (width, height), raw).convert("RGB")
                 if resolution:
                     want = [int(v) for v in (list(resolution) + [0, 0])[:2]]
@@ -438,10 +431,7 @@ def capture_view(
         if "png" not in captured:
             frozen = False
             try:
-                frozen = (
-                    frame_before is not None
-                    and viewport.frame_info.get("frame_number") == frame_before
-                )
+                frozen = frame_before is not None and viewport.frame_info.get("frame_number") == frame_before
             except Exception:  # noqa: BLE001
                 pass
             if frozen:

@@ -92,16 +92,13 @@ def test_no_two_boxes_are_sent_to_the_same_place() -> None:
 
 
 def test_boxes_in_a_layer_do_not_overlap() -> None:
-    slots = [s for s in pallet_slots(DECK, BOX, rows=2, cols=2, gap=0.01)
-             if s["layer"] == 0]
+    slots = [s for s in pallet_slots(DECK, BOX, rows=2, cols=2, gap=0.01) if s["layer"] == 0]
     for i, a in enumerate(slots):
-        for b in slots[i + 1:]:
+        for b in slots[i + 1 :]:
             dx = abs(a["rest"][0] - b["rest"][0])
             dy = abs(a["rest"][1] - b["rest"][1])
             # Axis-aligned boxes are clear if they are separated on either axis.
-            assert dx >= BOX[0] - 1e-9 or dy >= BOX[1] - 1e-9, (
-                f"slots {a['index']} and {b['index']} overlap"
-            )
+            assert dx >= BOX[0] - 1e-9 or dy >= BOX[1] - 1e-9, f"slots {a['index']} and {b['index']} overlap"
 
 
 def test_interlock_turns_alternate_layers_and_grid_does_not() -> None:
@@ -131,7 +128,12 @@ def test_the_deck_check_looks_at_the_rotated_layer_too() -> None:
     pallet_slots(DECK, long_box, rows=1, cols=2, layers=1, deck=(0.65, 0.15))
     with pytest.raises(PalletError, match="overhang"):
         pallet_slots(
-            DECK, long_box, rows=1, cols=2, layers=2, interlock=True,
+            DECK,
+            long_box,
+            rows=1,
+            cols=2,
+            layers=2,
+            interlock=True,
             deck=(0.65, 0.15),
         )
 

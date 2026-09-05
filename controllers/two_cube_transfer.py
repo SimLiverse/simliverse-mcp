@@ -14,17 +14,54 @@ registered for *planning only* — the tool never goes near them under servo
 control, so giving them to the policy costs accuracy and buys nothing.
 """
 
-(WARMUP, INIT, OPEN, PLAN_PICK, GOTO_PICK, HOVER, DESCEND, CLOSE, LIFT, GOTO_LIFT,
- PLAN_PLACE, GOTO_PLACE, LOWER, RELEASE, PLAN_CLEAR, GOTO_CLEAR,
- NEXT, DONE, FAILED) = range(19)
+(
+    WARMUP,
+    INIT,
+    OPEN,
+    PLAN_PICK,
+    GOTO_PICK,
+    HOVER,
+    DESCEND,
+    CLOSE,
+    LIFT,
+    GOTO_LIFT,
+    PLAN_PLACE,
+    GOTO_PLACE,
+    LOWER,
+    RELEASE,
+    PLAN_CLEAR,
+    GOTO_CLEAR,
+    NEXT,
+    DONE,
+    FAILED,
+) = range(19)
 
-NAMES = ["WARMUP", "INIT", "OPEN", "PLAN_PICK", "GOTO_PICK", "HOVER", "DESCEND", "CLOSE", "LIFT", "GOTO_LIFT", "PLAN_PLACE", "GOTO_PLACE", "LOWER", "RELEASE", "PLAN_CLEAR",
-         "GOTO_CLEAR", "NEXT", "DONE", "FAILED"]
+NAMES = [
+    "WARMUP",
+    "INIT",
+    "OPEN",
+    "PLAN_PICK",
+    "GOTO_PICK",
+    "HOVER",
+    "DESCEND",
+    "CLOSE",
+    "LIFT",
+    "GOTO_LIFT",
+    "PLAN_PLACE",
+    "GOTO_PLACE",
+    "LOWER",
+    "RELEASE",
+    "PLAN_CLEAR",
+    "GOTO_CLEAR",
+    "NEXT",
+    "DONE",
+    "FAILED",
+]
 TRACE_PATH = "/tmp/ctl_trace.log"
 
-DOWN = [0.0, 1.0, 0.0, 0.0]      # tool z pointing at the table
-HOVER_Z = 0.16                   # above the cube, where the plan hands over
-GRASP_Z = 0.030                  # fingertips around a 4 cm cube
+DOWN = [0.0, 1.0, 0.0, 0.0]  # tool z pointing at the table
+HOVER_Z = 0.16  # above the cube, where the plan hands over
+GRASP_Z = 0.030  # fingertips around a 4 cm cube
 # Just outside the planner's margin around the platform (top 0.10 + 0.06),
 # and no further. Everything between here and the surface is servoed, and
 # the reactive policy is fighting the post's field the whole way — a 17 cm
@@ -41,7 +78,7 @@ TRANSIT_Z = 0.40
 # 2.5 cm clear and the cube was dropped rather than set down.
 PLACE_Z = 0.125
 WARMUP_FRAMES = 30
-GRIP_FRAMES = 100   # closing takes real time; the state waits instead of stepping
+GRIP_FRAMES = 100  # closing takes real time; the state waits instead of stepping
 # A state that cannot converge should say so in about four seconds, not
 # fifteen. The old 900 frames meant a single stuck servo burned 15 s of the
 # run thrashing before falling through in a bad pose, and three of those is
@@ -64,7 +101,7 @@ _arm = None
 _cubes = None
 _pick = None
 _plan = None
-_hit = None      # the state that first touched something it must not
+_hit = None  # the state that first touched something it must not
 
 
 def _trace(line):
@@ -113,7 +150,7 @@ def _on_timeline(event):
     if event.type == int(omni.timeline.TimelineEventType.STOP):
         _state, _frame, _job = WARMUP, 0, 0
         _arm, _cubes, _pick, _plan = None, None, None, None
-        globals()['_hit'] = None
+        globals()["_hit"] = None
         open(TRACE_PATH, "w", encoding="utf-8").close()
 
 
@@ -140,8 +177,7 @@ def _watch_post():
     hits = sorted(b for b in bodies if b.startswith("/World/Franka"))
     if hits:
         _hit = NAMES[_state]
-        _trace("  FIRST POST CONTACT during %s (job=%d frame=%d) by %s"
-               % (_hit, _job, _frame, ", ".join(hits)))
+        _trace("  FIRST POST CONTACT during %s (job=%d frame=%d) by %s" % (_hit, _job, _frame, ", ".join(hits)))
 
 
 def compute(db=None):
@@ -152,6 +188,7 @@ def compute(db=None):
         return _compute(db)
     except Exception:
         import traceback
+
         _trace("RAISED in " + NAMES[_state])
         _trace(traceback.format_exc())
         _state = FAILED
@@ -205,7 +242,7 @@ def _compute(db=None):
             # which lands the fingers beside a 4 cm cube. The planner still
             # routes around it; the arm never goes near it while picking.
             _arm.remove_obstacle(POST)
-            _arm.add_obstacle(POST, reactive=False)   # non-blocking: never step inside compute()
+            _arm.add_obstacle(POST, reactive=False)  # non-blocking: never step inside compute()
         if _frame >= GRIP_FRAMES:
             # Read the pose once, before touching it: after the grasp the cube
             # travels with the gripper and a live read would chase itself.
@@ -306,19 +343,17 @@ def _compute(db=None):
         # is how a cube ends up on the floor beside the platform rather than on
         # it.
         if PLATFORM in cube.contact_bodies():
-            _trace("  touched down: cube on platform at %s"
-                   % [round(float(v), 3) for v in cube.position])
+            _trace("  touched down: cube on platform at %s" % [round(float(v), 3) for v in cube.position])
             _go(RELEASE)
             return True
         if _arm.servo_to([px, py, PLACE_Z], DOWN, tolerance=FINE) or _timeout():
-            _trace("  lowered without contact; releasing anyway at %s"
-                   % [round(float(v), 3) for v in cube.position])
+            _trace("  lowered without contact; releasing anyway at %s" % [round(float(v), 3) for v in cube.position])
             _go(RELEASE)
         return True
 
     if _state == RELEASE:
         if _frame == 1:
-            _arm.gripper.open()   # non-blocking: never step inside compute()
+            _arm.gripper.open()  # non-blocking: never step inside compute()
         if _frame >= GRIP_FRAMES:
             _go(PLAN_CLEAR)
         return True

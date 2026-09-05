@@ -140,8 +140,7 @@ def _purge_expired_physics_scene_apis() -> list:
         apis = getattr(SimulationManager, "_physics_scene_apis", None)
         if not apis:
             return []
-        dead = [path for path, api in list(apis.items())
-                if not api.GetPrim().IsValid()]
+        dead = [path for path, api in list(apis.items()) if not api.GetPrim().IsValid()]
         for path in dead:
             apis.pop(path, None)
         if dead:
@@ -356,7 +355,4 @@ def as_quat(value: Any, *, name: str = "orientation") -> np.ndarray:
             ],
             dtype=float,
         )
-    raise ValueError(
-        f"{name} must be a quaternion [w,x,y,z], euler degrees [x,y,z], or a "
-        f"Gf.Quat; got {value!r}"
-    )
+    raise ValueError(f"{name} must be a quaternion [w,x,y,z], euler degrees [x,y,z], or a Gf.Quat; got {value!r}")

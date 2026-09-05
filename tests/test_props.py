@@ -112,7 +112,8 @@ def test_every_entry_is_complete_and_unique() -> None:
         # /Isaac/People, the generator only ever looked in one place, and this
         # test agreed with it. A search for "worker" returned a packing table.
         assert entry["path"].startswith(("/Isaac/Props/", "/Isaac/People/")), (
-            "%s lives somewhere this index does not know about" % entry["path"])
+            "%s lives somewhere this index does not know about" % entry["path"]
+        )
         assert entry["physics"] in props.PHYSICS_KINDS
 
 
@@ -141,7 +142,7 @@ def test_index_is_valid_json_on_disk() -> None:
 
 
 def test_an_unknown_adjective_does_not_hide_the_asset() -> None:
-    """"cardboard box" used to match nothing at all.
+    """ "cardboard box" used to match nothing at all.
 
     `list_props` required *every* word, and "cardboard" appears in no keyword
     list, so the query returned empty — from which an agent concludes no box
@@ -272,11 +273,14 @@ def test_both_ops_request_double_precision_explicitly(xformable) -> None:
     assert str(rotate_op.GetAttr().GetTypeName()) == "double3"
 
 
-@pytest.mark.parametrize("orientation", [
-    [12.5, -4.0, 90.0],
-    [0.0, 0.0, -90.0],
-    [0.0, 0.0, 0.0],
-])
+@pytest.mark.parametrize(
+    "orientation",
+    [
+        [12.5, -4.0, 90.0],
+        [0.0, 0.0, -90.0],
+        [0.0, 0.0, 0.0],
+    ],
+)
 def test_orientation_values_survive_the_round_trip(orientation, xformable) -> None:
     from simliverse_sim.props import _place
 
@@ -313,7 +317,6 @@ def test_a_second_placement_replaces_the_first_rather_than_stacking(xformable) -
     assert tuple(ops[0].Get()) == pytest.approx((2.0, 2.0, 2.0))
 
 
-
 # ── resting on the floor ─────────────────────────────────────────────────────
 #
 # The small KLT has its origin at the centre of the bin: placed at z=0 it
@@ -321,13 +324,16 @@ def test_a_second_placement_replaces_the_first_rather_than_stacking(xformable) -
 # evaluation read as the arm having knocked it. spawn_prop measures the
 # placed asset and lifts it out of the floor by default.
 
+
 def test_a_buried_prop_is_lifted_by_exactly_its_burial() -> None:
     from simliverse_sim.props import floor_lift
+
     assert floor_lift(-0.0732, 0.0) == 0.0732
 
 
 def test_a_prop_already_on_or_above_the_floor_is_left_alone() -> None:
     from simliverse_sim.props import floor_lift
+
     assert floor_lift(0.0, 0.0) == 0.0
     assert floor_lift(0.3, 0.0) == 0.0, "never pushed down"
     assert floor_lift(-0.003, 0.0) == 0.0, "inside tolerance"
@@ -336,10 +342,13 @@ def test_a_prop_already_on_or_above_the_floor_is_left_alone() -> None:
 
 def test_resting_is_relative_to_the_requested_height() -> None:
     from simliverse_sim.props import floor_lift
+
     assert abs(floor_lift(0.9, 1.0) - 0.1) < 1e-9, "a prop asked for at 1.0 m rests at 1.0 m"
 
 
 def test_spawn_prop_rests_on_the_floor_by_default() -> None:
     import inspect
+
     from simliverse_sim.props import spawn_prop
+
     assert inspect.signature(spawn_prop).parameters["rest_on_floor"].default is True

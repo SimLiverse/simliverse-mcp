@@ -89,6 +89,7 @@ joint_data["target_position"] = target_attr.Get() if target_attr else None
 # Override with runtime target if articulation is active
 try:
     import omni.isaac.dynamic_control as dc_mod
+
     dc = dc_mod.acquire_dynamic_control_interface()
     art_handle = dc.get_articulation(prim_path)
     if art_handle != dc.INVALID_HANDLE:

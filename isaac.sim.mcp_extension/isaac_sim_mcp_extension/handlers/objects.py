@@ -55,9 +55,7 @@ def _apply_contact_properties(stage, prim, prim_path, mass, friction, restitutio
     physics_material.CreateStaticFrictionAttr().Set(float(friction))
     physics_material.CreateDynamicFrictionAttr().Set(float(friction))
     physics_material.CreateRestitutionAttr().Set(float(restitution))
-    UsdShade.MaterialBindingAPI.Apply(prim).Bind(
-        material, UsdShade.Tokens.weakerThanDescendants, "physics"
-    )
+    UsdShade.MaterialBindingAPI.Apply(prim).Bind(material, UsdShade.Tokens.weakerThanDescendants, "physics")
 
     if mass is not None:
         UsdPhysics.MassAPI.Apply(prim).CreateMassAttr().Set(float(mass))
@@ -94,13 +92,12 @@ def create(
         # tell it otherwise. displayColor is the cheap honest answer for a
         # primitive: it needs no material, and it is what the viewport shows.
         if color is not None:
-            from pxr import Gf, Usd, UsdGeom
+            from pxr import Gf, UsdGeom
 
             channels = [float(c) for c in color][:3]
             if len(channels) != 3:
-                return {"status": "error",
-                        "message": f"color needs three channels, got {list(color)}."}
-            if max(channels) > 1.0:          # 0-255 is the other convention
+                return {"status": "error", "message": f"color needs three channels, got {list(color)}."}
+            if max(channels) > 1.0:  # 0-255 is the other convention
                 channels = [c / 255.0 for c in channels]
             gprim = UsdGeom.Gprim(adapter.get_stage().GetPrimAtPath(prim_path))
             if gprim:
@@ -136,9 +133,7 @@ def create(
             # Friction and restitution are bound whether or not the body is
             # dynamic: what a *static* collider is made of decides whether
             # anything resting on it slides, so a ground plane needs them too.
-            _apply_contact_properties(
-                stage, prim, prim_path, mass if physics_enabled else None, friction, restitution
-            )
+            _apply_contact_properties(stage, prim, prim_path, mass if physics_enabled else None, friction, restitution)
 
         response: Dict[str, Any] = {"status": "success", "message": f"Created {object_type}", "prim_path": prim_path}
         if note:

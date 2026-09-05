@@ -105,8 +105,7 @@ class Escapement:
     part of the machine.
     """
 
-    def __init__(self, prim_path: str, *, hold_z: float, clear_z: float,
-                 scene: Any = None) -> None:
+    def __init__(self, prim_path: str, *, hold_z: float, clear_z: float, scene: Any = None) -> None:
         from .scene import Scene
 
         self.prim_path = prim_path
@@ -149,7 +148,7 @@ class Escapement:
             shape="cube",
             scale=[thickness / 2.0, width / 2.0, height / 2.0],
             position=[float(at_x), float(centre_y), hold_z],
-            static=True,                    # kinematic: takes contact, is posed
+            static=True,  # kinematic: takes contact, is posed
             friction=0.3,
             restitution=0.0,
             color=(0.85, 0.62, 0.15),
@@ -170,10 +169,7 @@ class Escapement:
                 current = op.Get()
                 op.Set(Gf.Vec3d(float(current[0]), float(current[1]), float(z)))
                 return
-        raise DeadPlateError(
-            f"{self.prim_path} has no translate op to drive. It was not built "
-            f"by Escapement.build."
-        )
+        raise DeadPlateError(f"{self.prim_path} has no translate op to drive. It was not built by Escapement.build.")
 
     def hold(self) -> "Escapement":
         """Raise the blade. The queue stops here."""
@@ -202,8 +198,7 @@ class Escapement:
 
     @classmethod
     def from_description(cls, described: dict, *, scene: Any = None) -> "Escapement":
-        return cls(described["prim_path"], hold_z=described["hold_z"],
-                   clear_z=described["clear_z"], scene=scene)
+        return cls(described["prim_path"], hold_z=described["hold_z"], clear_z=described["clear_z"], scene=scene)
 
 
 class DeadPlateError(RuntimeError):
@@ -267,12 +262,9 @@ class DeadPlate:
 
         scene = scene or Scene.get()
         if length <= 0 or width <= 0:
-            raise DeadPlateError(
-                f"length={length} width={width}: a plate needs positive extents."
-            )
+            raise DeadPlateError(f"length={length} width={width}: a plate needs positive extents.")
 
-        plate = cls(prim_path, deck_z=deck_z, stop_x=stop_x, length=length,
-                    width=width, centre_y=centre_y, scene=scene)
+        plate = cls(prim_path, deck_z=deck_z, stop_x=stop_x, length=length, width=width, centre_y=centre_y, scene=scene)
 
         centre_x = float(stop_x) - float(length) / 2.0
         # Static, so it never sags under a stack and never drifts. `spawn_rigid`
@@ -307,8 +299,7 @@ class DeadPlate:
             f"{prim_path}_Stop",
             shape="cube",
             scale=[0.02, width / 2.0, stop_height / 2.0],
-            position=[float(stop_x) + 0.02, float(centre_y),
-                      float(deck_z) + stop_height / 2.0],
+            position=[float(stop_x) + 0.02, float(centre_y), float(deck_z) + stop_height / 2.0],
             static=True,
             friction=0.5,
             restitution=0.0,
@@ -322,8 +313,7 @@ class DeadPlate:
                 f"{prim_path}_Guide{side}",
                 shape="cube",
                 scale=[length / 2.0, 0.015, guide_height / 2.0],
-                position=[centre_x, float(centre_y) + sign * (width / 2.0 + 0.015),
-                          float(deck_z) + guide_height / 2.0],
+                position=[centre_x, float(centre_y) + sign * (width / 2.0 + 0.015), float(deck_z) + guide_height / 2.0],
                 static=True,
                 friction=0.2,
                 restitution=0.0,
@@ -366,13 +356,9 @@ class DeadPlate:
         if within is None:
             within = 0.5 * half_box if self.box_size is not None else 0.10
 
-        rest_z = self.deck_z + (
-            float(self.box_size[2]) / 2.0 if self.box_size is not None else 0.0
-        )
+        rest_z = self.deck_z + (float(self.box_size[2]) / 2.0 if self.box_size is not None else 0.0)
         half_width = self.width / 2.0
-        across_limit = half_width + (
-            float(self.box_size[1]) / 2.0 if self.box_size is not None else 0.0
-        )
+        across_limit = half_width + (float(self.box_size[1]) / 2.0 if self.box_size is not None else 0.0)
 
         best, best_error = None, None
         for body in self._boxes:
@@ -388,9 +374,7 @@ class DeadPlate:
                 continue
             if abs(float(position[1]) - self.centre_y) > across_limit:
                 continue
-            if self.box_size is not None and abs(
-                float(position[2]) - rest_z
-            ) > float(self.box_size[2]):
+            if self.box_size is not None and abs(float(position[2]) - rest_z) > float(self.box_size[2]):
                 continue
             if best_error is None or error < best_error:
                 best, best_error = body, error
@@ -405,8 +389,7 @@ class DeadPlate:
             "length": self.length,
             "width": self.width,
             "centre_y": self.centre_y,
-            "box_size": None if self.box_size is None
-            else self.box_size.round(4).tolist(),
+            "box_size": None if self.box_size is None else self.box_size.round(4).tolist(),
             "boxes": [b.prim_path for b in self._boxes],
         }
 

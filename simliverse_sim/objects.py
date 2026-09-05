@@ -80,7 +80,8 @@ class RigidObject:
         if len(bodies) == 1:
             logger.debug(
                 "%s contains its rigid body at %s; measuring that instead",
-                self.prim_path, bodies[0],
+                self.prim_path,
+                bodies[0],
             )
             self.prim_path = bodies[0]
             return
@@ -220,9 +221,7 @@ class RigidObject:
             matrix = UsdGeom.Xformable(self.prim).ComputeLocalToWorldTransform(0)
             rotation = matrix.ExtractRotationQuat()
             imaginary = rotation.GetImaginary()
-            return np.asarray(
-                [rotation.GetReal(), imaginary[0], imaginary[1], imaginary[2]], dtype=float
-            )
+            return np.asarray([rotation.GetReal(), imaginary[0], imaginary[1], imaginary[2]], dtype=float)
 
     @property
     def linear_velocity(self) -> np.ndarray:
@@ -390,8 +389,7 @@ def bounds_of(scene: Any, prim_path: str) -> tuple[list[float], list[float]] | N
     prim = stage.GetPrimAtPath(prim_path)
     if not prim or not prim.IsValid():
         return None
-    cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_],
-                              useExtentsHint=True)
+    cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_], useExtentsHint=True)
     box = cache.ComputeWorldBound(prim).ComputeAlignedRange()
     if box.IsEmpty():
         return None

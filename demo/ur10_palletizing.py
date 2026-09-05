@@ -122,11 +122,11 @@ ARM = "/World/UR"
 BELT = "/World/Belt"
 PALLET = "/World/Pallet"
 
-BOX = 0.15                    # 15 cm cartons: a UR10 reaches 1.3 m, not 2.7 m
+BOX = 0.15  # 15 cm cartons: a UR10 reaches 1.3 m, not 2.7 m
 BOX_MASS = 1.0
-DECK = 0.45                   # belt surface height
-STOP_X = 0.75                 # where the stop is, and so where a box waits
-OFFSET_Y = -0.40              # belt centre-line, clear of the arm's base
+DECK = 0.45  # belt surface height
+STOP_X = 0.75  # where the stop is, and so where a box waits
+OFFSET_Y = -0.40  # belt centre-line, clear of the arm's base
 LENGTH, WIDTH = 1.6, 0.40
 SPEED = 0.20
 PALLET_Y = 0.75
@@ -239,9 +239,6 @@ def build(
     overhangs a 10 cm carton. Deriving them is what keeps a scenario sweep
     honest rather than a list of ways to mis-author a cell.
     """
-    from pxr import UsdPhysics
-
-    from simliverse_sim._compat import get_stage
 
     scene = scene or Scene.get()
     scene.stop()
@@ -264,23 +261,26 @@ def build(
     if pedestal > 0.0:
         from simliverse_sim import spawn_pedestal
 
-        plinth = spawn_pedestal("/World/Pedestal", position=[0.0, 0.0, 0.0],
-                                height=float(pedestal), size=(0.45, 0.45),
-                                scene=scene)
+        plinth = spawn_pedestal(
+            "/World/Pedestal", position=[0.0, 0.0, 0.0], height=float(pedestal), size=(0.45, 0.45), scene=scene
+        )
         base_z = plinth["top"]
 
     arm = Robot.spawn(robot, position=[0.0, 0.0, base_z], prim_path=ARM)
     gains = arm.tune_drives(stiffness=1.0e5, damping=1.0e4, max_force=1.0e4)
 
     shape = cell_geometry(box)
-    gate_height, width, spacing = (
-        shape["gate_height"], shape["width"], shape["spacing"])
+    gate_height, width, spacing = (shape["gate_height"], shape["width"], shape["spacing"])
 
     belt = Conveyor.build(
-        BELT, length=LENGTH, width=width,
+        BELT,
+        length=LENGTH,
+        width=width,
         position=[stop_x - LENGTH / 2.0, offset_y, deck],
-        direction=(1, 0, 0), speed=speed,
-        gate=True, gate_height=gate_height,
+        direction=(1, 0, 0),
+        speed=speed,
+        gate=True,
+        gate_height=gate_height,
         # Off by default, and that is a known limitation rather than a
         # preference. Rails stop a queue squirting cartons off a 400 mm belt,
         # which is what fails every carton at 1.5 kg and above. They also cost
@@ -293,15 +293,14 @@ def build(
         # Turning them on without fixing the approach trades a failure at 1.5 kg
         # for a failure at every mass, so the default stays off until the pick
         # lands centred on its own.
-        guides=guides, guide_height=max(0.10, box * 0.8),
+        guides=guides,
+        guide_height=max(0.10, box * 0.8),
         dressing=dressing,
         scene=scene,
     )
-    belt.load(boxes, box=(box, box, box), mass=box_mass,
-              spacing=spacing, start_offset=0.20)
+    belt.load(boxes, box=(box, box, box), mass=box_mass, spacing=spacing, start_offset=0.20)
 
-    spawn_prop("pallet", prim_path=PALLET,
-               position=[0.0, pallet_y, 0.0], scene=scene)
+    spawn_prop("pallet", prim_path=PALLET, position=[0.0, pallet_y, 0.0], scene=scene)
     # A pallet is 1.21 m long and is placed by its centre, so a pallet_y that
     # sounds merely close - 0.60 - puts its near edge at -0.005 and the arm's
     # base inside it. `spawn_prop` warns; a warning in a sweep of twelve cells
@@ -313,22 +312,25 @@ def build(
         fouled = _overlapping_robots(PALLET)
     except Exception:  # noqa: BLE001 - a diagnostic must not break the build
         fouled = []
-    slots = pallet_slots(origin=[0.0, pallet_y, 0.1425], box=(box, box, box),
-                         rows=rows, cols=cols, layers=layers, gap=0.01)
+    slots = pallet_slots(
+        origin=[0.0, pallet_y, 0.1425], box=(box, box, box), rows=rows, cols=cols, layers=layers, gap=0.01
+    )
 
     cup_radius = shape["cup_radius"]
 
     cup = arm.attach_suction_gripper(
         approach_axis="Z",
-        max_grip_distance=(shape["max_grip_distance"]
-                           if grip_distance is None else float(grip_distance)),
-        cup_radius=cup_radius, cup_length=0.04,
+        max_grip_distance=(shape["max_grip_distance"] if grip_distance is None else float(grip_distance)),
+        cup_radius=cup_radius,
+        cup_length=0.04,
         # 1e6, not the 500 taken from Isaac's tutorial. At 500 the seal forms
         # and breaks within 2 mm of the first commanded motion, whatever that
         # motion is. Whatever these units are, they are not newtons holding a
         # 1 kg carton: at 1e6 the same carton rides through a 0.28 m lift with
         # `gripped 1` at every step.
-        coaxial_force_limit=1.0e6, shear_force_limit=1.0e6, retry_interval=0.1,
+        coaxial_force_limit=1.0e6,
+        shear_force_limit=1.0e6,
+        retry_interval=0.1,
     )
     described = belt.describe()
 
@@ -357,15 +359,32 @@ def build(
     wait_for_box(belt)
 
     return {
-        "arm": arm, "cup": cup, "belt": belt, "slots": slots,
-        "gains": gains, "described": described, "box_size": box,
-        "fouled": fouled, "pedestal": plinth, "base_z": base_z,
+        "arm": arm,
+        "cup": cup,
+        "belt": belt,
+        "slots": slots,
+        "gains": gains,
+        "described": described,
+        "box_size": box,
+        "fouled": fouled,
+        "pedestal": plinth,
+        "base_z": base_z,
         "spec": {
-            "boxes": boxes, "box": box, "box_mass": box_mass, "deck": deck,
-            "stop_x": stop_x, "offset_y": offset_y, "speed": speed,
-            "pallet_y": pallet_y, "rows": rows, "cols": cols,
-            "layers": layers, "robot": robot, "guides": guides,
-            "grip_distance": grip_distance, "pedestal": pedestal,
+            "boxes": boxes,
+            "box": box,
+            "box_mass": box_mass,
+            "deck": deck,
+            "stop_x": stop_x,
+            "offset_y": offset_y,
+            "speed": speed,
+            "pallet_y": pallet_y,
+            "rows": rows,
+            "cols": cols,
+            "layers": layers,
+            "robot": robot,
+            "guides": guides,
+            "grip_distance": grip_distance,
+            "pedestal": pedestal,
             "dressing": dressing,
         },
     }
@@ -464,8 +483,7 @@ def pick_waiting_box(cell: dict) -> dict:
 
     here = np.asarray(box.position, dtype=float)
     box_top = float(here[2]) + size / 2.0
-    arm.move_ee_to([float(here[0]), float(here[1]), box_top + cup.tip_offset + 0.18],
-                   DOWN, tolerance=0.015)
+    arm.move_ee_to([float(here[0]), float(here[1]), box_top + cup.tip_offset + 0.18], DOWN, tolerance=0.015)
 
     # Re-read once more now the arm is parked above it, so the descent is
     # centred on the face rather than on where the box used to be.
@@ -520,9 +538,12 @@ def pick_waiting_box(cell: dict) -> dict:
         # not seal", which is true and says nothing about why.
         here = np.asarray(box.position, dtype=float)
         box_top = float(here[2]) + size / 2.0
-        arm.pose_to([float(here[0]), float(here[1]),
-                     box_top + cup.tip_offset + STANDOFF - attempt * 0.002],
-                    DOWN, corrections=8, raise_on_fail=False)
+        arm.pose_to(
+            [float(here[0]), float(here[1]), box_top + cup.tip_offset + STANDOFF - attempt * 0.002],
+            DOWN,
+            corrections=8,
+            raise_on_fail=False,
+        )
         # Settle, then close. Do NOT refine again here. `pose_to` has already
         # run its corrections and returned converged; refining from a converged
         # pose re-enters the same overshoot that made the budget of eight
@@ -550,8 +571,7 @@ def pick_waiting_box(cell: dict) -> dict:
         arm.scene.settle(0.2)
 
     if not sealed:
-        return {"picked": False,
-                "reason": f"cup did not seal after 10 descents (status {cup.status})"}
+        return {"picked": False, "reason": f"cup did not seal after 10 descents (status {cup.status})"}
 
     # The lift carries the same two corrections the descent needed, for the same
     # reasons, and it took a third debugging pass to notice they were missing
@@ -559,8 +579,9 @@ def pick_waiting_box(cell: dict) -> dict:
     # trailing refines it shook the carton off the cup, and the box came back
     # down to 0.525 — belt height — so the pick reported `rise: -0.0000` and
     # looked like a grasp that never happened rather than one that let go.
-    arm.pose_to([float(here[0]), float(here[1]), box_top + cup.tip_offset + 0.30],
-                DOWN, corrections=8, raise_on_fail=False)
+    arm.pose_to(
+        [float(here[0]), float(here[1]), box_top + cup.tip_offset + 0.30], DOWN, corrections=8, raise_on_fail=False
+    )
     arm.scene.settle(1.2)
 
     end = np.asarray(box.position, dtype=float)
@@ -600,14 +621,12 @@ def place_on_slot(cell: dict, slot: dict, *, box=None) -> dict:
     place_z = float(place[2]) + size / 2.0 + cup.tip_offset
     travel_z = max(float(slot["approach"][2]), 0.55) + cup.tip_offset + size / 2.0
 
-    arm.pose_to([float(place[0]), float(place[1]), travel_z], DOWN,
-                corrections=8, raise_on_fail=False)
+    arm.pose_to([float(place[0]), float(place[1]), travel_z], DOWN, corrections=8, raise_on_fail=False)
     scene.settle(1.0)
     if not (cup.holding and cup.gripped_objects):
         return {"placed": False, "reason": "dropped during traverse"}
 
-    arm.pose_to([float(place[0]), float(place[1]), place_z], DOWN,
-                corrections=8, raise_on_fail=False)
+    arm.pose_to([float(place[0]), float(place[1]), place_z], DOWN, corrections=8, raise_on_fail=False)
     scene.settle(1.0)
 
     cup.open(settle_steps=0)
@@ -616,8 +635,7 @@ def place_on_slot(cell: dict, slot: dict, *, box=None) -> dict:
         if not cup.holding:
             break
 
-    arm.pose_to([float(place[0]), float(place[1]), place_z + 0.25], DOWN,
-                corrections=8, raise_on_fail=False)
+    arm.pose_to([float(place[0]), float(place[1]), place_z + 0.25], DOWN, corrections=8, raise_on_fail=False)
     scene.settle(1.2)
 
     final = np.asarray(box.position, dtype=float)
@@ -648,7 +666,7 @@ def palletise(cell: dict, *, count: int | None = None) -> dict:
     from isaacsim.core.simulation_manager import SimulationManager
 
     arm, belt, slots = cell["arm"], cell["belt"], cell["slots"]
-    scene = arm.scene
+    arm.scene
     count = len(slots) if count is None else min(int(count), len(slots))
 
     cycles, placed = [], 0
@@ -667,21 +685,22 @@ def palletise(cell: dict, *, count: int | None = None) -> dict:
 
         picked = pick_waiting_box(cell)
         if not picked.get("picked"):
-            cycles.append({"slot": index, "ok": False,
-                           "reason": picked.get("reason", "pick failed")})
+            cycles.append({"slot": index, "ok": False, "reason": picked.get("reason", "pick failed")})
             break
 
         result = place_on_slot(cell, slots[index], box=waiting)
         finished = float(SimulationManager.get_simulation_time())
         ok = bool(result.get("placed"))
         placed += int(ok)
-        cycles.append({
-            "slot": index,
-            "ok": ok,
-            "seconds": round(finished - started, 2),
-            "error": result.get("error"),
-            "reason": result.get("reason"),
-        })
+        cycles.append(
+            {
+                "slot": index,
+                "ok": ok,
+                "seconds": round(finished - started, 2),
+                "error": result.get("error"),
+                "reason": result.get("reason"),
+            }
+        )
         if not ok:
             break
 

@@ -186,9 +186,7 @@ class JointRecorder:
                     "velocities": velocities,
                     "time_from_start": round(t, 6),
                 }
-                for t, positions, velocities in zip(
-                    self.times, self.positions, self.velocities
-                )
+                for t, positions, velocities in zip(self.times, self.positions, self.velocities)
             ],
             "duration": round(self.duration, 6),
             "sample_hz": round(len(self.times) / self.duration, 3) if self.duration else 0.0,
@@ -217,21 +215,14 @@ class JointRecorder:
                 low, high = limits[index]
                 column = positions[:, index]
                 if column.min() < low - position_tolerance:
-                    found.append(
-                        f"{name}: reaches {column.min():.4f}, below its lower limit {low:.4f}"
-                    )
+                    found.append(f"{name}: reaches {column.min():.4f}, below its lower limit {low:.4f}")
                 if column.max() > high + position_tolerance:
-                    found.append(
-                        f"{name}: reaches {column.max():.4f}, above its upper limit {high:.4f}"
-                    )
+                    found.append(f"{name}: reaches {column.max():.4f}, above its upper limit {high:.4f}")
             ceiling = maxima.get(name)
             if ceiling:
                 fastest = float(np.abs(velocities[:, index]).max())
                 if fastest > ceiling:
-                    found.append(
-                        f"{name}: peaks at {fastest:.4f} rad/s, above its declared "
-                        f"maximum {ceiling:.4f}"
-                    )
+                    found.append(f"{name}: peaks at {fastest:.4f} rad/s, above its declared maximum {ceiling:.4f}")
         return found
 
     def _declared_max_velocities(self) -> dict[str, float]:
@@ -256,9 +247,7 @@ class JointRecorder:
             len(payload["points"]),
             payload["duration"],
             path,
-            f" with {len(payload['violations'])} limit violations"
-            if payload["violations"]
-            else "",
+            f" with {len(payload['violations'])} limit violations" if payload["violations"] else "",
         )
         return path
 
@@ -415,9 +404,7 @@ class PoseRecorder:
                 if not prim or not prim.IsValid():
                     continue
                 names = [
-                    op.GetOpName()
-                    for op in UsdGeom.Xformable(prim).GetOrderedXformOps()
-                    if "scale" in op.GetOpName()
+                    op.GetOpName() for op in UsdGeom.Xformable(prim).GetOrderedXformOps() if "scale" in op.GetOpName()
                 ]
                 if names:
                     found[path] = names
@@ -427,7 +414,7 @@ class PoseRecorder:
             return {}
 
     def _sample(self) -> dict[str, tuple[list[float], list[float]]]:
-        from pxr import Gf, Usd, UsdGeom
+        from pxr import Usd, UsdGeom
 
         from ._compat import get_stage
 
@@ -511,9 +498,7 @@ class PoseRecorder:
             for path_key, (translation, quaternion) in frame.items():
                 translate_op, orient_op = writers[path_key]
                 translate_op.Set(Gf.Vec3d(*translation), frame_number)
-                orient_op.Set(
-                    Gf.Quatf(quaternion[0], Gf.Vec3f(*quaternion[1:])), frame_number
-                )
+                orient_op.Set(Gf.Quatf(quaternion[0], Gf.Vec3f(*quaternion[1:])), frame_number)
 
         stage.GetRootLayer().Export(path)
         logger.info(
@@ -545,7 +530,7 @@ def play_baked(path: str, *, stage: Any = None, autoplay: bool = True) -> dict[s
     on again and return to simulating.
     """
     import omni.timeline
-    from pxr import Sdf, Usd, UsdGeom, UsdPhysics
+    from pxr import Usd, UsdGeom, UsdPhysics
 
     from ._compat import get_stage
 
@@ -633,9 +618,7 @@ def _animated_paths(animation: Any) -> list[str]:
     return [str(prim.GetPath()) for prim in animation.TraverseAll()]
 
 
-def stop_playback(
-    *, stage: Any = None, physics_scenes: Any = (), layer: str | None = None
-) -> dict[str, Any]:
+def stop_playback(*, stage: Any = None, physics_scenes: Any = (), layer: str | None = None) -> dict[str, Any]:
     """Undo `play_baked`, all of it.
 
     Re-enabling physics is not enough on its own. The animation layer stays
@@ -799,12 +782,22 @@ def _sphere_mesh(radius: float, segments: int = 24, rings: int = 16):
 def _box_mesh(half: tuple[float, float, float]):
     x, y, z = half
     points = [
-        (-x, -y, -z), (x, -y, -z), (x, y, -z), (-x, y, -z),
-        (-x, -y, z), (x, -y, z), (x, y, z), (-x, y, z),
+        (-x, -y, -z),
+        (x, -y, -z),
+        (x, y, -z),
+        (-x, y, -z),
+        (-x, -y, z),
+        (x, -y, z),
+        (x, y, z),
+        (-x, y, z),
     ]
     faces = [
-        (0, 3, 2, 1), (4, 5, 6, 7), (0, 1, 5, 4),
-        (1, 2, 6, 5), (2, 3, 7, 6), (3, 0, 4, 7),
+        (0, 3, 2, 1),
+        (4, 5, 6, 7),
+        (0, 1, 5, 4),
+        (1, 2, 6, 5),
+        (2, 3, 7, 6),
+        (3, 0, 4, 7),
     ]
     counts = [4] * len(faces)
     indices = [i for face in faces for i in face]
@@ -852,7 +845,7 @@ def tessellate_analytic_prims(stage: Any, *, plane_extent: float = 10.0) -> list
 
     Returns the paths given meshes, so a caller can check rather than hope.
     """
-    from pxr import Sdf, UsdGeom, Vt
+    from pxr import UsdGeom, Vt
 
     made: list[str] = []
     for prim in list(stage.Traverse()):

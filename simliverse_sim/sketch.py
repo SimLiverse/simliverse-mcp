@@ -45,23 +45,19 @@ class SketchError(ValueError):
 _NUM = r"(-?\d+(?:\.\d+)?)"
 
 _RECT = re.compile(
-    r'rect\s+"(?P<label>[^"]*)"\s+centre\s+\(' + _NUM + r",\s*" + _NUM
-    + r"\)\s+" + _NUM + r"\s*x\s*" + _NUM + r"\s*m"
+    r'rect\s+"(?P<label>[^"]*)"\s+centre\s+\(' + _NUM + r",\s*" + _NUM + r"\)\s+" + _NUM + r"\s*x\s*" + _NUM + r"\s*m"
 )
 _ARROW = re.compile(
-    r'arrow\s+"(?P<label>[^"]*)"\s+\(' + _NUM + r",\s*" + _NUM
-    + r"\)\s*->\s*\(" + _NUM + r",\s*" + _NUM + r"\)"
+    r'arrow\s+"(?P<label>[^"]*)"\s+\(' + _NUM + r",\s*" + _NUM + r"\)\s*->\s*\(" + _NUM + r",\s*" + _NUM + r"\)"
 )
 _CIRCLE = re.compile(
-    r'circle\s+"(?P<label>[^"]*)"\s+centre\s+\(' + _NUM + r",\s*" + _NUM
-    + r"\)\s+radius\s+" + _NUM + r"\s*m"
+    r'circle\s+"(?P<label>[^"]*)"\s+centre\s+\(' + _NUM + r",\s*" + _NUM + r"\)\s+radius\s+" + _NUM + r"\s*m"
 )
 
 #: Words a person uses for the thing they want fenced. Checked before falling
 #: back to "the biggest rectangle", because the biggest rectangle is only the
 #: cell until someone draws a bigger floor around it.
-FENCE_WORDS = ("fence", "cell", "guard", "enclosure", "perimeter", "cage",
-               "safety")
+FENCE_WORDS = ("fence", "cell", "guard", "enclosure", "perimeter", "cage", "safety")
 
 #: Words for a thing that has to get through the fence line.
 FEED_WORDS = ("conveyor", "belt", "infeed", "outfeed", "feed", "line")
@@ -90,29 +86,34 @@ def parse_sketch(text: str) -> dict[str, list[dict[str, Any]]]:
     rects, arrows, circles = [], [], []
     for match in _RECT.finditer(text):
         cx, cy, w, h = (float(match.group(i)) for i in range(2, 6))
-        rects.append({
-            "label": match.group("label"), "centre": (cx, cy),
-            "size": (w, h), "area": w * h,
-        })
+        rects.append(
+            {
+                "label": match.group("label"),
+                "centre": (cx, cy),
+                "size": (w, h),
+                "area": w * h,
+            }
+        )
     for match in _ARROW.finditer(text):
         ax, ay, bx, by = (float(match.group(i)) for i in range(2, 6))
-        arrows.append({
-            "label": match.group("label"),
-            "from": (ax, ay), "to": (bx, by),
-            "length": float(np.hypot(bx - ax, by - ay)),
-        })
+        arrows.append(
+            {
+                "label": match.group("label"),
+                "from": (ax, ay),
+                "to": (bx, by),
+                "length": float(np.hypot(bx - ax, by - ay)),
+            }
+        )
     for match in _CIRCLE.finditer(text):
         cx, cy, r = (float(match.group(i)) for i in range(2, 5))
-        circles.append({"label": match.group("label"), "centre": (cx, cy),
-                        "radius": r})
+        circles.append({"label": match.group("label"), "centre": (cx, cy), "radius": r})
 
     return {"rects": rects, "arrows": arrows, "circles": circles}
 
 
 def _labelled(shapes: list[dict[str, Any]], words: tuple[str, ...]):
     """Shapes whose label mentions any of `words`, in drawing order."""
-    return [s for s in shapes
-            if any(w in (s["label"] or "").lower() for w in words)]
+    return [s for s in shapes if any(w in (s["label"] or "").lower() for w in words)]
 
 
 def pick_footprint(rects: list[dict[str, Any]]) -> dict[str, Any]:
@@ -126,7 +127,8 @@ def pick_footprint(rects: list[dict[str, Any]]) -> dict[str, Any]:
     if not rects:
         raise SketchError(
             "The sketch has no rectangle in it. A fence needs a footprint: "
-            "draw the guarded area as a rectangle and label it.")
+            "draw the guarded area as a rectangle and label it."
+        )
 
     named = _labelled(rects, FENCE_WORDS)
     if len(named) == 1:
@@ -135,12 +137,13 @@ def pick_footprint(rects: list[dict[str, Any]]) -> dict[str, Any]:
         biggest = max(named, key=lambda r: r["area"])
         logger.warning(
             "%d rectangles are labelled like a cell (%s); taking the largest.",
-            len(named), ", ".join(repr(r["label"]) for r in named))
+            len(named),
+            ", ".join(repr(r["label"]) for r in named),
+        )
         return dict(biggest, chosen_by="largest of several labelled")
     if len(rects) == 1:
         return dict(rects[0], chosen_by="the only rectangle")
-    return dict(max(rects, key=lambda r: r["area"]),
-                chosen_by="largest, unlabelled")
+    return dict(max(rects, key=lambda r: r["area"]), chosen_by="largest, unlabelled")
 
 
 def _nearest_side(centre, size, point) -> str:
@@ -171,8 +174,7 @@ def _nearest_side(centre, size, point) -> str:
         bx, by = b
         dx, dy = bx - ax, by - ay
         span2 = dx * dx + dy * dy
-        t = (0.0 if span2 == 0.0 else
-             max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / span2)))
+        t = 0.0 if span2 == 0.0 else max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / span2))
         qx, qy = ax + t * dx, ay + t * dy
         dist = float(np.hypot(px - qx, py - qy))
         if best_dist is None or dist < best_dist:
@@ -211,21 +213,23 @@ def _crosses(fence_centre, fence_size, a, b):
 
     best = None
     edges = (
-        ("west", x0, True), ("east", x1, True),
-        ("south", y0, False), ("north", y1, False),
+        ("west", x0, True),
+        ("east", x1, True),
+        ("south", y0, False),
+        ("north", y1, False),
     )
     for side, fixed, vertical in edges:
         denom = dx if vertical else dy
         if abs(denom) < 1e-12:
-            continue                      # parallel: it never meets this edge
+            continue  # parallel: it never meets this edge
         t = ((fixed - ax) / denom) if vertical else ((fixed - ay) / denom)
         if not (-1e-9 <= t <= 1.0 + 1e-9):
-            continue                      # the crossing is off the segment
+            continue  # the crossing is off the segment
         px, py = ax + t * dx, ay + t * dy
         along = py if vertical else px
         lo, hi = (y0, y1) if vertical else (x0, x1)
         if not (lo - 1e-9 <= along <= hi + 1e-9):
-            continue                      # it misses this edge's span
+            continue  # it misses this edge's span
         # Nearest crossing to the outside end is the one it enters through.
         rank = t if inside(b) else (1.0 - t)
         if best is None or rank < best[0]:
@@ -268,9 +272,8 @@ def fence_from_sketch(
     centre, size = footprint["centre"], footprint["size"]
 
     operator_spot = next(
-        (c for c in shapes["circles"]
-         if any(w in (c["label"] or "").lower() for w in OPERATOR_WORDS)),
-        None)
+        (c for c in shapes["circles"] if any(w in (c["label"] or "").lower() for w in OPERATOR_WORDS)), None
+    )
 
     gate_side = gate
     gate_chosen_by = "explicit"
@@ -287,28 +290,32 @@ def fence_from_sketch(
         hit = _crosses(centre, size, arrow["from"], arrow["to"])
         if hit is None:
             continue
-        crossings.append({"side": hit["side"], "centre": hit["centre"],
-                          "width": crossing_width, "for": arrow["label"]})
+        crossings.append({"side": hit["side"], "centre": hit["centre"], "width": crossing_width, "for": arrow["label"]})
 
     fence = SafetyFence.build(
-        prim_path, centre=centre, size=size, gate=gate_side,
+        prim_path,
+        centre=centre,
+        size=size,
+        gate=gate_side,
         gate_width=gate_width,
-        crossings=[{k: c[k] for k in ("side", "centre", "width")}
-                   for c in crossings],
-        scene=scene, **build_kwargs,
+        crossings=[{k: c[k] for k in ("side", "centre", "width")} for c in crossings],
+        scene=scene,
+        **build_kwargs,
     )
 
     return {
         "fence": fence,
-        "footprint": {"label": footprint["label"], "centre": list(centre),
-                      "size": list(size), "chosen_by": footprint["chosen_by"]},
+        "footprint": {
+            "label": footprint["label"],
+            "centre": list(centre),
+            "size": list(size),
+            "chosen_by": footprint["chosen_by"],
+        },
         "gate": {"side": gate_side, "chosen_by": gate_chosen_by},
         "crossings": crossings,
         "ignored": {
-            "rects": [r["label"] for r in shapes["rects"]
-                      if r is not footprint and r["label"] != footprint["label"]],
-            "circles": [c["label"] for c in shapes["circles"]
-                       if c is not operator_spot],
+            "rects": [r["label"] for r in shapes["rects"] if r is not footprint and r["label"] != footprint["label"]],
+            "circles": [c["label"] for c in shapes["circles"] if c is not operator_spot],
         },
         "describe": fence.describe(),
     }
@@ -325,16 +332,17 @@ def zones_from_sketch(text: str) -> dict[str, Any]:
     shapes = parse_sketch(text)
     footprint = pick_footprint(shapes["rects"]) if shapes["rects"] else None
     return {
-        "cell": None if footprint is None else {
-            "label": footprint["label"], "centre": list(footprint["centre"]),
-            "size": list(footprint["size"])},
-        "spots": [{"label": c["label"], "centre": list(c["centre"]),
-                   "radius": c["radius"]} for c in shapes["circles"]],
-        "areas": [{"label": r["label"], "centre": list(r["centre"]),
-                   "size": list(r["size"])}
-                  for r in shapes["rects"]
-                  if footprint is None or r["label"] != footprint["label"]],
-        "flows": [{"label": a["label"], "from": list(a["from"]),
-                   "to": list(a["to"]), "length": round(a["length"], 3)}
-                  for a in shapes["arrows"]],
+        "cell": None
+        if footprint is None
+        else {"label": footprint["label"], "centre": list(footprint["centre"]), "size": list(footprint["size"])},
+        "spots": [{"label": c["label"], "centre": list(c["centre"]), "radius": c["radius"]} for c in shapes["circles"]],
+        "areas": [
+            {"label": r["label"], "centre": list(r["centre"]), "size": list(r["size"])}
+            for r in shapes["rects"]
+            if footprint is None or r["label"] != footprint["label"]
+        ],
+        "flows": [
+            {"label": a["label"], "from": list(a["from"]), "to": list(a["to"]), "length": round(a["length"], 3)}
+            for a in shapes["arrows"]
+        ],
     }

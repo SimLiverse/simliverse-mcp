@@ -116,9 +116,7 @@ def list_props(query: str | None = None, *, physics: str | None = None) -> list[
             match="exact" if not missed else "partial",
             unmatched=missed,
         )
-        scored.append(
-            (-hits, -PHYSICS_KINDS.index(entry["physics"]), entry["key"], annotated)
-        )
+        scored.append((-hits, -PHYSICS_KINDS.index(entry["physics"]), entry["key"], annotated))
 
     return [entry for *_rank, entry in sorted(scored, key=lambda row: row[:3])]
 
@@ -185,12 +183,10 @@ def _place(xform, position: Any, orientation: Any = None) -> None:
     from pxr import Gf, UsdGeom
 
     xform.ClearXformOpOrder()
-    xform.AddTranslateOp(UsdGeom.XformOp.PrecisionDouble).Set(
-        Gf.Vec3d(*as_vec3(position, name="position")))
+    xform.AddTranslateOp(UsdGeom.XformOp.PrecisionDouble).Set(Gf.Vec3d(*as_vec3(position, name="position")))
     if orientation is not None:
         ox, oy, oz = as_vec3(orientation, name="orientation")
-        xform.AddRotateXYZOp(UsdGeom.XformOp.PrecisionDouble).Set(
-            Gf.Vec3d(float(ox), float(oy), float(oz)))
+        xform.AddRotateXYZOp(UsdGeom.XformOp.PrecisionDouble).Set(Gf.Vec3d(float(ox), float(oy), float(oz)))
 
 
 def spawn_prop(
@@ -200,7 +196,8 @@ def spawn_prop(
     prim_path: str | None = None,
     position: Any = (0.0, 0.0, 0.0),
     orientation: Any = None,
-    scene: Any = None,    rest_on_floor: bool = True,
+    scene: Any = None,
+    rest_on_floor: bool = True,
 ) -> dict[str, Any]:
     """Reference a real prop onto the stage. Returns its index entry plus the path.
 
@@ -252,6 +249,7 @@ def spawn_prop(
         try:
             from simliverse_sim.objects import bounds_of as _bounds_of
             from simliverse_sim.scene import Scene as _Scene
+
             lo_hi = _bounds_of(_Scene.get(), prim_path)
         except Exception:  # noqa: BLE001 -- unmeasurable: leave it
             lo_hi = None
@@ -270,8 +268,7 @@ def spawn_prop(
             "ones that can.",
             entry["key"],
             entry["physics"],
-            "no collider and no rigid body" if entry["physics"] == "visual"
-            else "a collider but no rigid body",
+            "no collider and no rigid body" if entry["physics"] == "visual" else "a collider but no rigid body",
             query,
         )
 
@@ -293,8 +290,7 @@ def spawn_prop(
     # still came back well-formed.
     #
     # So the caller is handed the body to measure, not the handle to hold.
-    result = {**entry, "prim_path": prim_path, "body_path": _body_path(prim_path),
-              "lifted_m": round(lift, 4)}
+    result = {**entry, "prim_path": prim_path, "body_path": _body_path(prim_path), "lifted_m": round(lift, 4)}
     overlaps = _overlapping_robots(prim_path)
     if overlaps:
         result["overlaps"] = overlaps
@@ -305,7 +301,9 @@ def spawn_prop(
                 "PhysX reports invalid transforms on the arm links when this "
                 "happens and the scene is unusable without saying so. Offset it "
                 "by at least half its extent plus the base radius.",
-                entry["key"], prim_path, hit["robot"],
+                entry["key"],
+                prim_path,
+                hit["robot"],
                 max(entry.get("extent") or [0.0]),
             )
     return result
@@ -391,13 +389,13 @@ def _overlapping_robots(prim_path: str) -> list[dict[str, Any]]:
             continue
         rlow, rhigh = robot_bounds
         if all(low[i] <= rhigh[i] and high[i] >= rlow[i] for i in range(3)):
-            hits.append({
-                "robot": robot_path,
-                "prop_bounds": [[round(float(v), 3) for v in low],
-                                [round(float(v), 3) for v in high]],
-                "robot_bounds": [[round(float(v), 3) for v in rlow],
-                                 [round(float(v), 3) for v in rhigh]],
-            })
+            hits.append(
+                {
+                    "robot": robot_path,
+                    "prop_bounds": [[round(float(v), 3) for v in low], [round(float(v), 3) for v in high]],
+                    "robot_bounds": [[round(float(v), 3) for v in rlow], [round(float(v), 3) for v in rhigh]],
+                }
+            )
     return hits
 
 
@@ -417,7 +415,9 @@ def verify_index() -> dict[str, Any]:
         "index_assets_root": recorded,
         "live_assets_root": live,
         "count": _index().get("count", 0),
-        "stale_because": None if ok else (
+        "stale_because": None
+        if ok
+        else (
             f"index was generated against {recorded or '<unknown>'} but this "
             f"session serves assets from {live}. Paths may not resolve; "
             f"regenerate with tools/generate_prop_index.py."

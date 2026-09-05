@@ -47,10 +47,7 @@ from pathlib import Path
 # point of `kit_log` is that it needs none of that.
 _SPEC = importlib.util.spec_from_file_location(
     "_sl_kit_log",
-    Path(__file__).resolve().parents[1]
-    / "isaac.sim.mcp_extension"
-    / "isaac_sim_mcp_extension"
-    / "kit_log.py",
+    Path(__file__).resolve().parents[1] / "isaac.sim.mcp_extension" / "isaac_sim_mcp_extension" / "kit_log.py",
 )
 control = importlib.util.module_from_spec(_SPEC)
 sys.modules[_SPEC.name] = control

@@ -16,6 +16,7 @@ Run it inside a live session:
     from demo.scenario_sweep import sweep
     print(report(sweep()))
 """
+
 from __future__ import annotations
 
 import time
@@ -68,7 +69,7 @@ def sweep(
     scene = scene or Scene.get()
     rows: list[dict[str, Any]] = []
 
-    for name, spec in (scenarios or SCENARIOS):
+    for name, spec in scenarios or SCENARIOS:
         started = time.time()
         row: dict[str, Any] = {"scenario": name, "spec": dict(spec)}
         try:
@@ -76,36 +77,40 @@ def sweep(
             # the belt failed to deliver rather than that the queue ran dry.
             cell = cell_mod.build(scene, boxes=cartons + 1, **spec)
             if cell.get("fouled"):
-                row.update({
-                    "built": False,
-                    "error": "impossible cell: the pallet encloses %s" % (
-                        ", ".join(f["robot"] for f in cell["fouled"])),
-                })
+                row.update(
+                    {
+                        "built": False,
+                        "error": "impossible cell: the pallet encloses %s"
+                        % (", ".join(f["robot"] for f in cell["fouled"])),
+                    }
+                )
                 row["wall_s"] = round(time.time() - started, 1)
                 rows.append(row)
                 continue
             report_ = cell_mod.palletise(cell, count=cartons)
-            row.update({
-                "built": True,
-                "placed": int(report_.get("placed", 0)),
-                "of": int(report_.get("of", cartons)),
-                "complete": bool(report_.get("complete")),
-                "s_per_carton": report_.get("seconds_per_carton"),
-                "per_hour": report_.get("cartons_per_hour"),
-                "errors_mm": [
-                    None if c.get("error") is None
-                    else round(float(c["error"]) * 1000.0, 1)
-                    for c in report_.get("cycles", [])
-                ],
-                "why": [c.get("reason") for c in report_.get("cycles", [])
-                        if c.get("reason")],
-            })
+            row.update(
+                {
+                    "built": True,
+                    "placed": int(report_.get("placed", 0)),
+                    "of": int(report_.get("of", cartons)),
+                    "complete": bool(report_.get("complete")),
+                    "s_per_carton": report_.get("seconds_per_carton"),
+                    "per_hour": report_.get("cartons_per_hour"),
+                    "errors_mm": [
+                        None if c.get("error") is None else round(float(c["error"]) * 1000.0, 1)
+                        for c in report_.get("cycles", [])
+                    ],
+                    "why": [c.get("reason") for c in report_.get("cycles", []) if c.get("reason")],
+                }
+            )
         except Exception as exc:  # noqa: BLE001 - a broken cell is a result
-            row.update({
-                "built": False,
-                "error": "%s: %s" % (type(exc).__name__, exc),
-                "where": traceback.format_exc().strip().splitlines()[-3:],
-            })
+            row.update(
+                {
+                    "built": False,
+                    "error": "%s: %s" % (type(exc).__name__, exc),
+                    "where": traceback.format_exc().strip().splitlines()[-3:],
+                }
+            )
         row["wall_s"] = round(time.time() - started, 1)
         rows.append(row)
     return rows
@@ -113,21 +118,22 @@ def sweep(
 
 def report(rows: list[dict[str, Any]]) -> str:
     """A table, with the baseline first so the rest can be read against it."""
-    lines = ["%-14s %-7s %-22s %-11s %s" % (
-        "scenario", "placed", "errors mm", "s/carton", "note")]
+    lines = ["%-14s %-7s %-22s %-11s %s" % ("scenario", "placed", "errors mm", "s/carton", "note")]
     lines.append("-" * 78)
     for row in rows:
         if not row.get("built"):
-            lines.append("%-14s %-7s %-22s %-11s %s" % (
-                row["scenario"], "-", "-", "-", row["error"]))
+            lines.append("%-14s %-7s %-22s %-11s %s" % (row["scenario"], "-", "-", "-", row["error"]))
             continue
-        lines.append("%-14s %-7s %-22s %-11s %s" % (
-            row["scenario"],
-            "%d/%d" % (row["placed"], row["of"]),
-            str(row["errors_mm"]),
-            row["s_per_carton"] if row["s_per_carton"] is not None else "-",
-            "; ".join(row["why"]) or "ok",
-        ))
+        lines.append(
+            "%-14s %-7s %-22s %-11s %s"
+            % (
+                row["scenario"],
+                "%d/%d" % (row["placed"], row["of"]),
+                str(row["errors_mm"]),
+                row["s_per_carton"] if row["s_per_carton"] is not None else "-",
+                "; ".join(row["why"]) or "ok",
+            )
+        )
     return "\n".join(lines)
 
 

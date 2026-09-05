@@ -72,8 +72,9 @@ class PathPlan:
     so it can be planned once and followed by whoever owns the control loop.
     """
 
-    def __init__(self, xs: Sequence[float], ys: Sequence[float],
-                 yaws: Sequence[float], speeds: Sequence[float]) -> None:
+    def __init__(
+        self, xs: Sequence[float], ys: Sequence[float], yaws: Sequence[float], speeds: Sequence[float]
+    ) -> None:
         self.xs = [float(v) for v in xs]
         self.ys = [float(v) for v in ys]
         self.yaws = [float(v) for v in yaws]
@@ -144,9 +145,19 @@ def plan_path(
         sv = 0.0 if i == 0 else cruise
         gv = 0.0 if i == len(points) - 2 else cruise
         _, rx, ry, ryaw, rv, _, _ = quintic_polynomials_planner(
-            float(points[i][0]), float(points[i][1]), headings[i], sv, 0.0,
-            float(points[i + 1][0]), float(points[i + 1][1]), headings[i + 1], gv, 0.0,
-            max_accel, max_jerk, dt,
+            float(points[i][0]),
+            float(points[i][1]),
+            headings[i],
+            sv,
+            0.0,
+            float(points[i + 1][0]),
+            float(points[i + 1][1]),
+            headings[i + 1],
+            gv,
+            0.0,
+            max_accel,
+            max_jerk,
+            dt,
         )
         # The first sample of each leg repeats the previous leg's last.
         start = 1 if xs else 0
@@ -156,8 +167,7 @@ def plan_path(
         speeds.extend(rv[start:])
 
     plan = PathPlan(xs, ys, yaws, speeds)
-    logger.info("Planned a %.2f m path through %d waypoints (%d samples)",
-                plan.length, len(points), len(plan))
+    logger.info("Planned a %.2f m path through %d waypoints (%d samples)", plan.length, len(points), len(plan))
     return plan
 
 
@@ -175,13 +185,18 @@ class PoseDriver:
     still stops at every goal it is given.
     """
 
-    def __init__(self, robot: Any, *, max_linear: float = 0.5,
-                 max_angular: float = 1.0, position_tol: float = 0.1,
-                 heading_tol: float = 0.05) -> None:
+    def __init__(
+        self,
+        robot: Any,
+        *,
+        max_linear: float = 0.5,
+        max_angular: float = 1.0,
+        position_tol: float = 0.1,
+        heading_tol: float = 0.05,
+    ) -> None:
         if not available():
             raise NavigationUnavailable(
-                "isaacsim.robot.wheeled_robots is not importable; use "
-                "drive(linear, angular) directly."
+                "isaacsim.robot.wheeled_robots is not importable; use drive(linear, angular) directly."
             )
         from isaacsim.robot.wheeled_robots.controllers import (
             DifferentialController,
@@ -229,9 +244,16 @@ class PathFollower:
     nothing and blocks nothing, so it belongs inside a controller's `compute`.
     """
 
-    def __init__(self, robot: Any, plan: PathPlan, *, tolerance: float = 0.12,
-                 max_linear: float = 0.6, max_angular: float = 1.2,
-                 min_linear: float = 0.12) -> None:
+    def __init__(
+        self,
+        robot: Any,
+        plan: PathPlan,
+        *,
+        tolerance: float = 0.12,
+        max_linear: float = 0.6,
+        max_angular: float = 1.2,
+        min_linear: float = 0.12,
+    ) -> None:
         if not available():
             raise NavigationUnavailable(
                 "isaacsim.robot.wheeled_robots is not importable; there is no "
@@ -274,9 +296,7 @@ class PathFollower:
         # every tick — and Stanley's cross-track term is atan2(k * error, v),
         # which at v = 0 saturates to +-pi/2. The steering was pinned hard over
         # on the sign of the error instead of scaling with it.
-        wheels = np.asarray(self.robot.joint_velocities, dtype=float)[
-            self.robot.wheel_indices
-        ]
+        wheels = np.asarray(self.robot.joint_velocities, dtype=float)[self.robot.wheel_indices]
         speed = float(self.robot.wheel_radius * float(np.mean(wheels)))
         # A floor keeps that same atan2 well-conditioned at a standstill.
         speed = max(speed, 0.05)
@@ -310,9 +330,7 @@ class PathFollower:
         state = self._state()
         if self._index == 0:
             self._index, _ = calc_target_index(state, self.plan.xs, self.plan.ys)
-        delta, self._index = stanley_control(
-            state, self.plan.xs, self.plan.ys, self.plan.yaws, self._index
-        )
+        delta, self._index = stanley_control(state, self.plan.xs, self.plan.ys, self.plan.yaws, self._index)
 
         profile = self.plan.speeds[min(self._index, len(self.plan) - 1)]
         # Floor first, then taper toward the goal. Order matters: tapering a

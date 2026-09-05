@@ -38,8 +38,7 @@ REACH = 1.3
 STANDOFF = 0.55
 
 
-def guard(cell: dict, *, scene: Any = None, gate: str = "south",
-          margin: float = STANDOFF) -> dict:
+def guard(cell: dict, *, scene: Any = None, gate: str = "south", margin: float = STANDOFF) -> dict:
     """Fence an existing cell, leaving the conveyor a slot to run through.
 
     The footprint is measured from what the cell actually contains rather than
@@ -88,11 +87,14 @@ def guard(cell: dict, *, scene: Any = None, gate: str = "south",
     # first version of this tested that the slot lined up with the belt's
     # centre-line, which it did, and never that the belt got there.
     reaches = belt_far_x >= east - 1e-6
-    crossings = ([{"side": "east", "centre": belt_y,
-                   "width": belt_width + 0.30}] if reaches else [])
+    crossings = [{"side": "east", "centre": belt_y, "width": belt_width + 0.30}] if reaches else []
 
     fence = SafetyFence.build(
-        "/World/Fence", centre=centre, size=size, gate=gate, gate_width=1.0,
+        "/World/Fence",
+        centre=centre,
+        size=size,
+        gate=gate,
+        gate_width=1.0,
         # The slot the conveyor runs through, with room either side: cut to the
         # exact belt width it clips the guide rails when anyone fits them.
         crossings=crossings,
@@ -101,38 +103,45 @@ def guard(cell: dict, *, scene: Any = None, gate: str = "south",
     if not reaches:
         # Worth saying. A belt that terminates inside the guarding is a cell
         # with no way in for cartons, which is a layout question, not a bug.
-        print("  note: the belt ends %.2f m short of the east guarding, so no "
-              "crossing was cut" % (east - belt_far_x))
+        print("  note: the belt ends %.2f m short of the east guarding, so no crossing was cut" % (east - belt_far_x))
 
     reach = REACH_BY_ROBOT.get(spec.get("robot", "ur10"), REACH)
     fit = fence.fits((0.0, 0.0), reach=reach)
     if fit["touches_fence"]:
         # Reported, not raised: guarding at the envelope is a real choice.
         # Silently shipping it is not.
-        print("  note: the arm reaches within %.2f m of the guarding"
-              % fit["clearance"])
+        print("  note: the arm reaches within %.2f m of the guarding" % fit["clearance"])
 
     gate_line = fence.centre[1] - fence.size[1] / 2.0
-    spawn_cabinet("/World/Cabinet",
-                  position=(float(fence.centre[0] - fence.size[0] / 2.0 - 0.5),
-                            float(fence.centre[1]), 0.0),
-                  scene=scene)
-    spawn_beacon("/World/Beacon",
-                 position=(float(fence.centre[0] + fence.size[0] / 2.0 - 0.25),
-                           float(fence.centre[1] + fence.size[1] / 2.0 - 0.25),
-                           0.0),
-                 height=1.2, scene=scene)
+    spawn_cabinet(
+        "/World/Cabinet",
+        position=(float(fence.centre[0] - fence.size[0] / 2.0 - 0.5), float(fence.centre[1]), 0.0),
+        scene=scene,
+    )
+    spawn_beacon(
+        "/World/Beacon",
+        position=(
+            float(fence.centre[0] + fence.size[0] / 2.0 - 0.25),
+            float(fence.centre[1] + fence.size[1] / 2.0 - 0.25),
+            0.0,
+        ),
+        height=1.2,
+        scene=scene,
+    )
     platform_y = float(gate_line - 1.0)
-    spawn_operator_platform("/World/OperatorPlatform",
-                            position=(float(fence.centre[0]), platform_y, 0.0),
-                            size=(1.6, 1.6), scene=scene)
+    spawn_operator_platform(
+        "/World/OperatorPlatform", position=(float(fence.centre[0]), platform_y, 0.0), size=(1.6, 1.6), scene=scene
+    )
     # On the platform, outside the line, facing the gate. Passing the fence
     # means the placement is checked rather than asserted - a figure inside
     # the guarding is a cell nobody may run with the robot live.
-    person = spawn_operator("/World/Operator",
-                            position=(float(fence.centre[0] + 0.45),
-                                      platform_y, 0.05),
-                            facing=90.0, fence=fence, scene=scene)
+    person = spawn_operator(
+        "/World/Operator",
+        position=(float(fence.centre[0] + 0.45), platform_y, 0.05),
+        facing=90.0,
+        fence=fence,
+        scene=scene,
+    )
 
     cell["fence"] = fence
     cell["guarding"] = {
