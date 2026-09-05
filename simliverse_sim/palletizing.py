@@ -169,20 +169,43 @@ def pallet_slots(
     return slots
 
 
+def _yaw_degrees(quat: Any) -> float:
+    """Rotation about world z, in degrees, from a (w, x, y, z) quaternion."""
+    w, x, y, z = (float(v) for v in quat)
+    return float(np.degrees(np.arctan2(2.0 * (w * z + x * y),
+                                       1.0 - 2.0 * (y * y + z * z))))
+
+
+def _skew_degrees(quat: Any, want_deg: float) -> float:
+    """How far off square, wrapped into a quarter turn.
+
+    A carton is symmetric under 90 degrees, so one sitting at 88 degrees is
+    2 degrees off square, not 88. Without the wrap every correctly rotated
+    carton in a pinwheel pattern reads as a failure.
+    """
+    return abs((_yaw_degrees(quat) - want_deg + 45.0) % 90.0 - 45.0)
+
+
 def verify_pallet(
     objects: Any,
     slots: list[dict[str, Any]],
     *,
     tolerance: float = 0.04,
     settled_speed: float = 0.02,
+    square_tolerance: float = 5.0,
 ) -> dict[str, Any]:
-    """Did the boxes actually land on their slots, and are they still there?
+    """Did the boxes actually land on their slots, square, and stay there?
 
     Measured against `rest`, not `place`: `place` is where the box was released,
     a few millimetres high, and every box should have settled below it. A box
     still moving is not placed, however close it is — it is mid-fall, and a
     report written one frame earlier would have called a collapsing stack a
     success.
+
+    Orientation counts too. A carton set down 26.7 degrees off sat 8 mm from
+    its slot, so a distance-only check called it placed — and the pallet it
+    made would not stretch-wrap. Measured, that is the difference between a
+    photograph a customer accepts and one they do not.
 
     Returns a per-slot verdict rather than a bare bool, because "three of four,
     and the fourth is 9 cm out in +X" is the sentence that identifies the bug.
@@ -198,10 +221,20 @@ def verify_pallet(
                 {"index": slot["index"], "ok": False, "reason": f"unreadable: {exc}"}
             )
             continue
+        # Separately, and forgivingly: an object that cannot report an
+        # orientation is not thereby unplaced. Position and speed are the
+        # measurements this check has always been able to make, and losing
+        # them because a handle has no `orientation` would be a worse answer
+        # than not knowing the angle.
+        try:
+            skew = _skew_degrees(obj.orientation, float(slot.get("yaw") or 0.0))
+        except Exception:  # noqa: BLE001
+            skew = 0.0
         target = np.asarray(slot["rest"], dtype=float)
         error = float(np.linalg.norm(position - target))
         moving = speed > settled_speed
-        ok = error <= tolerance and not moving
+        askew = skew > square_tolerance
+        ok = error <= tolerance and not moving and not askew
         placed += int(ok)
         results.append(
             {
@@ -211,10 +244,12 @@ def verify_pallet(
                 "error": round(error, 4),
                 "offset": (position - target).round(4).tolist(),
                 "speed": round(speed, 4),
+                "skew": round(skew, 2),
                 "reason": (
                     "" if ok
                     else "still moving" if moving
-                    else f"{error:.3f} m from its slot"
+                    else f"{error:.3f} m from its slot" if error > tolerance
+                    else f"{skew:.1f} deg off square"
                 ),
             }
         )

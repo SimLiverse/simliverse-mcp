@@ -1080,14 +1080,43 @@ class LulaRoute:
     surface, so a route made without cuMotion is followed by the same code.
     """
 
-    def __init__(self, trajectory: Any, joint_names: Any) -> None:
+    def __init__(self, trajectory: Any, joint_names: Any,
+                 start: Any = None, goal: Any = None) -> None:
         self._trajectory = trajectory
         self.joint_names = list(joint_names)
         self._start = float(trajectory.start_time)
         self.duration = float(trajectory.end_time) - self._start
+        #: The configurations this route runs between, so a caller choosing
+        #: among several routes to the same pose can ask what each one costs.
+        #: IK can reach a pose either by folding the arm or by turning the
+        #: base most of the way round, and both are valid answers -- but one
+        #: of them looks, to somebody watching the cell, like the robot has
+        #: decided to take the scenic route.
+        self.start = None if start is None else np.asarray(start, dtype=float)
+        self.goal = None if goal is None else np.asarray(goal, dtype=float)
+
+    @property
+    def base_turn(self) -> float:
+        """Radians the first joint turns over this route.
+
+        The first joint is the one that swings the whole arm, so it is the
+        one worth asking about: every other joint moving is the arm changing
+        shape, and that is what it is for.
+        """
+        if self.start is None or self.goal is None or not len(self.goal):
+            return 0.0
+        return float(abs(self.goal[0] - self.start[0]))
+
+    @property
+    def travel(self) -> float:
+        """The largest single-joint move on this route, in radians."""
+        if self.start is None or self.goal is None:
+            return 0.0
+        return float(np.max(np.abs(self.goal - self.start)))
 
     def __repr__(self) -> str:
-        return f"<LulaRoute {self.duration:.2f}s, {len(self.joint_names)} joints>"
+        return (f"<LulaRoute {self.duration:.2f}s, {len(self.joint_names)} joints, "
+                f"base {np.degrees(self.base_turn):.0f} deg>")
 
     def sample(self, t: float) -> tuple[np.ndarray, np.ndarray]:
         at = self._start + float(np.clip(t, 0.0, self.duration))
@@ -2392,7 +2421,7 @@ class Manipulator(Robot):
         )
         if trajectory is None:
             raise MotionError(f"{self.prim_path}: Lula could not time-parameterise the route.")
-        return LulaRoute(trajectory, names)
+        return LulaRoute(trajectory, names, start=start, goal=goal)
 
     def _cspace_generator(self) -> Any:
         if getattr(self, "_cspace_gen", None) is None:
