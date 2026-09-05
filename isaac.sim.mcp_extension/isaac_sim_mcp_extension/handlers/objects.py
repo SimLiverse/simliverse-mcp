@@ -89,6 +89,23 @@ def create(
         if position or rotation or scale:
             adapter.set_prim_transform(prim_path, position=position, rotation=rotation, scale=scale)
 
+        # `color` was accepted and thrown away, so an agent that asked for a
+        # red cube got a grey one -- and no state read it could make would
+        # tell it otherwise. displayColor is the cheap honest answer for a
+        # primitive: it needs no material, and it is what the viewport shows.
+        if color is not None:
+            from pxr import Gf, Usd, UsdGeom
+
+            channels = [float(c) for c in color][:3]
+            if len(channels) != 3:
+                return {"status": "error",
+                        "message": f"color needs three channels, got {list(color)}."}
+            if max(channels) > 1.0:          # 0-255 is the other convention
+                channels = [c / 255.0 for c in channels]
+            gprim = UsdGeom.Gprim(adapter.get_stage().GetPrimAtPath(prim_path))
+            if gprim:
+                gprim.CreateDisplayColorAttr().Set([Gf.Vec3f(*channels)])
+
         # All objects get collision so they interact with the scene.
         # physics_enabled additionally adds RigidBodyAPI for dynamic simulation.
         from pxr import UsdPhysics

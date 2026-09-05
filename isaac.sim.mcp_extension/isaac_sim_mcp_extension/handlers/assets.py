@@ -130,6 +130,12 @@ def search_usd(
         url = searcher.search(text_prompt)
         loader = USDLoader()
         prim_path = loader.load_usd_from_url(url_path=url, target_path=target_path)
+        # position and scale were advertised and dropped, so a searched asset
+        # always landed at the origin at its authored size -- and the caller,
+        # having asked for somewhere else, had no error to go on. `load_usd`
+        # has always placed what it loads; this verb now does the same.
+        if position or scale:
+            adapter.set_prim_transform(prim_path, position=position, scale=scale)
         return {
             "status": "success",
             "message": f"Found and loaded USD for '{text_prompt}'",
