@@ -343,16 +343,38 @@ def capture_view(
         except Exception:
             pass
 
-        if camera_path:
-            viewport.camera_path = camera_path
-        elif position or look_at:
-            temp_camera = _aim_camera(
+        # `camera_path` says WHERE to put the camera prim; `position` and
+        # `look_at` say where to aim it. Both together is the natural way to
+        # ask for a named, reusable viewpoint -- and the old code took the
+        # first branch and dropped the aim on the floor, pointing the viewport
+        # at a prim that, first time round, did not exist yet. A dangling
+        # camera renders nothing, so every capture died on the 40-frame
+        # timeout with a message about the capture rather than the camera.
+        # Silently ignoring an argument is the same failure that cost a whole
+        # session of looking at the default view and believing it.
+        if position or look_at:
+            target_path = camera_path or "/World/__capture_view_cam"
+            _aim_camera(
                 stage,
-                "/World/__capture_view_cam",
+                target_path,
                 [float(v) for v in (position or [10.0, -10.0, 8.0])],
                 [float(v) for v in (look_at or [0.0, 0.0, 0.0])],
             )
-            viewport.camera_path = temp_camera
+            if not camera_path:
+                temp_camera = target_path
+            viewport.camera_path = target_path
+        elif camera_path:
+            prim = stage.GetPrimAtPath(camera_path)
+            if not (prim and prim.IsValid()):
+                return {
+                    "status": "error",
+                    "message": (
+                        f"No camera at {camera_path}. Either pass position and "
+                        f"look_at to create one there, or name a camera that "
+                        f"exists."
+                    ),
+                }
+            viewport.camera_path = camera_path
 
         if camera_path or temp_camera:
             # Let the switch land before asking for a frame, or the shot is from
@@ -402,8 +424,11 @@ def capture_view(
 
         capture_viewport_to_buffer(viewport, _on_capture)
 
-        # The callback fires on a later frame, so the loop is the wait.
-        for _ in range(40):
+        # The callback fires on a later frame, so the loop is the wait. 40 was
+        # not enough for the first shot through a freshly created camera on a
+        # cold worker -- RTX warms the new view before it will hand over a
+        # frame. Waiting is cheap; a blind agent is not.
+        for _ in range(240):
             app.update()
             if captured:
                 break
@@ -433,7 +458,7 @@ def capture_view(
                 }
             return {
                 "status": "error",
-                "message": "Viewport capture did not complete within 40 frames.",
+                "message": "Viewport capture did not complete within 240 frames.",
             }
 
         return {
