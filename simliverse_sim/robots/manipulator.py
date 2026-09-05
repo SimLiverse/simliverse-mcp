@@ -2457,9 +2457,20 @@ class Manipulator(Robot):
         boxes = [(np.asarray(lo, dtype=float) - margin, np.asarray(hi, dtype=float) + margin)
                  for lo, hi, *_ in obstacles]
         names = [o[2] if len(o) > 2 else str(i) for i, o in enumerate(obstacles)]
+        # A contact that exists at the START of the route is where the arm
+        # already is, not something the route sweeps into. After setting a
+        # carton down against the fence -- a pallet drawn 0.3 m from the
+        # panels, with a 0.25 m margin -- the wrist begins every following
+        # route inside the panel's box, and refusing those left the arm with
+        # no route it was allowed to take: "cannot reach over carton 1 in
+        # any grip orientation", on a pick it had just made. So a (frame,
+        # obstacle) pair in contact at sample 0 is tolerated for as long as
+        # that contact is continuous, and only an ENTRY is a hit.
+        grace: set[tuple[str, str]] = set()
         for k in range(samples + 1):
             t = route.duration * k / samples
             q, _ = route.sample(t)
+            touching: set[tuple[str, str]] = set()
             for frame in frames:
                 try:
                     pos, rot = solver.compute_forward_kinematics(frame, q)
@@ -2471,8 +2482,15 @@ class Manipulator(Robot):
                 for pt in points:
                     for (lo, hi), name in zip(boxes, names):
                         if np.all(pt >= lo) and np.all(pt <= hi):
-                            return {"t": float(t), "frame": frame, "obstacle": name,
-                                    "point": pt.round(3).tolist()}
+                            key = (frame, name)
+                            touching.add(key)
+                            if k == 0:
+                                grace.add(key)
+                            elif key not in grace:
+                                return {"t": float(t), "frame": frame, "obstacle": name,
+                                        "point": pt.round(3).tolist()}
+            # Leaving a box ends its grace: coming back into it is an entry.
+            grace &= touching
         return None
 
     def _cspace_generator(self) -> Any:

@@ -88,3 +88,30 @@ def test_the_carried_carton_counts():
 
 def test_no_obstacles_means_no_work():
     assert _arm().route_clearance(_Route(), []) is None
+
+
+def test_starting_inside_a_box_is_not_a_sweep():
+    """
+    After setting a carton down against the fence the wrist begins every
+    following route inside the panel's inflated box. Refusing those left the
+    arm with no route it was allowed to take, on a pick it had just made.
+    A contact present at the start is where the arm already is; only an
+    entry counts.
+    """
+    box = ([-0.1, -0.1, 0.5], [0.3, 0.1, 1.5], "panel")   # the elbow starts inside, leaves
+    assert _arm().route_clearance(_Route(), [box], margin=0.0) is None
+
+
+def test_leaving_and_re_entering_is_a_sweep():
+    """Grace ends when the frame leaves the box; coming back is an entry."""
+
+    class _Bounce:
+        duration = 1.0
+
+        def sample(self, t):        # elbow x: 0 -> 2 -> 0
+            x = 2.0 * t if t <= 0.5 else 2.0 * (1.0 - t)
+            return np.array([x / 2.0, 0.0]), np.zeros(2)
+
+    box = ([-0.1, -0.1, 0.5], [0.3, 0.1, 1.5], "panel")
+    hit = _arm().route_clearance(_Bounce(), [box], margin=0.0, samples=40)
+    assert hit is not None and hit["t"] > 0.8
