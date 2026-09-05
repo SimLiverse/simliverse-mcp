@@ -515,3 +515,22 @@ def test_a_franka_needs_no_note():
 
 def test_an_unknown_robot_with_no_joints_is_not_described_at_all():
     assert _what_this_actually_is([], "mystery") == ""
+
+
+def test_spawn_robot_accepts_a_mounting_yaw():
+    """
+    A six-axis arm's base joint has a seam, and work that sits across it is
+    reachable only the long way round or over the shoulder. Spawning every
+    arm at yaw 0 put the seam wherever the sketch left it; one layout put a
+    pallet slot at +174 degrees on a KR210 (seam at +/-185) and the set-down
+    had no route the controller was allowed to drive. The builder mounts the
+    arm facing the work, and needs this to do it.
+    """
+    import ast, os
+    path = os.path.join(os.path.dirname(__file__), "..", "simliverse_sim", "robots", "library.py")
+    with open(path) as f:
+        tree = ast.parse(f.read())
+    fn = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "spawn_robot")
+    assert "yaw" in {a.arg for a in fn.args.kwonlyargs}
+    src = ast.unparse(fn)
+    assert "AddRotateZOp" in src, "the yaw must be applied to the prim, not just accepted"

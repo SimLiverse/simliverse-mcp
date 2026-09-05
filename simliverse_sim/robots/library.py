@@ -549,10 +549,21 @@ def spawn_robot(
     *,
     prim_path: str | None = None,
     position: Any = (0.0, 0.0, 0.0),
+    yaw: float = 0.0,
     scene: Any = None,
     **kwargs: Any,
 ) -> Robot:
-    """Load a robot and return a handle with the right control surface."""
+    """Load a robot and return a handle with the right control surface.
+
+    `yaw` is the mounting angle about Z, in degrees. It matters more than it
+    looks: a six-axis arm's base joint has a seam -- a KR210's is at +/-185
+    degrees -- and work that sits across it is reachable only the long way
+    round or over the shoulder. Every arm used to be spawned at yaw 0, which
+    put the seam wherever the sketch happened to leave it; one layout put a
+    pallet slot at a bearing of +174 degrees and the set-down had no route
+    the controller was allowed to drive. An integrator mounts the robot
+    facing the work. So does the sketch builder, through this.
+    """
     from ..scene import Scene as _Scene
     from .base import classify_morphology
 
@@ -569,6 +580,8 @@ def spawn_robot(
     xform = UsdGeom.Xformable(get_stage().GetPrimAtPath(prim_path))
     xform.ClearXformOpOrder()
     xform.AddTranslateOp().Set(Gf.Vec3d(*as_vec3(position, name="position")))
+    if float(yaw):
+        xform.AddRotateZOp().Set(float(yaw))
 
     _register_articulation(scene, prim_path)
 
