@@ -18,11 +18,12 @@ from __future__ import annotations
 
 import ast
 import glob
-import inspect
 import hashlib
+import inspect
 import json
 import logging
 import os
+import time
 from typing import Any
 
 import numpy as np
@@ -59,10 +60,7 @@ def _writable_directory() -> str:
             return candidate
         except OSError as exc:
             problems.append(f"{candidate}: {exc.strerror or exc}")
-    raise ControllerError(
-        "No writable directory for controller scripts. Tried:\n  "
-        + "\n  ".join(problems)
-    )
+    raise ControllerError("No writable directory for controller scripts. Tried:\n  " + "\n  ".join(problems))
 
 
 class ControllerError(RuntimeError):
@@ -246,8 +244,7 @@ def write(name: str, code: str, *, directory: str | None = None) -> str:
         tree = ast.parse(code)
     except SyntaxError as exc:
         raise ControllerError(
-            f"Controller {name!r} has a syntax error on line {exc.lineno}: {exc.msg}. "
-            f"Nothing was written."
+            f"Controller {name!r} has a syntax error on line {exc.lineno}: {exc.msg}. Nothing was written."
         ) from exc
 
     functions = {node.name for node in tree.body if isinstance(node, ast.FunctionDef)}
@@ -363,8 +360,17 @@ def attach(script_path: str, *, graph_path: str = "/World/TaskGraph") -> str:
 
     # Without usePath the node ignores scriptPath and runs its inline source,
     # which is empty — a graph that is wired, valid, and does nothing.
+    #
+    # And NOT the script itself: a shim that loads it as a module of its own.
+    # Every ScriptNode on the stage executes its script in ONE shared Python
+    # namespace (measured: two nodes, two scripts, one id(globals())), so the
+    # second controller's module-level state overwrote the first's and both
+    # nodes drove the second arm while the first stood idle. The shim keeps a
+    # registry keyed by node path and dispatches setup/compute to the module
+    # that belongs to this node; redefining the shim's own functions from
+    # another node's shim is harmless because they are identical.
     og.Controller.set(node.get_attribute("inputs:usePath"), True)
-    og.Controller.set(node.get_attribute("inputs:scriptPath"), script_path)
+    og.Controller.set(node.get_attribute("inputs:scriptPath"), _isolating_shim(script_path, f"{graph_path}/ScriptNode"))
 
     # Confirm the trigger can actually fire, rather than trusting that it does.
     # A physics-step trigger in the wrong pipeline stage still builds, still
@@ -375,10 +381,7 @@ def attach(script_path: str, *, graph_path: str = "/World/TaskGraph") -> str:
     kind = str(trigger_node.get_type_name()) if trigger_node else ""
     if "OnPhysicsStep" in kind:
         try:
-            stage_ok = (
-                graph.get_pipeline_stage()
-                == og.GraphPipelineStage.GRAPH_PIPELINE_STAGE_ONDEMAND
-            )
+            stage_ok = graph.get_pipeline_stage() == og.GraphPipelineStage.GRAPH_PIPELINE_STAGE_ONDEMAND
         except Exception:  # noqa: BLE001 — an unreadable stage is not a failure
             stage_ok = True
         if not stage_ok:
@@ -395,6 +398,137 @@ def attach(script_path: str, *, graph_path: str = "/World/TaskGraph") -> str:
 
 
 # ── Reading the stage back ────────────────────────────────────────────────────
+
+
+def _isolating_shim(script_path: str, node_path: str) -> str:
+    """Write the per-node loader next to `script_path`; return its path.
+
+    The shim imports the controller under a module name derived from the
+    node path, so two controllers never share globals, and registers it in a
+    dict that lives in the (shared) ScriptNode namespace under the node's
+    own path. `setup`/`compute` look the caller's node up in that dict.
+    """
+    stem = os.path.splitext(os.path.basename(script_path))[0]
+    # Unique per attach, module name included. A node recreated at the same
+    # prim path with the same scriptPath kept its previous script: the rail
+    # layout ran the previous layout's controller (TAG s3, RAIL None) while
+    # the file on disk said otherwise. A path nobody has seen before cannot
+    # be reused, and a module name nobody has seen before cannot be found
+    # in sys.modules by mistake. Older shims of the same stem are removed.
+    stamp = f"{int(time.time() * 1000):x}"
+    module_name = "simliverse_ctl_" + "".join(ch if ch.isalnum() else "_" for ch in node_path.strip("/")) + "_" + stamp
+    directory = os.path.dirname(script_path)
+    for old in glob.glob(os.path.join(directory, "__pycache__", f"{stem}.*.pyc")):
+        try:
+            os.remove(old)
+        except OSError:
+            pass
+    for old in glob.glob(os.path.join(directory, f"{stem}__node*.py")):
+        try:
+            os.remove(old)
+        except OSError:
+            pass
+    shim_path = os.path.join(directory, f"{stem}__node_{stamp}.py")
+    code = SHIM_TEMPLATE.format(
+        node_path=node_path,
+        script_path=script_path,
+        module_name=module_name,
+        shim_log=os.path.join(os.path.dirname(script_path), "shim.log"),
+    )
+    with open(shim_path, "w", encoding="utf-8") as handle:
+        handle.write(code)
+    return shim_path
+
+
+#: The loader every ScriptNode runs instead of its controller. See
+#: `_isolating_shim`. Module-level names here are shared with every other
+#: node's shim on the stage, which is exactly why the only state kept is a
+#: dict keyed by node path.
+SHIM_TEMPLATE = """# generated by simliverse_sim.controller.attach -- one module per node
+#
+# How a ScriptNode runs this file (measured, Isaac Sim 6.0): exec with a
+# fresh LOCALS dict and one GLOBALS dict shared by every ScriptNode on the
+# stage, then the locals are copied into that shared globals. So: nothing
+# defined here may be called from a function during this top-level run
+# (it cannot see the imports yet), every top-level name is later
+# overwritten by the next node's shim (harmless: they are identical), and
+# the only state that must survive is the registry, created with
+# setdefault on the shared dict so all shims see one and the same.
+import sys as _sys
+import traceback as _tb
+import types as _types
+
+_SIMLIVERSE_NODE_MODULES = globals().setdefault("_SIMLIVERSE_NODE_MODULES", {{}})
+_SIMLIVERSE_SHIM_LOG = {shim_log!r}
+
+try:
+    # From SOURCE, never through importlib's loader: SourceFileLoader served
+    # a stale __pycache__ bytecode for a controller rewritten between
+    # builds (measured: file said TAG None and 12 cartons, the module it
+    # produced said TAG s3 and 4), and three layouts ran a previous
+    # layout's controller.
+    with open({script_path!r}, "r", encoding="utf-8") as _src:
+        _simliverse_code = compile(_src.read(), {script_path!r}, "exec")
+    _simliverse_mod = _types.ModuleType({module_name!r})
+    _simliverse_mod.__file__ = {script_path!r}
+    _sys.modules[{module_name!r}] = _simliverse_mod
+    exec(_simliverse_code, _simliverse_mod.__dict__)
+    _SIMLIVERSE_NODE_MODULES[{node_path!r}] = _simliverse_mod
+    with open(_SIMLIVERSE_SHIM_LOG, "a", encoding="utf-8") as _h:
+        _h.write("loaded %s for %s" % ({script_path!r}, {node_path!r}) + chr(10))
+except Exception:
+    with open(_SIMLIVERSE_SHIM_LOG, "a", encoding="utf-8") as _h:
+        _h.write("LOAD FAILED for %s: %s" % ({node_path!r}, _tb.format_exc()) + chr(10))
+
+
+def _simliverse_note(what):
+    try:
+        with open(_SIMLIVERSE_SHIM_LOG, "a", encoding="utf-8") as handle:
+            handle.write(what + chr(10))
+    except Exception:
+        pass
+
+
+def _simliverse_node_path(db):
+    node = getattr(db, "node", None)
+    for name in ("get_prim_path", "get_path"):
+        getter = getattr(node, name, None)
+        if getter is not None:
+            try:
+                return str(getter())
+            except Exception:
+                pass
+    try:
+        return str(db.abi_node.get_prim_path())
+    except Exception:
+        _simliverse_note("no node path on db: %s" % type(db))
+        return None
+
+
+def _simliverse_module(db):
+    return _SIMLIVERSE_NODE_MODULES.get(_simliverse_node_path(db))
+
+
+def setup(db):
+    module = _simliverse_module(db)
+    if module is not None and hasattr(module, "setup"):
+        return module.setup(db)
+
+
+def compute(db):
+    module = _simliverse_module(db)
+    if module is None:
+        _simliverse_note("compute: no module registered for %r (have %r)"
+                         % (_simliverse_node_path(db), list(_SIMLIVERSE_NODE_MODULES)))
+        return True
+    return module.compute(db)
+
+
+def cleanup(db):
+    module = _simliverse_module(db)
+    if module is not None and hasattr(module, "cleanup"):
+        return module.cleanup(db)
+"""
 
 
 def _script_node(graph_path: str) -> Any:
@@ -678,20 +812,19 @@ def deliver(
             + "\n\nor deliver to that same graph_path to replace it."
         )
     attach(path, graph_path=graph_path)
-    report = verify(seconds=seconds, objects=objects, robots=robots,
-                    undisturbed=undisturbed, traveled=traveled, posed=posed)
+    report = verify(
+        seconds=seconds, objects=objects, robots=robots, undisturbed=undisturbed, traveled=traveled, posed=posed
+    )
     report["controller_path"] = path
     report["graph_path"] = graph_path
     report["record_path"] = _record(report, script_path=path, graph_path=graph_path)
     if report.get("disturbed"):
         detail = "; ".join(
-            "%s moved %s m, touched by %s"
-            % (path, d["moved_by"], ", ".join(d["touched_by"]) or "nothing recorded")
+            "%s moved %s m, touched by %s" % (path, d["moved_by"], ", ".join(d["touched_by"]) or "nothing recorded")
             for path, d in report["disturbed"].items()
         )
         report["hint"] = (
-            detail
-            + ". These were named as things the task must not move, and the "
+            detail + ". These were named as things the task must not move, and the "
             "arm reached its targets and hit them on the way. That is a routing "
             "problem rather than a target problem: register them with "
             "add_obstacle before the motion that passes them, and check "
@@ -714,7 +847,8 @@ def deliver(
         ]
         report["hint"] = (
             "The scene did not do the task, and the robot has defects that would "
-            "account for it:" + "".join("\n  " + line for line in faults)
+            "account for it:"
+            + "".join("\n  " + line for line in faults)
             + "\n\nThese are faults in the asset, not in the controller. Do not "
             "write code around them. Report the task as blocked, quote these "
             "measurements, and say what would have to change about the robot for "
@@ -799,9 +933,7 @@ def _is_articulation(path: str) -> bool:
     return bool(prim.IsValid() and prim.HasAPI(UsdPhysics.ArticulationRootAPI))
 
 
-def _split_by_kind(
-    objects: list[str] | None, robots: list[str] | None
-) -> tuple[list[str], list[str], list[str]]:
+def _split_by_kind(objects: list[str] | None, robots: list[str] | None) -> tuple[list[str], list[str], list[str]]:
     """Sort requested paths into rigid bodies and articulations.
 
     A robot path in `objects` was originally an error, because measuring one as
@@ -845,9 +977,7 @@ def _sample(objects: dict[str, Any], robots: dict[str, Any]) -> dict[str, Any]:
             "contacts": sorted({c["body"] for c in obj.contacts()}),
         }
     for path, robot in robots.items():
-        state[path] = {
-            "joint_positions": np.asarray(robot.joint_positions, dtype=float).round(4).tolist()
-        }
+        state[path] = {"joint_positions": np.asarray(robot.joint_positions, dtype=float).round(4).tolist()}
     return state
 
 
@@ -904,9 +1034,7 @@ def verify(
         try:
             handles_objects[path] = RigidObject(path, scene=scene)
         except ValueError as exc:
-            raise ControllerError(
-                f"objects={path!r} cannot be measured as a rigid body.\n\n{exc}"
-            ) from exc
+            raise ControllerError(f"objects={path!r} cannot be measured as a rigid body.\n\n{exc}") from exc
     # `attach` rather than `Robot(...)`: the plain constructor gives a base
     # handle with no gripper and no morphology-specific checks, so a robot
     # measured here reported no asset problems while `describe()` on the same
@@ -918,11 +1046,7 @@ def verify(
     before = _sample(handles_objects, handles_robots)
     before_still = {p: np.asarray(o.position, dtype=float) for p, o in keep_still.items()}
     before_pose = {p: np.asarray(r.joint_positions, dtype=float) for p, r in posers.items()}
-    before_travel = {
-        p: (_body_position(r),
-            np.asarray(r.joint_positions, dtype=float))
-        for p, r in movers.items()
-    }
+    before_travel = {p: (_body_position(r), np.asarray(r.joint_positions, dtype=float)) for p, r in movers.items()}
 
     scene.play()
     start = timeline.get_current_time()
@@ -948,9 +1072,7 @@ def verify(
             # into a state you can look at. Filtered to the robot, because a
             # body resting on the ground is in contact from the first frame and
             # would otherwise stamp every obstacle at t=0.
-            if path not in first_touch and any(
-                b.startswith(r) for b in bodies for r in attributable
-            ):
+            if path not in first_touch and any(b.startswith(r) for b in bodies for r in attributable):
                 first_touch[path] = round(timeline.get_current_time() - start, 2)
         ticks += 1
         if ticks > 200_000:  # a stopped timeline would otherwise spin forever
@@ -964,16 +1086,9 @@ def verify(
         path
         for path in before
         if "position" in before[path]
-        and float(
-            np.linalg.norm(
-                np.asarray(after[path]["position"]) - np.asarray(before[path]["position"])
-            )
-        )
-        > 0.005
+        and float(np.linalg.norm(np.asarray(after[path]["position"]) - np.asarray(before[path]["position"]))) > 0.005
     }
-    at_rest = all(
-        entry.get("speed", 0.0) < 0.05 for entry in after.values() if "speed" in entry
-    )
+    at_rest = all(entry.get("speed", 0.0) < 0.05 for entry in after.values() if "speed" in entry)
 
     # Anything that left the world did not "move" in any sense worth reporting.
     # Motion alone was the whole test until a robot with a corrupted articulation
@@ -981,8 +1096,7 @@ def verify(
     diverged = sorted(
         path
         for path, entry in after.items()
-        if "position" in entry
-        and (entry["position"][2] < -1.0 or max(abs(v) for v in entry["position"]) > 50.0)
+        if "position" in entry and (entry["position"][2] < -1.0 or max(abs(v) for v in entry["position"]) > 50.0)
     )
 
     # What the task promised not to move. Displacement is the fact; the robot
@@ -1015,9 +1129,7 @@ def verify(
         now_base = _body_position(robot)
         now_joints = np.asarray(robot.joint_positions, dtype=float)
         distance = float(np.linalg.norm(now_base[:2] - start_base[:2]))
-        joint_delta = (
-            float(np.max(np.abs(now_joints - start_joints))) if now_joints.size else 0.0
-        )
+        joint_delta = float(np.max(np.abs(now_joints - start_joints))) if now_joints.size else 0.0
         travelled[path] = {
             "distance": round(distance, 4),
             "joints_moved": round(joint_delta, 4),
@@ -1071,8 +1183,7 @@ def verify(
     # evidence exists at the moment of failure and was otherwise discarded,
     # leaving the author to debug a controller that was never the problem.
     faults: dict[str, Any] = {}
-    for path, robot in (list(handles_robots.items()) + list(movers.items())
-                        + list(posers.items())):
+    for path, robot in list(handles_robots.items()) + list(movers.items()) + list(posers.items()):
         try:
             found = robot.asset_problems()
         except Exception:  # noqa: BLE001 — a missing check is not itself a fault

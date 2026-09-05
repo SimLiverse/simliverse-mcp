@@ -37,6 +37,50 @@ def register(registry: Dict[str, Any], adapter: IsaacAdapterBase) -> None:
     registry["sensors.get_point_cloud"] = lambda **p: get_point_cloud(adapter, **p)
 
 
+#: Live sensors, by the prim path they own.
+#:
+#: Kept because a sensor outlives the call that made it and keeps re-authoring
+#: its prim on every render tick. `create_camera` used to drop the reference on
+#: the floor, which made the camera permanently undeletable: `delete_object`
+#: removed the prim, the sensor put it back within five frames, and every tool
+#: involved reported success. A session accumulated cameras nobody could clear.
+_SENSORS: Dict[str, Any] = {}
+
+
+def release_all_sensors() -> list:
+    """Release every sensor we own. `scene.clear` calls this before deleting
+    prims, because a live sensor re-creates its camera within five frames of
+    the prim going -- which is how a "cleared" stage grew cameras back."""
+    return [path for path in list(_SENSORS) if release_sensor(path)]
+
+
+def release_sensor(prim_path: str) -> bool:
+    """Shut down the sensor owning `prim_path`, if we made one.
+
+    Called before removing a prim. Returns whether there was anything to
+    release, so the caller can say so rather than guess.
+    """
+    sensor = _SENSORS.pop(prim_path, None)
+    if sensor is None:
+        return False
+    # No single teardown verb is guaranteed across Isaac versions, so try the
+    # ones that exist and ignore the rest. What matters is dropping our
+    # reference and detaching anything that pulls frames.
+    for method in ("detach_annotators", "remove_annotators", "post_reset"):
+        try:
+            getattr(sensor, method)()
+        except Exception:
+            pass
+    del sensor
+    try:
+        import gc
+
+        gc.collect()
+    except Exception:
+        pass
+    return True
+
+
 def create_camera(
     adapter: IsaacAdapterBase,
     prim_path: str = "/World/Camera",
@@ -46,7 +90,10 @@ def create_camera(
 ) -> Dict[str, Any]:
     try:
         res = tuple(resolution) if resolution else (1280, 720)
-        _cam = adapter.create_camera(prim_path, resolution=res)
+        # Replace rather than stack: creating a camera twice at the same path
+        # otherwise leaves the first sensor alive and fighting the second.
+        release_sensor(prim_path)
+        _SENSORS[prim_path] = adapter.create_camera(prim_path, resolution=res)
         if position or rotation:
             adapter.set_prim_transform(prim_path, position=position, rotation=rotation)
         return {"status": "success", "message": f"Camera created at {prim_path}", "prim_path": prim_path}

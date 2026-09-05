@@ -23,13 +23,13 @@ NAMES = ["WARMUP", "INIT", "DRIVE", "HALT", "DONE", "FAILED"]
 TRACE_PATH = "/tmp/ctl_trace.log"
 
 ROUTE = [
-    [0.70, 0.80],   # line up short of A
-    [1.70, 0.80],   # straight past A
+    [0.70, 0.80],  # line up short of A
+    [1.70, 0.80],  # straight past A
     [2.30, -0.20],  # swing down, clear of B
     [3.30, -0.20],  # straight past B
-    [3.90, 0.80],   # swing up, clear of C
-    [4.90, 0.80],   # straight past C
-    [5.20, 0.00],   # in to the goal
+    [3.90, 0.80],  # swing up, clear of C
+    [4.90, 0.80],  # straight past C
+    [5.20, 0.00],  # in to the goal
 ]
 WALLS = ("/World/WallA", "/World/WallB", "/World/WallC")
 WARMUP_FRAMES = 30
@@ -67,8 +67,7 @@ def _watch_walls():
     for wall in WALLS:
         if _rover.touching(wall):
             _bumped = True
-            _trace("  BUMPED %s on leg %d at %s"
-                   % (wall, _leg, [round(float(v), 3) for v in _rover.base_position[:2]]))
+            _trace("  BUMPED %s on leg %d at %s" % (wall, _leg, [round(float(v), 3) for v in _rover.base_position[:2]]))
             return
 
 
@@ -133,8 +132,7 @@ def _compute(db=None):
 
     if _state == DRIVE:
         if _driver.step(ROUTE[_leg]) or _frame > LIMIT:
-            _trace("  leg %d done at %s"
-                   % (_leg, [round(float(v), 3) for v in _rover.base_position[:2]]))
+            _trace("  leg %d done at %s" % (_leg, [round(float(v), 3) for v in _rover.base_position[:2]]))
             if _leg + 1 < len(ROUTE):
                 _leg += 1
                 _go(DRIVE)

@@ -486,10 +486,7 @@ class USDSearch3d:
                 f"{response.text[:300]}"
             )
         if response.status_code >= 400:
-            raise USDSearchUnavailable(
-                f"USD Search returned HTTP {response.status_code}: "
-                f"{response.text[:300]}"
-            )
+            raise USDSearchUnavailable(f"USD Search returned HTTP {response.status_code}: {response.text[:300]}")
 
         payload = response.json()
         # Documented as a list of results; tolerate an object wrapper rather than
@@ -501,8 +498,7 @@ class USDSearch3d:
                     break
         if not isinstance(payload, list):
             raise USDSearchUnavailable(
-                f"USD Search returned {type(payload).__name__}, not a list of "
-                f"results: {str(payload)[:300]}"
+                f"USD Search returned {type(payload).__name__}, not a list of results: {str(payload)[:300]}"
             )
         if not payload:
             raise USDSearchNoResults(
@@ -514,9 +510,7 @@ class USDSearch3d:
 
         first = payload[0]
         if not isinstance(first, dict) or "url" not in first:
-            raise USDSearchUnavailable(
-                f"USD Search result has no 'url' field: {str(first)[:300]}"
-            )
+            raise USDSearchUnavailable(f"USD Search result has no 'url' field: {str(first)[:300]}")
         url = first["url"]
 
         # Convert S3 URL to HTTPS URL if needed

@@ -449,8 +449,8 @@ def test_a_recorder_hears_steps_run_through_a_different_scene_handle():
     robot = FakeRobot()
     robot.scene = SharedScene()
 
-    rec = JointRecorder(robot, scene=SharedScene()).start()   # the harness's handle
-    another = SharedScene()                                    # the agent's handle
+    rec = JointRecorder(robot, scene=SharedScene()).start()  # the harness's handle
+    another = SharedScene()  # the agent's handle
     for _ in range(6):
         robot.joint_positions = robot.joint_positions + 0.01
         another.step(1)

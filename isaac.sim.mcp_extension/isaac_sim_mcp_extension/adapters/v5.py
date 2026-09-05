@@ -157,10 +157,48 @@ class IsaacAdapterV5(IsaacAdapterBase):
         rot = _pick(rotation, "rotation", (0.0, 0.0, 0.0))
         scl = _pick(scale, "scale", (1.0, 1.0, 1.0))
 
-        xformable.ClearXformOpOrder()
-        xformable.AddTranslateOp(precision=UsdGeom.XformOp.PrecisionDouble).Set(Gf.Vec3d(*pos))
-        xformable.AddRotateXYZOp(precision=UsdGeom.XformOp.PrecisionDouble).Set(Gf.Vec3d(*rot))
-        xformable.AddScaleOp(precision=UsdGeom.XformOp.PrecisionDouble).Set(Gf.Vec3d(*scl))
+        # Reuse the ops already authored rather than clearing and re-adding.
+        #
+        # `ClearXformOpOrder()` empties the *order* but leaves the attributes
+        # authored, so the following `AddTranslateOp()` raises "The xformOp
+        # 'xformOp:translate' already exists in xformOpOrder" on any prim that
+        # has been transformed before. Every Kit camera is such a prim, which is
+        # why `transform_object` was unusable on /OmniverseKit_Persp -- and why
+        # an agent trying to look from a different angle got an exception
+        # instead of a viewpoint.
+        existing = {op.GetOpName(): op for op in xformable.GetOrderedXformOps()}
+
+        def _op(name: str, add):
+            # Match on the op *prefix*, not the exact name. A referenced asset
+            # can author `xformOp:scale:unitsResolve` (USD's units fix-up) or a
+            # differently-precisioned op, and looking for the bare name misses
+            # it -- then `AddScaleOp()` raises and the whole call fails. That is
+            # how a 60-metre crate survived being told to scale to 0.6m: the
+            # transform errored and the caller was told nothing.
+            op = existing.get(name)
+            if op is None:
+                for op_name, candidate in existing.items():
+                    if op_name.startswith(name + ":") or op_name == name:
+                        op = candidate
+                        break
+            if op is not None:
+                return op
+            try:
+                return add()
+            except Exception as exc:
+                raise ValueError(
+                    f"Could not author {name} on {prim_path}: {exc}. Existing ops: {sorted(existing)}"
+                ) from exc
+
+        _op("xformOp:translate", lambda: xformable.AddTranslateOp(precision=UsdGeom.XformOp.PrecisionDouble)).Set(
+            Gf.Vec3d(*pos)
+        )
+        _op("xformOp:rotateXYZ", lambda: xformable.AddRotateXYZOp(precision=UsdGeom.XformOp.PrecisionDouble)).Set(
+            Gf.Vec3d(*rot)
+        )
+        _op("xformOp:scale", lambda: xformable.AddScaleOp(precision=UsdGeom.XformOp.PrecisionDouble)).Set(
+            Gf.Vec3d(*scl)
+        )
 
     def get_prim_transform(self, prim_path: str) -> Dict[str, Any]:
         from pxr import UsdGeom
@@ -172,9 +210,27 @@ class IsaacAdapterV5(IsaacAdapterBase):
         xformable = UsdGeom.Xformable(prim)
         local_transform = xformable.GetLocalTransformation()
         translation = local_transform.ExtractTranslation()
-        return {
+
+        # Rotation and scale are read back too, and that is load-bearing rather
+        # than informational. `set_prim_transform` merges what the caller
+        # supplied with what is already there by asking this method -- so while
+        # this returned position alone, every partial update silently reset the
+        # other two to identity. `transform_object(path, position=[...])` on a
+        # tilted ramp flattened it, and reported success. The merge was already
+        # written; it just had nothing to merge with.
+        result: Dict[str, Any] = {
             "position": [translation[0], translation[1], translation[2]],
         }
+        for op in xformable.GetOrderedXformOps():
+            name = op.GetOpName()
+            value = op.Get()
+            if value is None:
+                continue
+            if name == "xformOp:rotateXYZ":
+                result["rotation"] = [float(value[0]), float(value[1]), float(value[2])]
+            elif name == "xformOp:scale":
+                result["scale"] = [float(value[0]), float(value[1]), float(value[2])]
+        return result
 
     def list_prims(self, root_path: str = "/", prim_type: Optional[str] = None) -> List[Dict[str, str]]:
         stage = self.get_stage()
@@ -200,16 +256,48 @@ class IsaacAdapterV5(IsaacAdapterBase):
             "transform": transform,
             "children": children,
         }
-        if prim.GetTypeName() in ("Cube", "Sphere", "Cylinder", "Cone", "Capsule"):
-            try:
-                actual_size, _bbox = self.get_prim_actual_size(prim_path)
-                info["actual_size"] = actual_size
-            except Exception:
-                pass
+        # Measure everything, not only the five analytic primitives.
+        #
+        # A referenced asset -- every pallet, conveyor and robot -- composes to
+        # an Xform, so this used to return `actual_size: None` for exactly the
+        # prims whose size nobody can predict. The agent then had no way to
+        # notice that a crate had come in at ten times the size of the cell it
+        # was placed in: `load_usd` said success, `get_prim_info` said nothing,
+        # and the mistake was only visible in a render.
+        try:
+            actual_size, bbox = self.get_prim_actual_size(prim_path)
+            info["actual_size"] = actual_size
+            info["bbox"] = {"min": bbox[0], "max": bbox[1]}
+        except Exception:
+            pass
         return info
 
+    def _world_bound_size(self, prim: Any) -> Tuple[List[float], Tuple[List[float], List[float]]]:
+        """Size in metres from the composed world bound, for any prim.
+
+        The analytic paths below are exact for the primitives they know, and
+        useless for a referenced asset, whose geometry lives in descendants.
+        `BBoxCache` walks the composed hierarchy, which is the only thing that
+        can answer "how big is this pallet" once it is on the stage.
+        """
+        from pxr import Usd, UsdGeom
+
+        cache = UsdGeom.BBoxCache(
+            Usd.TimeCode.Default(),
+            [UsdGeom.Tokens.default_, UsdGeom.Tokens.render],
+            useExtentsHint=True,
+        )
+        aligned = cache.ComputeWorldBound(prim).ComputeAlignedRange()
+        if aligned.IsEmpty():
+            raise ValueError(f"No renderable geometry under {prim.GetPath()}")
+        low, high = aligned.GetMin(), aligned.GetMax()
+        return (
+            [float(high[i] - low[i]) for i in range(3)],
+            ([float(v) for v in low], [float(v) for v in high]),
+        )
+
     def get_prim_actual_size(self, prim_path: str) -> Tuple[List[float], Tuple[List[float], List[float]]]:
-        """Return actual dimensions and bounding box for a geometric prim."""
+        """Return actual dimensions and bounding box for a prim."""
         from pxr import UsdGeom
 
         stage = self.get_stage()
@@ -218,6 +306,8 @@ class IsaacAdapterV5(IsaacAdapterBase):
             raise ValueError(f"Prim not found: {prim_path}")
 
         prim_type = prim.GetTypeName()
+        if prim_type not in ("Cube", "Sphere", "Cylinder", "Cone", "Capsule"):
+            return self._world_bound_size(prim)
 
         # Read scale from xform
         xformable = UsdGeom.Xformable(prim)
@@ -674,9 +764,31 @@ class IsaacAdapterV5(IsaacAdapterBase):
         return Camera(prim_path=prim_path, resolution=resolution, **kwargs)
 
     def capture_camera_image(self, prim_path: str) -> np.ndarray:
+        """RGBA pixels from an existing camera prim.
+
+        `initialize()` is not optional and its absence is silent: a freshly
+        constructed `Camera` hands back an empty array from `get_rgba()`, which
+        surfaced as `capture_image` reporting `status: success` with a null
+        shape -- a verb that claims to have taken a photograph and returns
+        nothing. It also needs a tick after initialising before the first frame
+        exists.
+        """
         from isaacsim.sensors.camera import Camera
 
         cam = Camera(prim_path=prim_path)
+        try:
+            cam.initialize()
+        except Exception:
+            # Already initialised cameras raise rather than no-op. That is fine
+            # -- an initialised camera is exactly what we want.
+            pass
+
+        import omni.kit.app
+
+        app = omni.kit.app.get_app()
+        for _ in range(3):
+            app.update()
+
         return cam.get_rgba()
 
     def create_lidar(self, prim_path: str, config: Optional[str] = None, **kwargs) -> Any:
@@ -950,6 +1062,7 @@ class IsaacAdapterV5(IsaacAdapterBase):
             try:
                 import isaacsim
                 import isaacsim.core as isaac_core
+
                 sys.modules["omni.isaac"] = isaacsim
                 sys.modules["omni.isaac.core"] = isaac_core
                 sys.modules["omni.isaac.core.api"] = isaac_core.api
@@ -962,8 +1075,8 @@ class IsaacAdapterV5(IsaacAdapterBase):
         usd_utils_mod = None
         prim_utils_mod = None
         try:
-            import isaacsim.core.utils.stage as usd_utils_mod
             import isaacsim.core.utils.prims as prim_utils_mod
+            import isaacsim.core.utils.stage as usd_utils_mod
         except Exception:
             pass
 

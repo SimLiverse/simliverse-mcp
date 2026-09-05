@@ -63,11 +63,16 @@ def register_tools(mcp: FastMCP, get_connection: "Callable[[], IsaacConnection]"
             return json.dumps({"status": "error", "message": str(e)})
 
     @mcp.tool("clear_scene")
-    def clear_scene(keep_physics: bool = False) -> str:
-        """Remove all prims from the scene.
+    def clear_scene(keep_physics: bool = True) -> str:
+        """Empty the stage and leave it ready for the next cell.
+
+        Stops the timeline, releases sensors, and removes everything under
+        /World except the physics scene, physics materials and ground plane,
+        which later builds reuse. Returns the paths it removed.
 
         Args:
-            keep_physics: If True, keep physics scene prims.
+            keep_physics: Pass False to remove the physics configuration too;
+                the next build must then recreate it before dynamics work.
         """
         try:
             conn = get_connection()

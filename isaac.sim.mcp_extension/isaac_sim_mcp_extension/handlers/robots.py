@@ -107,9 +107,12 @@ def list_robots(
         if not search:
             return True
         needle = search.lower().replace("_", "").replace("-", "")
-        haystack = " ".join(
-            [key, str(spec.get("description", "")), str(spec.get("manufacturer", ""))]
-        ).lower().replace("_", "").replace("-", "")
+        haystack = (
+            " ".join([key, str(spec.get("description", "")), str(spec.get("manufacturer", ""))])
+            .lower()
+            .replace("_", "")
+            .replace("-", "")
+        )
         return needle in haystack
 
     selected = {k: v for k, v in library.items() if matches(k, v)}

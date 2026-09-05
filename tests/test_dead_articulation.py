@@ -118,7 +118,8 @@ def _no_isaac(monkeypatch):
     import simliverse_sim.robots.base as base
 
     monkeypatch.setattr(
-        base, "single_articulation",
+        base,
+        "single_articulation",
         lambda path: _current["robot"]._rebind(),
     )
     yield

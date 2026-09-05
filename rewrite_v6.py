@@ -1,5 +1,3 @@
-import os
-
 v6_path = "isaac.sim.mcp_extension/isaac_sim_mcp_extension/adapters/v6.py"
 
 content = '''# MIT License
@@ -50,7 +48,7 @@ class IsaacAdapterV6(IsaacAdapterBase):
             self._engine = SimulationManager.get_active_physics_engine()
         except ImportError:
             self._engine = "unknown"
-            
+
         try:
             import isaacsim.core.version
             self._isaacsim_version = isaacsim.core.version.get_version()
@@ -399,11 +397,11 @@ class IsaacAdapterV6(IsaacAdapterBase):
             art = Articulation(prim_paths=[prim_path])
             if not art.initialized:
                 art.initialize()
-            
+
             # Articulation is batched (takes lists of prim paths), so we pass [[pos]]
             if joint_indices:
                 art.set_joint_positions(
-                    positions=wp.array([positions], dtype=wp.float32), 
+                    positions=wp.array([positions], dtype=wp.float32),
                     joint_indices=wp.array(joint_indices, dtype=wp.int32)
                 )
             else:
@@ -531,7 +529,7 @@ class IsaacAdapterV6(IsaacAdapterBase):
             if targets is not None and len(targets) > 0:
                 runtime_targets = targets.numpy()[0].tolist()
         except Exception:
-            pass 
+            pass
 
         joints_info = []
         for desc in Usd.PrimRange(prim):
@@ -807,14 +805,14 @@ class IsaacAdapterV6(IsaacAdapterBase):
 
         if not os.path.isfile(urdf_path):
             raise FileNotFoundError(f"URDF file not found: {urdf_path}")
-            
+
         config = URDFImporterConfig(urdf_path=urdf_path, dest_path=prim_path, **kwargs)
         importer = URDFImporter(config)
         importer.import_urdf()
         return {"prim_path": prim_path}
 
     # ── Simulation ─────────────────────────────────────────
-    
+
     def _ensure_physics_world(self) -> None:
         from isaacsim.core.simulation_manager import SimulationManager
         try:
@@ -852,10 +850,10 @@ class IsaacAdapterV6(IsaacAdapterBase):
                 try:
                     physics_state = self.get_physics_state(path)
                     state = {"prim_path": path}
-                    
+
                     transform = self.get_prim_transform(path)
                     state["position"] = transform.get("position", [0, 0, 0])
-                    
+
                     state["linear_velocity"] = physics_state.get("linear_velocity", [0, 0, 0])
                     state["angular_velocity"] = physics_state.get("angular_velocity", [0, 0, 0])
                     prim_states.append(state)
@@ -880,7 +878,7 @@ class IsaacAdapterV6(IsaacAdapterBase):
     def get_simulation_state(self) -> Dict[str, Any]:
         import omni.timeline
         from isaacsim.core.simulation_manager import SimulationManager
-        
+
         timeline = omni.timeline.get_timeline_interface()
         sim = SimulationManager()
 

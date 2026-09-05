@@ -119,6 +119,38 @@ def _ensure_physics_scene_prim(path: str = "/World/PhysicsScene") -> None:
         logger.debug("Could not ensure a physics scene at %s", path, exc_info=True)
 
 
+def _purge_expired_physics_scene_apis() -> list:
+    """Drop SimulationManager's schema handles onto prims that no longer exist.
+
+    `SimulationManager._physics_scene_apis` caches a `PhysxSceneAPI` per physics
+    scene, keyed by path. Delete the prim and the cache keeps the handle: the
+    very next `get_physics_dt()` then dies on "Accessed schema on invalid prim"
+    -- reached from `World.initialize_physics()`, so rebuilding the World alone
+    does not recover. Measured after a scene clear that removed
+    `/World/PhysicsScene`: re-defining the prim at the same path does not
+    refresh the cache, because the cached object wraps the *old* prim.
+
+    Re-registration is automatic once the stale entry is gone -- the manager
+    tracks physics scenes through USD notices, so the next defined scene is
+    picked up on its own.
+    """
+    try:
+        from isaacsim.core.simulation_manager import SimulationManager
+
+        apis = getattr(SimulationManager, "_physics_scene_apis", None)
+        if not apis:
+            return []
+        dead = [path for path, api in list(apis.items()) if not api.GetPrim().IsValid()]
+        for path in dead:
+            apis.pop(path, None)
+        if dead:
+            logger.warning("Purged expired physics-scene handles: %s", dead)
+        return dead
+    except Exception:  # noqa: BLE001 -- healing must never be the thing that raises
+        logger.debug("Could not inspect SimulationManager's scene cache", exc_info=True)
+        return []
+
+
 def get_world(physics_dt: float = 1.0 / 60.0) -> Any:
     """Return the singleton `World`, with physics genuinely initialized.
 
@@ -148,6 +180,7 @@ def get_world(physics_dt: float = 1.0 / 60.0) -> Any:
         # fresh one — the alternative is every later call failing on a corpse.
         logger.warning("World.initialize_physics() failed (%s); rebuilding", exc)
         _drop_world_singleton(World)
+        _purge_expired_physics_scene_apis()
         _ensure_physics_scene_prim()
         world = World(physics_dt=physics_dt, stage_units_in_meters=1.0)
         world.initialize_physics()
@@ -322,7 +355,4 @@ def as_quat(value: Any, *, name: str = "orientation") -> np.ndarray:
             ],
             dtype=float,
         )
-    raise ValueError(
-        f"{name} must be a quaternion [w,x,y,z], euler degrees [x,y,z], or a "
-        f"Gf.Quat; got {value!r}"
-    )
+    raise ValueError(f"{name} must be a quaternion [w,x,y,z], euler degrees [x,y,z], or a Gf.Quat; got {value!r}")

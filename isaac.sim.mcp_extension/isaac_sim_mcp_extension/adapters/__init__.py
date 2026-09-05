@@ -27,15 +27,17 @@
 def _detect_isaacsim_major_version() -> int:
     try:
         import isaacsim.core.version
+
         ver_str = isaacsim.core.version.get_version()
         if ver_str:
             return int(ver_str.split(".")[0])
     except Exception:
         pass
-    
+
     # Fallback: check file system for VERSION
     import os
     import sys
+
     for path in sys.path:
         if "isaac-sim" in path.lower() and os.path.exists(os.path.join(path, "VERSION")):
             try:
@@ -47,11 +49,14 @@ def _detect_isaacsim_major_version() -> int:
                 pass
     return 5  # default to 5
 
+
 def get_adapter():
     """Return the appropriate adapter for the current Isaac Sim version."""
     if _detect_isaacsim_major_version() >= 6:
         from .v6 import IsaacAdapterV6
+
         return IsaacAdapterV6()
-    
+
     from .v5 import IsaacAdapterV5
+
     return IsaacAdapterV5()

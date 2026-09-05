@@ -52,20 +52,32 @@ class RobotAsset:
 CATALOGUE: dict[str, RobotAsset] = {
     # ── Manipulators ──────────────────────────────────────────────────────────
     "franka": RobotAsset(
-        "franka", "/Isaac/Robots/FrankaRobotics/FrankaPanda/franka.usd", Morphology.MANIPULATOR,
-        "Franka", "7-DOF arm with a parallel gripper.",
+        "franka",
+        "/Isaac/Robots/FrankaRobotics/FrankaPanda/franka.usd",
+        Morphology.MANIPULATOR,
+        "Franka",
+        "7-DOF arm with a parallel gripper.",
     ),
     "fr3": RobotAsset(
-        "fr3", "/Isaac/Robots/FrankaRobotics/FrankaFR3/fr3.usd", Morphology.MANIPULATOR,
-        "FR3", "Franka Research 3 — 7-DOF arm with a parallel gripper.",
+        "fr3",
+        "/Isaac/Robots/FrankaRobotics/FrankaFR3/fr3.usd",
+        Morphology.MANIPULATOR,
+        "FR3",
+        "Franka Research 3 — 7-DOF arm with a parallel gripper.",
     ),
     "ur10": RobotAsset(
-        "ur10", "/Isaac/Robots/UniversalRobots/ur10/ur10.usd", Morphology.MANIPULATOR,
-        "UR10", "6-DOF arm, no gripper by default.",
+        "ur10",
+        "/Isaac/Robots/UniversalRobots/ur10/ur10.usd",
+        Morphology.MANIPULATOR,
+        "UR10",
+        "6-DOF arm, no gripper by default.",
     ),
     "ur5": RobotAsset(
-        "ur5", "/Isaac/Robots/UniversalRobots/ur5/ur5.usd", Morphology.MANIPULATOR,
-        "UR5", "6-DOF arm, no gripper by default.",
+        "ur5",
+        "/Isaac/Robots/UniversalRobots/ur5/ur5.usd",
+        Morphology.MANIPULATOR,
+        "UR5",
+        "6-DOF arm, no gripper by default.",
     ),
     # The key said iiwa, the asset is a KR210, and the motion config named a
     # third robot — `Kuka_iiwa7`, which Isaac does not ship. The result was an
@@ -74,65 +86,104 @@ CATALOGUE: dict[str, RobotAsset] = {
     # configuration matches". `Kuka_KR210` is supported; the asset was right all
     # along and only the config name was wrong.
     "kuka_kr210": RobotAsset(
-        "kuka_kr210", "/Isaac/Robots/Kuka/KR210_L150/kr210_l150.usd", Morphology.MANIPULATOR,
-        "Kuka_KR210", "6-DOF industrial arm, 150 kg payload. No gripper by default.",
+        "kuka_kr210",
+        "/Isaac/Robots/Kuka/KR210_L150/kr210_l150.usd",
+        Morphology.MANIPULATOR,
+        "Kuka_KR210",
+        "6-DOF industrial arm, 150 kg payload. No gripper by default.",
     ),
     # No motion config: Lula ships 21 and `Kinova_Gen3` is not one of them. It
     # was seeded here anyway, so `list_robots()` advertised Cartesian control
     # this arm does not have and `move_ee_to` failed at runtime on a robot an
     # agent picked *because* the catalogue said it could reach.
     "kinova_gen3": RobotAsset(
-        "kinova_gen3", "/Isaac/Robots/Kinova/Gen3/gen3n7_instanceable.usd", Morphology.MANIPULATOR,
-        None, "7-DOF arm. Joint control only — no Cartesian motion config ships for it.",
+        "kinova_gen3",
+        "/Isaac/Robots/Kinova/Gen3/gen3n7_instanceable.usd",
+        Morphology.MANIPULATOR,
+        None,
+        "7-DOF arm. Joint control only — no Cartesian motion config ships for it.",
     ),
     # ── Dexterous hands ───────────────────────────────────────────────────────
     "allegro_hand": RobotAsset(
-        "allegro_hand", "/Isaac/Robots/WonikRobotics/AllegroHand/allegro_hand_instanceable.usd",
-        Morphology.DEXTEROUS_HAND, None, "16-DOF four-finger hand.",
+        "allegro_hand",
+        "/Isaac/Robots/WonikRobotics/AllegroHand/allegro_hand_instanceable.usd",
+        Morphology.DEXTEROUS_HAND,
+        None,
+        "16-DOF four-finger hand.",
     ),
     "shadow_hand": RobotAsset(
-        "shadow_hand", "/Isaac/Robots/ShadowRobot/ShadowHand/shadow_hand_instanceable.usd",
-        Morphology.DEXTEROUS_HAND, None, "24-DOF five-finger hand.",
+        "shadow_hand",
+        "/Isaac/Robots/ShadowRobot/ShadowHand/shadow_hand_instanceable.usd",
+        Morphology.DEXTEROUS_HAND,
+        None,
+        "24-DOF five-finger hand.",
     ),
     # ── Wheeled ───────────────────────────────────────────────────────────────
     "carter": RobotAsset(
-        "carter", "/Isaac/Robots/NVIDIA/Carter/carter_v1.usd", Morphology.WHEELED,
-        None, "Differential-drive research AMR.",
+        "carter",
+        "/Isaac/Robots/NVIDIA/Carter/carter_v1.usd",
+        Morphology.WHEELED,
+        None,
+        "Differential-drive research AMR.",
     ),
     "jetbot": RobotAsset(
-        "jetbot", "/Isaac/Robots/NVIDIA/Jetbot/jetbot.usd", Morphology.WHEELED,
-        None, "Small two-wheel differential-drive robot.",
+        "jetbot",
+        "/Isaac/Robots/NVIDIA/Jetbot/jetbot.usd",
+        Morphology.WHEELED,
+        None,
+        "Small two-wheel differential-drive robot.",
     ),
     "kaya": RobotAsset(
-        "kaya", "/Isaac/Robots/NVIDIA/Kaya/kaya.usd", Morphology.WHEELED,
-        None, "Three-wheel holonomic robot.",
+        "kaya",
+        "/Isaac/Robots/NVIDIA/Kaya/kaya.usd",
+        Morphology.WHEELED,
+        None,
+        "Three-wheel holonomic robot.",
     ),
     # ── Quadrupeds ────────────────────────────────────────────────────────────
     "anymal_c": RobotAsset(
-        "anymal_c", "/Isaac/Robots/ANYbotics/anymal_c/anymal_c.usd", Morphology.QUADRUPED,
-        None, "12-DOF quadruped. Locomotion needs a trained policy.",
+        "anymal_c",
+        "/Isaac/Robots/ANYbotics/anymal_c/anymal_c.usd",
+        Morphology.QUADRUPED,
+        None,
+        "12-DOF quadruped. Locomotion needs a trained policy.",
     ),
     "unitree_go2": RobotAsset(
-        "unitree_go2", "/Isaac/Robots/Unitree/Go2/go2.usd", Morphology.QUADRUPED,
-        None, "12-DOF quadruped. Locomotion needs a trained policy.",
+        "unitree_go2",
+        "/Isaac/Robots/Unitree/Go2/go2.usd",
+        Morphology.QUADRUPED,
+        None,
+        "12-DOF quadruped. Locomotion needs a trained policy.",
     ),
     "spot": RobotAsset(
-        "spot", "/Isaac/Robots/BostonDynamics/spot/spot.usd", Morphology.QUADRUPED,
-        None, "12-DOF quadruped. Locomotion needs a trained policy.",
+        "spot",
+        "/Isaac/Robots/BostonDynamics/spot/spot.usd",
+        Morphology.QUADRUPED,
+        None,
+        "12-DOF quadruped. Locomotion needs a trained policy.",
     ),
     # ── Humanoids ─────────────────────────────────────────────────────────────
     "unitree_h1": RobotAsset(
-        "unitree_h1", "/Isaac/Robots/Unitree/H1/h1.usd", Morphology.HUMANOID,
-        None, "Full-size humanoid. Locomotion needs a trained policy.",
+        "unitree_h1",
+        "/Isaac/Robots/Unitree/H1/h1.usd",
+        Morphology.HUMANOID,
+        None,
+        "Full-size humanoid. Locomotion needs a trained policy.",
     ),
     "unitree_g1": RobotAsset(
-        "unitree_g1", "/Isaac/Robots/Unitree/G1/g1.usd", Morphology.HUMANOID,
-        None, "Compact humanoid. Locomotion needs a trained policy.",
+        "unitree_g1",
+        "/Isaac/Robots/Unitree/G1/g1.usd",
+        Morphology.HUMANOID,
+        None,
+        "Compact humanoid. Locomotion needs a trained policy.",
     ),
     # ── Aerial ────────────────────────────────────────────────────────────────
     "quadcopter": RobotAsset(
-        "quadcopter", "/Isaac/Robots/Bitcraze/Crazyflie/cf2x.usd", Morphology.AERIAL,
-        None, "Small quadcopter, thrust-controlled.",
+        "quadcopter",
+        "/Isaac/Robots/Bitcraze/Crazyflie/cf2x.usd",
+        Morphology.AERIAL,
+        None,
+        "Small quadcopter, thrust-controlled.",
     ),
 }
 
@@ -191,10 +242,7 @@ def _preferred_usd(files: list[str], model: str) -> str | None:
     Prefers an exact model-name match, then the shortest name: `franka.usd` over
     `franka_alt_finger.usd`, and never a `*_part.usd` fragment.
     """
-    usable = [
-        f for f in files
-        if f.endswith(".usd") and not any(t in f.lower() for t in _SKIP_FILE_TOKENS)
-    ]
+    usable = [f for f in files if f.endswith(".usd") and not any(t in f.lower() for t in _SKIP_FILE_TOKENS)]
     if not usable:
         return None
     stem = model.lower().replace("_", "")
@@ -273,9 +321,10 @@ def _infer_motion_config(vendor: str, model: str, supported: list[str]) -> str |
     ranked.sort(reverse=True)
     if len(ranked) > 1 and ranked[0][0] == ranked[1][0]:
         logger.info(
-            "%s/%s matches several RMPflow configs (%s) equally well; leaving it "
-            "without one rather than guessing.",
-            vendor, model, ", ".join(c for _, c in ranked),
+            "%s/%s matches several RMPflow configs (%s) equally well; leaving it without one rather than guessing.",
+            vendor,
+            model,
+            ", ".join(c for _, c in ranked),
         )
         return None
     return ranked[0][1]
@@ -340,7 +389,8 @@ def discover_robots(refresh: bool = False) -> dict[str, RobotAsset]:
 
     logger.info(
         "Matched RMPflow configs for %d of %d discovered robots",
-        sum(1 for a in found.values() if a.motion_config), len(found),
+        sum(1 for a in found.values() if a.motion_config),
+        len(found),
     )
 
     # Seeded entries win on key collision: they carry a hand-checked morphology,
@@ -364,12 +414,16 @@ def discover_robots(refresh: bool = False) -> dict[str, RobotAsset]:
                     "ship (it has %d). Dropping the claim: the robot stays, but "
                     "it is reported as joint-control only rather than failing "
                     "later inside move_ee_to.",
-                    key, asset.motion_config, len(supported),
+                    key,
+                    asset.motion_config,
+                    len(supported),
                 )
                 merged[key] = replace(asset, motion_config=None)
     logger.info(
         "Robot catalogue: %d discovered, %d seeded, %d total",
-        len(found), len(CATALOGUE), len(merged),
+        len(found),
+        len(CATALOGUE),
+        len(merged),
     )
     _DISCOVERED = merged
     return merged
@@ -399,9 +453,7 @@ def specialize(probe: Robot, **kwargs: Any) -> Robot:
     """Re-wrap a generic `Robot` as the subclass matching its actual structure."""
     from .base import classify_morphology
 
-    morphology = classify_morphology(
-        probe.joint_names, probe.groups, [str(l) for l in probe.links()]
-    )
+    morphology = classify_morphology(probe.joint_names, probe.groups, [str(link) for link in probe.links()])
     controller = _controller_class(morphology)
     if controller is Robot:
         logger.info(
@@ -454,8 +506,7 @@ def _check_reachable(url: str) -> None:
                 )
     except urllib.error.HTTPError as exc:
         raise RobotAssetUnreachable(
-            f"{url} answered HTTP {exc.code}. The catalogue lists this robot but "
-            f"the asset server will not serve it."
+            f"{url} answered HTTP {exc.code}. The catalogue lists this robot but the asset server will not serve it."
         ) from exc
     except (urllib.error.URLError, OSError, TimeoutError) as exc:
         raise RobotAssetUnreachable(
@@ -549,10 +600,21 @@ def spawn_robot(
     *,
     prim_path: str | None = None,
     position: Any = (0.0, 0.0, 0.0),
+    yaw: float = 0.0,
     scene: Any = None,
     **kwargs: Any,
 ) -> Robot:
-    """Load a robot and return a handle with the right control surface."""
+    """Load a robot and return a handle with the right control surface.
+
+    `yaw` is the mounting angle about Z, in degrees. It matters more than it
+    looks: a six-axis arm's base joint has a seam -- a KR210's is at +/-185
+    degrees -- and work that sits across it is reachable only the long way
+    round or over the shoulder. Every arm used to be spawned at yaw 0, which
+    put the seam wherever the sketch happened to leave it; one layout put a
+    pallet slot at a bearing of +174 degrees and the set-down had no route
+    the controller was allowed to drive. An integrator mounts the robot
+    facing the work. So does the sketch builder, through this.
+    """
     from ..scene import Scene as _Scene
     from .base import classify_morphology
 
@@ -569,6 +631,8 @@ def spawn_robot(
     xform = UsdGeom.Xformable(get_stage().GetPrimAtPath(prim_path))
     xform.ClearXformOpOrder()
     xform.AddTranslateOp().Set(Gf.Vec3d(*as_vec3(position, name="position")))
+    if float(yaw):
+        xform.AddRotateZOp().Set(float(yaw))
 
     _register_articulation(scene, prim_path)
 
@@ -580,9 +644,7 @@ def spawn_robot(
     # Load first, then classify from the real joint set — the catalogue's
     # morphology is a hint, but the articulation is the ground truth.
     probe = Robot(prim_path, scene=scene)
-    morphology = classify_morphology(
-        probe.joint_names, probe.groups, [str(l) for l in probe.links()]
-    )
+    morphology = classify_morphology(probe.joint_names, probe.groups, [str(link) for link in probe.links()])
     controller = _controller_class(morphology)
 
     if controller is Robot:
@@ -602,8 +664,7 @@ def spawn_robot(
                 attr = prim.CreateAttribute("simliverse:motion_config", Sdf.ValueTypeNames.String)
                 attr.Set(str(asset.motion_config))
             except Exception:  # noqa: BLE001 — a hint that cannot be stored is not fatal
-                logger.debug("Could not record the motion config on %s", prim_path,
-                             exc_info=True)
+                logger.debug("Could not record the motion config on %s", prim_path, exc_info=True)
         if morphology is Morphology.DEXTEROUS_HAND:
             kwargs.pop("rmp_config", None)
     return controller(prim_path, scene=scene, **kwargs)
@@ -618,7 +679,5 @@ def list_robots() -> list[dict[str, str]]:
             "cartesian_control": "yes" if asset.motion_config else "no",
             "description": asset.description,
         }
-        for asset in sorted(
-            discover_robots().values(), key=lambda a: (a.morphology.value, a.key)
-        )
+        for asset in sorted(discover_robots().values(), key=lambda a: (a.morphology.value, a.key))
     ]

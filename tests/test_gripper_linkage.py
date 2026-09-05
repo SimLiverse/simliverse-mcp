@@ -134,8 +134,7 @@ def test_a_linkage_is_driven_by_one_joint_not_six():
     gripper.set_position(0.34, settle_steps=0)
 
     assert robot.commands == [([0], [0.34])], (
-        "the followers are moved by the mechanism; commanding them independently "
-        "sets them fighting it"
+        "the followers are moved by the mechanism; commanding them independently sets them fighting it"
     )
 
 
@@ -167,13 +166,9 @@ def test_position_averages_independent_fingers():
 
 def test_the_closing_end_is_whichever_brings_the_pads_together(monkeypatch):
     """The jaw is driven to both ends and the pads are measured at each."""
-    robot, gripper = cobotta_gripper(
-        links=["/World/Arm/left_inner_finger", "/World/Arm/right_inner_finger"]
-    )
+    robot, gripper = cobotta_gripper(links=["/World/Arm/left_inner_finger", "/World/Arm/right_inner_finger"])
     # An RG6: near zero it is open, positive rotation closes it.
-    monkeypatch.setattr(Gripper, "_pad_gap", lambda self, pads: 0.09 - 0.1 * float(
-        robot.joint_positions[0]
-    ))
+    monkeypatch.setattr(Gripper, "_pad_gap", lambda self, pads: 0.09 - 0.1 * float(robot.joint_positions[0]))
 
     opened, closed = gripper._ends_by_measurement(-0.628, 0.628)
 
@@ -182,13 +177,9 @@ def test_the_closing_end_is_whichever_brings_the_pads_together(monkeypatch):
 
 
 def test_the_jaw_is_left_where_it_was_found(monkeypatch):
-    robot, gripper = cobotta_gripper(
-        links=["/World/Arm/left_inner_finger", "/World/Arm/right_inner_finger"]
-    )
+    robot, gripper = cobotta_gripper(links=["/World/Arm/left_inner_finger", "/World/Arm/right_inner_finger"])
     robot.joint_positions[0] = 0.21
-    monkeypatch.setattr(Gripper, "_pad_gap", lambda self, pads: 0.09 - 0.1 * float(
-        robot.joint_positions[0]
-    ))
+    monkeypatch.setattr(Gripper, "_pad_gap", lambda self, pads: 0.09 - 0.1 * float(robot.joint_positions[0]))
 
     gripper._ends_by_measurement(-0.628, 0.628)
 
@@ -207,12 +198,8 @@ def test_a_jaw_with_no_measurable_pads_says_it_is_guessing(caplog):
 
 
 def test_open_and_close_use_the_measured_ends(monkeypatch):
-    robot, gripper = cobotta_gripper(
-        links=["/World/Arm/left_inner_finger", "/World/Arm/right_inner_finger"]
-    )
-    monkeypatch.setattr(Gripper, "_pad_gap", lambda self, pads: 0.09 - 0.1 * float(
-        robot.joint_positions[0]
-    ))
+    robot, gripper = cobotta_gripper(links=["/World/Arm/left_inner_finger", "/World/Arm/right_inner_finger"])
+    monkeypatch.setattr(Gripper, "_pad_gap", lambda self, pads: 0.09 - 0.1 * float(robot.joint_positions[0]))
 
     gripper.close(settle_steps=0)
     assert robot.commands[-1] == ([0], [pytest.approx(0.628)])
@@ -235,9 +222,24 @@ def test_a_panda_still_opens_at_its_upper_limit():
 from simliverse_sim.robots.manipulator import _match_motion_config  # noqa: E402
 
 SUPPORTED = [
-    "Cobotta_Pro_1300", "Cobotta_Pro_900", "FR3", "Fanuc_CRX10IAL", "FestoCobot",
-    "Franka", "Kuka_KR210", "RS007L", "RS007N", "Rizon4", "Techman_TM12",
-    "UR10", "UR10e", "UR16e", "UR3", "UR3e", "UR5", "UR5e",
+    "Cobotta_Pro_1300",
+    "Cobotta_Pro_900",
+    "FR3",
+    "Fanuc_CRX10IAL",
+    "FestoCobot",
+    "Franka",
+    "Kuka_KR210",
+    "RS007L",
+    "RS007N",
+    "Rizon4",
+    "Techman_TM12",
+    "UR10",
+    "UR10e",
+    "UR16e",
+    "UR3",
+    "UR3e",
+    "UR5",
+    "UR5e",
 ]
 
 # What `_asset_identity` and the joint/leaf readers produce: lowercased, no
@@ -255,9 +257,7 @@ def test_a_cobotta_is_found_by_its_asset_when_its_joints_say_nothing():
     It raised `No RMPflow configuration matches /World/Arm` while listing
     `Cobotta_Pro_900` among the robots it supported, in the same message.
     """
-    assert _match_motion_config(SUPPORTED, COBOTTA_JOINTS, COBOTTA_ASSET, "arm") == (
-        "Cobotta_Pro_900"
-    )
+    assert _match_motion_config(SUPPORTED, COBOTTA_JOINTS, COBOTTA_ASSET, "arm") == ("Cobotta_Pro_900")
 
 
 def test_a_panda_is_not_this_functions_job():
@@ -282,9 +282,7 @@ def test_the_prim_path_still_works_when_it_is_the_only_clue():
 def test_a_longer_name_is_not_claimed_by_a_shorter_one():
     """`UR5` is a substring of `ur5e`; first-match-wins would take the wrong one."""
     assert _match_motion_config(SUPPORTED, "", ".../robots/universalrobots/ur5e/ur5e.usd", "arm") == "UR5e"
-    assert _match_motion_config(SUPPORTED, "", ".../denso/cobottapro1300/x.usd", "arm") == (
-        "Cobotta_Pro_1300"
-    )
+    assert _match_motion_config(SUPPORTED, "", ".../denso/cobottapro1300/x.usd", "arm") == ("Cobotta_Pro_1300")
 
 
 def test_an_unknown_robot_matches_nothing():

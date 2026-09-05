@@ -165,8 +165,7 @@ def airborne(obj: "RigidObject", *, min_speed: float = 0.5) -> Check:
         (
             f"In free flight at {speed:.2f} m/s."
             if ok
-            else f"Not airborne: speed {speed:.2f} m/s (need ≥ {min_speed}), "
-            f"{len(contacts)} contact(s)."
+            else f"Not airborne: speed {speed:.2f} m/s (need ≥ {min_speed}), {len(contacts)} contact(s)."
         ),
         {"speed": round(speed, 3), "contacts": contacts},
     )
@@ -189,15 +188,12 @@ def upright(robot: "Robot", *, max_tilt_deg: float = 45.0, min_height: float | N
         "upright",
         ok,
         f"Base tilted {angle:.1f}° at {height:.3f} m."
-        + ("" if ok else f" Limit is {max_tilt_deg}°"
-           + (f" and {min_height} m." if min_height is not None else ".")),
+        + ("" if ok else f" Limit is {max_tilt_deg}°" + (f" and {min_height} m." if min_height is not None else ".")),
         {"tilt_degrees": round(angle, 2), "base_height": round(float(height), 4)},
     )
 
 
-def reached_position(
-    robot: "Robot", target: Any, *, tolerance: float = 0.25, planar: bool = True
-) -> Check:
+def reached_position(robot: "Robot", target: Any, *, tolerance: float = 0.25, planar: bool = True) -> Check:
     """A mobile robot actually arrived where it was sent."""
     goal = np.asarray(target, dtype=float).reshape(-1)
     current = robot.base_position
@@ -212,17 +208,13 @@ def reached_position(
     )
 
 
-def moved_under_own_power(
-    robot: "Robot", start_position: Any, *, min_distance: float = 0.1
-) -> Check:
+def moved_under_own_power(robot: "Robot", start_position: Any, *, min_distance: float = 0.1) -> Check:
     """The robot travelled, and its joints actually moved to do it.
 
     Guards against a base whose transform was set directly — displacement with
     motionless joints is teleportation, not locomotion.
     """
-    displacement = float(
-        np.linalg.norm(robot.base_position[:2] - np.asarray(start_position, dtype=float)[:2])
-    )
+    displacement = float(np.linalg.norm(robot.base_position[:2] - np.asarray(start_position, dtype=float)[:2]))
     joint_motion = float(np.max(np.abs(robot.joint_velocities))) if robot.dof else 0.0
 
     if displacement < min_distance:

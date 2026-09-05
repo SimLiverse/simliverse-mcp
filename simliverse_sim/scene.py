@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import numpy as np
+if TYPE_CHECKING:  # pragma: no cover -- annotations only; objects imports scene at runtime
+    from .objects import RigidObject
 
 from ._compat import (
     as_quat,
@@ -103,15 +104,13 @@ class Scene:
     def stage(self) -> Any:
         return get_stage()
 
-    def configure_physics(
-        self, config: PhysicsConfig | None = None, **overrides: Any
-    ) -> PhysicsConfig:
+    def configure_physics(self, config: PhysicsConfig | None = None, **overrides: Any) -> PhysicsConfig:
         """Apply gravity, timestep and solver settings, and create a ground plane.
 
         The MCP `set_physics_params` verb silently discards every one of these
         (ADR 012 §1.5) and returns success regardless. This actually applies them.
         """
-        from pxr import PhysxSchema, UsdGeom, UsdPhysics
+        from pxr import PhysxSchema, UsdPhysics
 
         # Accept `configure_physics(gravity=-9.81)` as well as a PhysicsConfig.
         # Requiring the wrapper type cost a turn every time: the keyword call is
@@ -217,14 +216,58 @@ class Scene:
         for path in extras:
             logger.warning(
                 "Removing duplicate physics scene at %s; PhysX cannot step two, "
-                "and a second one stalls the simulator without raising.", path,
+                "and a second one stalls the simulator without raising.",
+                path,
             )
             stage.RemovePrim(path)
             removed.append(path)
         return removed
 
+    #: Everything a cell rebuilds on top of rather than re-authoring. The
+    #: physics scene and its materials are configuration, the ground plane is
+    #: the floor, and re-making any of them mid-session invalidates handles
+    #: that are still live.
+    WORLD_KEEP = ("PhysicsScene", "PhysicsMaterials", "GroundPlane")
+
+    def clear_world(self, keep: "tuple[str, ...] | None" = None) -> list[str]:
+        """Remove the last cell before authoring the next one on the same stage.
+
+        `stop()` ends the simulation; it does not empty the stage. Two cells
+        built in one session therefore coexist, and the older one is still
+        solid. That is not a cosmetic problem: an escapement blade left over
+        from an infeed experiment held the palletising cell's carton queue
+        with 26 N of contact force, and every belt observable - kinematic
+        body, surface velocity enabled, friction 0.9 - said the conveyor was
+        working perfectly. It was. Something else was holding the cargo.
+
+        Returns what it removed, so a caller can say so rather than guess.
+        """
+        keep_set = set(self.WORLD_KEEP if keep is None else keep)
+        stage = self.stage
+        world = stage.GetPrimAtPath("/World")
+        if not world or not world.IsValid():
+            return []
+        doomed = [child.GetPath().pathString for child in world.GetChildren() if child.GetName() not in keep_set]
+        for path in doomed:
+            stage.RemovePrim(path)
+        if doomed:
+            logger.info("cleared %d stale prims from /World", len(doomed))
+        return doomed
+
+    def clear_scene(self, keep: "tuple[str, ...] | None" = None) -> list[str]:
+        """`clear_world`, under the name every caller reaches for.
+
+        The MCP tool is called `clear_scene`, the prompts say `clear_scene`,
+        and an evaluation harness wrote `scene.clear_scene()` and shipped it.
+        On this class that was an AttributeError inside `run_control`, which
+        the harness did not read -- so nothing cleared, every layout was
+        built on top of the previous one's prims, and a short line ran with
+        the long line's carton queue. A name people guess should exist.
+        """
+        return self.clear_world(keep)
+
     def ensure_ground_plane(self, path: str = "/World/GroundPlane", z: float = 0.0) -> str:
-        from pxr import UsdGeom, UsdPhysics
+        from pxr import Gf, Sdf, UsdGeom, UsdPhysics, UsdShade
 
         stage = self.stage
         prim = stage.GetPrimAtPath(path)
@@ -233,8 +276,51 @@ class Scene:
             plane.CreateAxisAttr().Set("Z")
             plane.AddTranslateOp().Set((0.0, 0.0, z))
             prim = plane.GetPrim()
+        # A UsdGeom.Plane is 2 x 2 m by default. The collider PhysX makes of
+        # it is infinite, so physics never noticed -- but visually the floor
+        # ended two metres out and the rest of every cell stood on nothing.
+        plane = UsdGeom.Plane(prim)
+        if (plane.GetWidthAttr().Get() or 2.0) < 100.0:
+            plane.CreateWidthAttr().Set(400.0)
+            plane.CreateLengthAttr().Set(400.0)
+        # And a surface to see: a bare plane renders near black under RTX.
+        material_path = f"{path}/Material"
+        if not stage.GetPrimAtPath(material_path).IsValid():
+            material = UsdShade.Material.Define(stage, material_path)
+            shader = UsdShade.Shader.Define(stage, f"{material_path}/Shader")
+            shader.CreateIdAttr("UsdPreviewSurface")
+            shader.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f(0.42, 0.43, 0.45))
+            shader.CreateInput("roughness", Sdf.ValueTypeNames.Float).Set(0.85)
+            material.CreateSurfaceOutput().ConnectToSource(shader.ConnectableAPI(), "surface")
+            UsdShade.MaterialBindingAPI.Apply(prim).Bind(material)
         if not prim.HasAPI(UsdPhysics.CollisionAPI):
             UsdPhysics.CollisionAPI.Apply(prim)
+        return path
+
+    def ensure_light(self, path: str = "/World/SketchDome", intensity: float = 1000.0) -> str:
+        """Give the stage a light if it has none, and never a second one.
+
+        A cold headless stage has no light at all: everything authored into it
+        is correct, physical, and renders as shapes on black. The first person
+        to notice is whoever looks at a capture -- the numbers never say
+        "dark". Checked by *type*, not by path, so a stage lit any other way
+        (a dome from an environment, a distant light someone placed) is left
+        alone.
+        """
+        from pxr import Gf, UsdLux
+
+        stage = self.stage
+        # A dome specifically. The first version stood down for any light at
+        # all, and Kit's default stage carries one distant light -- a single
+        # sun with no sky: every face turned away from it is black, the ground
+        # is black, the background is black. Measured as "why is it so dark"
+        # on every capture of an otherwise correct cell.
+        for prim in stage.Traverse():
+            if prim.IsA(UsdLux.DomeLight):
+                return str(prim.GetPath())
+        dome = UsdLux.DomeLight.Define(stage, path)
+        dome.CreateIntensityAttr().Set(float(intensity))
+        dome.CreateColorAttr().Set(Gf.Vec3f(0.85, 0.88, 0.95))
         return path
 
     # ── Timeline and stepping ─────────────────────────────────────────────────
@@ -353,6 +439,138 @@ class Scene:
 
     # ── Authoring ─────────────────────────────────────────────────────────────
 
+    def spawn_box(
+        self,
+        prim_path: str,
+        *,
+        size: Any = (0.2, 0.2, 0.2),
+        position: Any = (0.0, 0.0, 0.5),
+        mass: float = 1.0,
+        color: Any = (0.72, 0.55, 0.33),
+        friction: float = 0.9,
+        restitution: float = 0.0,
+        static: bool = False,
+        orientation: Any = None,
+    ) -> "RigidObject":
+        """A cuboid of the stated size in metres, authored *without* a scale.
+
+        Use this rather than `spawn_rigid(shape="cube", scale=...)` for anything
+        a suction gripper has to pick up.
+
+        A `UsdGeom.Cube` is a single-parameter shape: one `size` for all three
+        edges, defaulting to 2.0. The only way to get a 15 cm carton out of it is
+        an xform scale of 0.075, and the only way to get a non-cubic one is a
+        non-uniform scale. That is the configuration Isaac's own surface-gripper
+        sample warns about: grip detection is a scene-query raycast, and it does
+        not reliably hit a scaled box collider. The failure is silent — the cup
+        arrives, the cup closes, nothing attaches, and the arm lifts away empty
+        while every pose reads correct.
+
+        Authoring the geometry at its real size removes the scale entirely. Eight
+        points and six quads is more verbose than setting one attribute, and it
+        is the only shape that expresses a carton, since real cartons are not
+        cubes.
+
+        `extent` is set explicitly. USD will not compute one for a Mesh, and a
+        prim with no extent is skipped by bounding-box queries — which is how a
+        box becomes invisible to `compute_path_world_bounding_box`, and so to
+        anything that places or measures against it.
+        """
+        from pxr import Gf, UsdGeom, UsdPhysics, Vt
+
+        from .objects import RigidObject
+
+        dims = as_vec3(size, name="size").astype(float)
+        if (dims <= 0).any():
+            raise ValueError(f"size={list(dims)}: every dimension must be positive.")
+        hx, hy, hz = (float(d) / 2.0 for d in dims)
+
+        stage = self.stage
+        # Define() on a path that already holds a prim returns THAT prim, with
+        # whatever pose and physics state it has -- and a rigid body that
+        # existed before is where the last run left it, or where PhysX reset
+        # it to on stop. Measured: a rebuilt short line asked for four cartons
+        # 1.57 m apart and got the previous long line's four, 3.36 m apart,
+        # two of them past the end of the belt on the floor. A spawn is a
+        # spawn: whatever was at the path goes first.
+        stale = stage.GetPrimAtPath(prim_path)
+        if stale and stale.IsValid():
+            stage.RemovePrim(prim_path)
+        mesh = UsdGeom.Mesh.Define(stage, prim_path)
+        prim = mesh.GetPrim()
+
+        points = [
+            (-hx, -hy, -hz),
+            (hx, -hy, -hz),
+            (hx, hy, -hz),
+            (-hx, hy, -hz),
+            (-hx, -hy, hz),
+            (hx, -hy, hz),
+            (hx, hy, hz),
+            (-hx, hy, hz),
+        ]
+        # Counter-clockwise seen from outside, so the normals face out. A box
+        # wound the other way renders inside-out and reads as a missing object.
+        faces = [
+            0,
+            3,
+            2,
+            1,  # bottom
+            4,
+            5,
+            6,
+            7,  # top
+            0,
+            1,
+            5,
+            4,  # -Y
+            1,
+            2,
+            6,
+            5,  # +X
+            2,
+            3,
+            7,
+            6,  # +Y
+            3,
+            0,
+            4,
+            7,  # -X
+        ]
+        mesh.CreatePointsAttr(Vt.Vec3fArray([Gf.Vec3f(*p) for p in points]))
+        mesh.CreateFaceVertexCountsAttr(Vt.IntArray([4] * 6))
+        mesh.CreateFaceVertexIndicesAttr(Vt.IntArray(faces))
+        mesh.CreateExtentAttr(Vt.Vec3fArray([Gf.Vec3f(-hx, -hy, -hz), Gf.Vec3f(hx, hy, hz)]))
+        # Flat shading; a smoothed carton catches the light like a pillow.
+        mesh.CreateSubdivisionSchemeAttr().Set(UsdGeom.Tokens.none)
+
+        xform = UsdGeom.Xformable(prim)
+        xform.ClearXformOpOrder()
+        xform.AddTranslateOp().Set(Gf.Vec3d(*as_vec3(position, name="position")))
+        if orientation is not None:
+            w, x, y, z = as_quat(orientation)
+            xform.AddOrientOp().Set(Gf.Quatf(float(w), Gf.Vec3f(float(x), float(y), float(z))))
+
+        if color is not None:
+            mesh.CreateDisplayColorAttr().Set([Gf.Vec3f(*as_vec3(color, name="color"))])
+
+        collision = UsdPhysics.CollisionAPI.Apply(prim)
+        # A convex hull of eight points *is* the box, exactly. Left at the
+        # default the mesh would collide as a triangle soup, which PhysX refuses
+        # to move dynamically.
+        mesh_collision = UsdPhysics.MeshCollisionAPI.Apply(prim)
+        mesh_collision.CreateApproximationAttr().Set(UsdPhysics.Tokens.convexHull)
+        del collision
+
+        if static:
+            UsdPhysics.RigidBodyAPI.Apply(prim).CreateKinematicEnabledAttr().Set(True)
+        else:
+            UsdPhysics.RigidBodyAPI.Apply(prim)
+            UsdPhysics.MassAPI.Apply(prim).CreateMassAttr().Set(float(mass))
+
+        self.apply_physics_material(prim_path, friction=friction, restitution=restitution)
+        return RigidObject(prim_path, scene=self)
+
     def spawn_rigid(
         self,
         prim_path: str,
@@ -403,8 +621,23 @@ class Scene:
 
         if radius is not None and hasattr(geom, "CreateRadiusAttr"):
             geom.CreateRadiusAttr().Set(float(radius))
-        if size is not None and hasattr(geom, "CreateSizeAttr"):
-            geom.CreateSizeAttr().Set(float(size))
+        if size is not None:
+            # `size` means height on everything that has one. Only `Cube` has a
+            # `size` attribute, so guarding this on `CreateSizeAttr` alone
+            # dropped the argument for every other shape without a word: a
+            # cylinder asked for 0.82 m came out at its default 2.0, and the
+            # figure it was a leg of stood through the floor. The render was
+            # the only thing that said so.
+            if hasattr(geom, "CreateSizeAttr"):
+                geom.CreateSizeAttr().Set(float(size))
+            elif hasattr(geom, "CreateHeightAttr"):
+                geom.CreateHeightAttr().Set(float(size))
+            else:
+                raise ValueError(
+                    f"{shape!r} has neither a size nor a height, so `size="
+                    f"{size}` cannot be applied. Use `radius`, or `scale` for "
+                    f"a non-uniform extent."
+                )
 
         xform = UsdGeom.Xformable(prim)
         xform.ClearXformOpOrder()
@@ -430,9 +663,7 @@ class Scene:
             mass_api = UsdPhysics.MassAPI.Apply(prim)
             mass_api.CreateMassAttr().Set(float(mass))
 
-        self.apply_physics_material(
-            prim_path, friction=friction, restitution=restitution
-        )
+        self.apply_physics_material(prim_path, friction=friction, restitution=restitution)
         return RigidObject(prim_path, scene=self)
 
     def apply_physics_material(
@@ -450,9 +681,7 @@ class Scene:
         material_path = material_path or f"/World/PhysicsMaterials/mu{int(friction * 100)}"
         mat_prim = stage.GetPrimAtPath(material_path)
         if not mat_prim.IsValid():
-            material = UsdPhysics.MaterialAPI.Apply(
-                UsdShade.Material.Define(stage, material_path).GetPrim()
-            )
+            material = UsdPhysics.MaterialAPI.Apply(UsdShade.Material.Define(stage, material_path).GetPrim())
             material.CreateStaticFrictionAttr().Set(float(friction))
             material.CreateDynamicFrictionAttr().Set(float(friction))
             material.CreateRestitutionAttr().Set(float(restitution))
@@ -484,11 +713,7 @@ class Scene:
         if not start.IsValid():
             return []
         iterator = Usd.PrimRange(start) if recursive else start.GetChildren()
-        return [
-            {"path": str(p.GetPath()), "type": p.GetTypeName()}
-            for p in iterator
-            if str(p.GetPath()) != root
-        ]
+        return [{"path": str(p.GetPath()), "type": p.GetTypeName()} for p in iterator if str(p.GetPath()) != root]
 
     def find(self, pattern: str, *, root: str = "/World") -> list[str]:
         """Case-insensitive substring search over prim paths."""

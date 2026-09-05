@@ -166,11 +166,7 @@ def test_every_handler_module_defines_register():
     for name in _handler_modules_from_init():
         path = os.path.join(EXTENSION_ROOT, "handlers", f"{name}.py")
         assert os.path.isfile(path), f"handlers/__init__.py imports missing module {name!r}"
-        functions = {
-            node.name
-            for node in ast.walk(_parse_file(path))
-            if isinstance(node, ast.FunctionDef)
-        }
+        functions = {node.name for node in ast.walk(_parse_file(path)) if isinstance(node, ast.FunctionDef)}
         assert "register" in functions, (
             f"handlers/{name}.py has no register() — register_all_handlers calls it "
             f"unconditionally, so this breaks the entire extension at startup."
@@ -182,14 +178,10 @@ def test_registered_handlers_are_defined():
     for name in _handler_modules_from_init():
         tree = _parse_file(os.path.join(EXTENSION_ROOT, "handlers", f"{name}.py"))
         defined = {n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
-        register = next(
-            n for n in ast.walk(tree)
-            if isinstance(n, ast.FunctionDef) and n.name == "register"
-        )
+        register = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "register")
         for call in (n for n in ast.walk(register) if isinstance(n, ast.Call)):
             target = call.func
             if isinstance(target, ast.Name) and target.id.islower():
                 assert target.id in defined or target.id in dir(__builtins__), (
-                    f"handlers/{name}.py register() wires {target.id}(), which is not "
-                    f"defined in that module."
+                    f"handlers/{name}.py register() wires {target.id}(), which is not defined in that module."
                 )

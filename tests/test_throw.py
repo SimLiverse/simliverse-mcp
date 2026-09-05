@@ -125,7 +125,7 @@ class FakeArm:
 
     def __init__(self, profile, *, gripper_opens=True, ceiling=1e9):
         self.profile = profile
-        self.ceiling = ceiling      # the fastest this arm's hand can ever go
+        self.ceiling = ceiling  # the fastest this arm's hand can ever go
         self.base_dt = DT
         self.dt_scale = 1.0
         self.dt_history = []
@@ -211,9 +211,7 @@ TOPS_OUT = 0.6
 
 
 def test_releases_at_the_ceiling_when_the_arm_cannot_go_any_faster():
-    _, result = run_throw(
-        reaches(9.9), ceiling=TOPS_OUT, speed=2.8, observe_steps=90
-    )
+    _, result = run_throw(reaches(9.9), ceiling=TOPS_OUT, speed=2.8, observe_steps=90)
 
     assert "as fast as it swings" in result["release_reason"]
     # The number that mattered: the old code carried on to the geometric release
@@ -223,9 +221,7 @@ def test_releases_at_the_ceiling_when_the_arm_cannot_go_any_faster():
 
 
 def test_a_slow_swing_is_driven_harder_rather_than_reported_as_a_throw():
-    arm, result = run_throw(
-        reaches(9.9), ceiling=TOPS_OUT, speed=2.8, observe_steps=10
-    )
+    arm, result = run_throw(reaches(9.9), ceiling=TOPS_OUT, speed=2.8, observe_steps=10)
 
     # RMPflow plans to arrive, so it plans to stop, and no release rule recovers
     # a velocity it never produced. The only lever that does is telling it more
@@ -248,9 +244,7 @@ def test_reports_the_shortfall_rather_than_implying_the_speed_was_met():
 
     assert result["requested_speed"] == 2.8
     assert result["release_hand_speed"] < 2.8
-    assert result["speed_shortfall"] == pytest.approx(
-        2.8 - result["release_hand_speed"], abs=1e-3
-    )
+    assert result["speed_shortfall"] == pytest.approx(2.8 - result["release_hand_speed"], abs=1e-3)
 
 
 def test_releases_on_speed_when_the_arm_can_actually_deliver_it():
@@ -262,9 +256,7 @@ def test_releases_on_speed_when_the_arm_can_actually_deliver_it():
 
 
 def test_released_is_never_true_while_the_object_is_still_held():
-    _, result = run_throw(
-        reaches(3.0), gripper_opens=False, speed=1.5, observe_steps=20
-    )
+    _, result = run_throw(reaches(3.0), gripper_opens=False, speed=1.5, observe_steps=20)
 
     assert result["still_held"] is True
     assert result["released"] is False

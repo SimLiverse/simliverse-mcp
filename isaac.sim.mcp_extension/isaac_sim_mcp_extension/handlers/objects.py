@@ -55,9 +55,7 @@ def _apply_contact_properties(stage, prim, prim_path, mass, friction, restitutio
     physics_material.CreateStaticFrictionAttr().Set(float(friction))
     physics_material.CreateDynamicFrictionAttr().Set(float(friction))
     physics_material.CreateRestitutionAttr().Set(float(restitution))
-    UsdShade.MaterialBindingAPI.Apply(prim).Bind(
-        material, UsdShade.Tokens.weakerThanDescendants, "physics"
-    )
+    UsdShade.MaterialBindingAPI.Apply(prim).Bind(material, UsdShade.Tokens.weakerThanDescendants, "physics")
 
     if mass is not None:
         UsdPhysics.MassAPI.Apply(prim).CreateMassAttr().Set(float(mass))
@@ -89,6 +87,22 @@ def create(
         if position or rotation or scale:
             adapter.set_prim_transform(prim_path, position=position, rotation=rotation, scale=scale)
 
+        # `color` was accepted and thrown away, so an agent that asked for a
+        # red cube got a grey one -- and no state read it could make would
+        # tell it otherwise. displayColor is the cheap honest answer for a
+        # primitive: it needs no material, and it is what the viewport shows.
+        if color is not None:
+            from pxr import Gf, UsdGeom
+
+            channels = [float(c) for c in color][:3]
+            if len(channels) != 3:
+                return {"status": "error", "message": f"color needs three channels, got {list(color)}."}
+            if max(channels) > 1.0:  # 0-255 is the other convention
+                channels = [c / 255.0 for c in channels]
+            gprim = UsdGeom.Gprim(adapter.get_stage().GetPrimAtPath(prim_path))
+            if gprim:
+                gprim.CreateDisplayColorAttr().Set([Gf.Vec3f(*channels)])
+
         # All objects get collision so they interact with the scene.
         # physics_enabled additionally adds RigidBodyAPI for dynamic simulation.
         from pxr import UsdPhysics
@@ -119,9 +133,7 @@ def create(
             # Friction and restitution are bound whether or not the body is
             # dynamic: what a *static* collider is made of decides whether
             # anything resting on it slides, so a ground plane needs them too.
-            _apply_contact_properties(
-                stage, prim, prim_path, mass if physics_enabled else None, friction, restitution
-            )
+            _apply_contact_properties(stage, prim, prim_path, mass if physics_enabled else None, friction, restitution)
 
         response: Dict[str, Any] = {"status": "success", "message": f"Created {object_type}", "prim_path": prim_path}
         if note:
@@ -141,8 +153,25 @@ def delete(adapter: IsaacAdapterBase, prim_path: Optional[str] = None) -> Dict[s
     try:
         if not prim_path:
             return {"status": "error", "message": "prim_path is required"}
+
+        # Shut down any sensor that owns this prim first. A camera sensor
+        # re-authors its prim on the next render tick, so removing the prim
+        # while the sensor lives is a delete that silently undoes itself --
+        # verified: gone immediately after RemovePrim, back within five frames,
+        # with every call reporting success.
+        released = False
+        try:
+            from .sensors import release_sensor
+
+            released = release_sensor(prim_path)
+        except Exception:
+            pass
+
         adapter.delete_prim(prim_path)
-        return {"status": "success", "message": f"Deleted {prim_path}"}
+        message = f"Deleted {prim_path}"
+        if released:
+            message += " (and released the sensor that owned it)"
+        return {"status": "success", "message": message}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 

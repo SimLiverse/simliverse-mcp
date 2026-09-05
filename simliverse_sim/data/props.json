@@ -1,11 +1,11 @@
 {
   "assets_root": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/6.0",
   "by_physics": {
+    "visual": 67,
     "dynamic": 97,
-    "static": 11,
-    "visual": 61
+    "static": 11
   },
-  "count": 169,
+  "count": 175,
   "generated_from": "/Isaac/Props",
   "props": {
     "002_master_chef_can": {
@@ -1845,6 +1845,41 @@
       "path": "/Isaac/Props/Dolly/dolly_physics.usd",
       "physics": "dynamic"
     },
+    "f_business_02": {
+      "category": "people",
+      "extent": [
+        1.7646,
+        0.4412,
+        1.7315
+      ],
+      "key": "f_business_02",
+      "keywords": [
+        "business",
+        "human",
+        "people",
+        "person",
+        "visitor"
+      ],
+      "path": "/Isaac/People/Characters/F_Business_02/F_Business_02.usd",
+      "physics": "visual"
+    },
+    "f_medical_01": {
+      "category": "people",
+      "extent": [
+        1.8362,
+        0.4617,
+        1.815
+      ],
+      "key": "f_medical_01",
+      "keywords": [
+        "human",
+        "medical",
+        "people",
+        "person"
+      ],
+      "path": "/Isaac/People/Characters/F_Medical_01/F_Medical_01.usd",
+      "physics": "visual"
+    },
     "factory_bolt_m12_loose": {
       "category": "factory",
       "extent": [
@@ -2671,6 +2706,81 @@
       ],
       "path": "/Isaac/Props/Blocks/green_block.usd",
       "physics": "dynamic"
+    },
+    "m_medical_01": {
+      "category": "people",
+      "extent": [
+        2.0493,
+        0.4959,
+        1.9069
+      ],
+      "key": "m_medical_01",
+      "keywords": [
+        "human",
+        "medical",
+        "people",
+        "person"
+      ],
+      "path": "/Isaac/People/Characters/M_Medical_01/M_Medical_01.usd",
+      "physics": "visual"
+    },
+    "male_adult_construction_01_new": {
+      "category": "people",
+      "extent": [
+        2.0442,
+        0.571,
+        1.9534
+      ],
+      "key": "male_adult_construction_01_new",
+      "keywords": [
+        "construction",
+        "hard hat",
+        "human",
+        "operator",
+        "people",
+        "person",
+        "worker"
+      ],
+      "path": "/Isaac/People/Characters/male_adult_construction_01_new/male_adult_construction_01_new.usd",
+      "physics": "visual"
+    },
+    "male_adult_construction_03": {
+      "category": "people",
+      "extent": [
+        2.0118,
+        0.5501,
+        1.9384
+      ],
+      "key": "male_adult_construction_03",
+      "keywords": [
+        "construction",
+        "human",
+        "operator",
+        "people",
+        "person",
+        "worker"
+      ],
+      "path": "/Isaac/People/Characters/male_adult_construction_03/male_adult_construction_03.usd",
+      "physics": "visual"
+    },
+    "male_adult_construction_05_new": {
+      "category": "people",
+      "extent": [
+        2.088,
+        0.5684,
+        1.9268
+      ],
+      "key": "male_adult_construction_05_new",
+      "keywords": [
+        "construction",
+        "human",
+        "operator",
+        "people",
+        "person",
+        "worker"
+      ],
+      "path": "/Isaac/People/Characters/male_adult_construction_05_new/male_adult_construction_05_new.usd",
+      "physics": "visual"
     },
     "meshes_gear_base": {
       "category": "isaac_ros_segment_anything",

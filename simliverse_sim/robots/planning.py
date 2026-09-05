@@ -87,10 +87,7 @@ class MotionPlan:
         self.duration = float(trajectory.duration)
 
     def __repr__(self) -> str:
-        return (
-            f"<MotionPlan {self.duration:.2f}s, {len(self.waypoints)} waypoints, "
-            f"{len(self.joint_names)} joints>"
-        )
+        return f"<MotionPlan {self.duration:.2f}s, {len(self.waypoints)} waypoints, {len(self.joint_names)} joints>"
 
     def sample(self, t: float) -> tuple[np.ndarray, np.ndarray]:
         """Joint positions and velocities at time `t`, clamped to the duration."""
@@ -170,9 +167,7 @@ class CuMotionPlanner:
         self.joint_names = list(joint_names)
         self._obstacles = obstacles or (lambda: [])
         self._tool_frame = tool_frame
-        self.safety_margin = (
-            self.DEFAULT_SAFETY_MARGIN if safety_margin is None else float(safety_margin)
-        )
+        self.safety_margin = self.DEFAULT_SAFETY_MARGIN if safety_margin is None else float(safety_margin)
 
         self._robot = self._load_robot(robot_name)
         # cuMotion plans its own joint set, which is the arm without the
@@ -249,9 +244,7 @@ class CuMotionPlanner:
 
         self._binding = binding
         self._planner = cu_mg.GraphBasedMotionPlanner(**kwargs)
-        self._generator = cu_mg.TrajectoryGenerator(
-            cumotion_robot=self._robot, robot_joint_space=self.planned_joints
-        )
+        self._generator = cu_mg.TrajectoryGenerator(cumotion_robot=self._robot, robot_joint_space=self.planned_joints)
         self._bound_obstacles = wanted
         logger.info(
             "cuMotion world bound with %d obstacle(s): %s",
@@ -311,9 +304,7 @@ class CuMotionPlanner:
         position = np.asarray(position, dtype=float)
 
         if orientation is None:
-            path = self._planner.plan_to_translation_target(
-                q_initial=q_initial, translation_target=position
-            )
+            path = self._planner.plan_to_translation_target(q_initial=q_initial, translation_target=position)
         else:
             path = self._planner.plan_to_pose_target(
                 q_initial=q_initial,

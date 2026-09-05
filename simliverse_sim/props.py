@@ -116,9 +116,7 @@ def list_props(query: str | None = None, *, physics: str | None = None) -> list[
             match="exact" if not missed else "partial",
             unmatched=missed,
         )
-        scored.append(
-            (-hits, -PHYSICS_KINDS.index(entry["physics"]), entry["key"], annotated)
-        )
+        scored.append((-hits, -PHYSICS_KINDS.index(entry["physics"]), entry["key"], annotated))
 
     return [entry for *_rank, entry in sorted(scored, key=lambda row: row[:3])]
 
@@ -164,18 +162,56 @@ def find_prop(query: str, *, allow_partial: bool = False) -> dict[str, Any]:
     return best
 
 
+def _place(xform, position: Any, orientation: Any = None) -> None:
+    """Set a prop's transform: translate, and rotate if asked.
+
+    A function of its own so a test can exercise the exact xformOp calls
+    against a real, if empty, USD stage - `add_reference` and `assets_root()`
+    need a live asset server and cannot run outside Kit, but a precision
+    mismatch on the ops themselves has nothing to do with either and was
+    invisible to every test until one actually authored the attribute.
+
+    Precision is requested explicitly at both ops, rather than left to
+    `AddRotateXYZOp()`'s default - which is not one thing. A standalone `pxr`
+    package defaults the bare call to float and lets `Set()` silently coerce
+    whatever it is given; Kit's bundled USD defaulted the same bare call to
+    double and raised outright the first time this passed it a `Gf.Vec3f` -
+    `'has typeName double3 which does not match the requested precision
+    PrecisionFloat'`. A fix that only swapped `Vec3f` for `Vec3d` would still
+    be depending on whichever build's default happened to agree with it.
+    """
+    from pxr import Gf, UsdGeom
+
+    xform.ClearXformOpOrder()
+    xform.AddTranslateOp(UsdGeom.XformOp.PrecisionDouble).Set(Gf.Vec3d(*as_vec3(position, name="position")))
+    if orientation is not None:
+        ox, oy, oz = as_vec3(orientation, name="orientation")
+        xform.AddRotateXYZOp(UsdGeom.XformOp.PrecisionDouble).Set(Gf.Vec3d(float(ox), float(oy), float(oz)))
+
+
 def spawn_prop(
     query: str,
     *,
     allow_partial: bool = False,
     prim_path: str | None = None,
     position: Any = (0.0, 0.0, 0.0),
+    orientation: Any = None,
     scene: Any = None,
+    rest_on_floor: bool = True,
 ) -> dict[str, Any]:
     """Reference a real prop onto the stage. Returns its index entry plus the path.
 
     Warns when the chosen asset has no rigid body, because that is the failure
     that otherwise surfaces as a grasp which mysteriously never holds.
+
+    `orientation` takes euler degrees `[x, y, z]`. Every indexed prop keeps
+    the local frame it was authored in - a conveyor section's own footprint
+    runs along its local +X regardless of which way anything using it is
+    travelling. Leaving this unset spawns the asset always facing world +X,
+    which is wrong for anything not already travelling that way: a conveyor
+    dressed onto a belt running -X rendered off the far end of its own
+    physics slab, because the visual asset extended along +X while the belt
+    it was standing in for ran the other direction entirely.
     """
     from .scene import Scene as _Scene
 
@@ -197,11 +233,33 @@ def spawn_prop(
 
     add_reference(assets_root() + entry["path"], prim_path)
 
-    from pxr import Gf, UsdGeom
+    from pxr import UsdGeom
 
     xform = UsdGeom.Xformable(get_stage().GetPrimAtPath(prim_path))
-    xform.ClearXformOpOrder()
-    xform.AddTranslateOp().Set(Gf.Vec3d(*as_vec3(position, name="position")))
+    _place(xform, position, orientation)
+    lift = 0.0
+    if rest_on_floor:
+        # Props do not agree on where their origin is. The small KLT has it
+        # at the centre of the bin: placed at z=0 it stands half buried, and
+        # PhysX pops it 73 mm up on Play -- which reads as something having
+        # knocked it. Measure the placed asset and lift it so its lowest
+        # point sits at the requested z, never below. Pass rest_on_floor=False
+        # to place the origin exactly where asked (a prop on a shelf, say,
+        # where the bounds of the shelf are not the floor).
+        try:
+            from simliverse_sim.objects import bounds_of as _bounds_of
+            from simliverse_sim.scene import Scene as _Scene
+
+            lo_hi = _bounds_of(_Scene.get(), prim_path)
+        except Exception:  # noqa: BLE001 -- unmeasurable: leave it
+            lo_hi = None
+        base_z = float(as_vec3(position, name="position")[2])
+        lift = floor_lift(lo_hi[0][2] if lo_hi is not None else None, base_z)
+        if lift:
+            pos = as_vec3(position, name="position").astype(float)
+            pos[2] += lift
+            _place(xform, pos, orientation)
+            logger.info("%s rested on the floor: lifted %.3f m", prim_path, lift)
 
     if entry["physics"] != "dynamic":
         logger.warning(
@@ -210,8 +268,7 @@ def spawn_prop(
             "ones that can.",
             entry["key"],
             entry["physics"],
-            "no collider and no rigid body" if entry["physics"] == "visual"
-            else "a collider but no rigid body",
+            "no collider and no rigid body" if entry["physics"] == "visual" else "a collider but no rigid body",
             query,
         )
 
@@ -233,7 +290,7 @@ def spawn_prop(
     # still came back well-formed.
     #
     # So the caller is handed the body to measure, not the handle to hold.
-    result = {**entry, "prim_path": prim_path, "body_path": _body_path(prim_path)}
+    result = {**entry, "prim_path": prim_path, "body_path": _body_path(prim_path), "lifted_m": round(lift, 4)}
     overlaps = _overlapping_robots(prim_path)
     if overlaps:
         result["overlaps"] = overlaps
@@ -244,10 +301,23 @@ def spawn_prop(
                 "PhysX reports invalid transforms on the arm links when this "
                 "happens and the scene is unusable without saying so. Offset it "
                 "by at least half its extent plus the base radius.",
-                entry["key"], prim_path, hit["robot"],
+                entry["key"],
+                prim_path,
+                hit["robot"],
                 max(entry.get("extent") or [0.0]),
             )
     return result
+
+
+def floor_lift(lowest_z: float | None, base_z: float, *, tolerance: float = 0.005) -> float:
+    """How far up a placed prop must move so its lowest point sits at `base_z`.
+
+    Zero when it already does, or stands above it, or could not be measured:
+    a prop is lifted out of the floor, never pushed down onto it.
+    """
+    if lowest_z is None or lowest_z >= base_z - tolerance:
+        return 0.0
+    return float(base_z - lowest_z)
 
 
 def _body_path(prim_path: str) -> str:
@@ -319,13 +389,13 @@ def _overlapping_robots(prim_path: str) -> list[dict[str, Any]]:
             continue
         rlow, rhigh = robot_bounds
         if all(low[i] <= rhigh[i] and high[i] >= rlow[i] for i in range(3)):
-            hits.append({
-                "robot": robot_path,
-                "prop_bounds": [[round(float(v), 3) for v in low],
-                                [round(float(v), 3) for v in high]],
-                "robot_bounds": [[round(float(v), 3) for v in rlow],
-                                 [round(float(v), 3) for v in rhigh]],
-            })
+            hits.append(
+                {
+                    "robot": robot_path,
+                    "prop_bounds": [[round(float(v), 3) for v in low], [round(float(v), 3) for v in high]],
+                    "robot_bounds": [[round(float(v), 3) for v in rlow], [round(float(v), 3) for v in rhigh]],
+                }
+            )
     return hits
 
 
@@ -345,7 +415,9 @@ def verify_index() -> dict[str, Any]:
         "index_assets_root": recorded,
         "live_assets_root": live,
         "count": _index().get("count", 0),
-        "stale_because": None if ok else (
+        "stale_because": None
+        if ok
+        else (
             f"index was generated against {recorded or '<unknown>'} but this "
             f"session serves assets from {live}. Paths may not resolve; "
             f"regenerate with tools/generate_prop_index.py."

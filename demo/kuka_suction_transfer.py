@@ -11,9 +11,9 @@ machine is actually built for.
 
 from simliverse_sim import Robot, Scene
 
-TABLE_H = 1.0          # table top height
-REACH = 1.9            # table centres, on +X and on +Y
-BOX = 0.15             # half-extent multiplier: 30 cm boxes
+TABLE_H = 1.0  # table top height
+REACH = 1.9  # table centres, on +X and on +Y
+BOX = 0.15  # half-extent multiplier: 30 cm boxes
 BOX_MASS = 5.0
 
 PICK_TABLE = "/World/PickTable"
@@ -30,18 +30,25 @@ def build(scene: Scene | None = None) -> dict:
 
     for path, centre in ((PICK_TABLE, [REACH, 0.0]), (PLACE_TABLE, [0.0, REACH])):
         scene.spawn_rigid(
-            path, shape="cube", scale=[0.70, 0.70, TABLE_H / 2],
+            path,
+            shape="cube",
+            scale=[0.70, 0.70, TABLE_H / 2],
             position=[centre[0], centre[1], TABLE_H / 2],
-            mass=0.0, friction=0.9, static=True,
+            mass=0.0,
+            friction=0.9,
+            static=True,
         )
 
     boxes = []
     for index, offset in enumerate((-0.45, 0.0, 0.45)):
         boxes.append(
             scene.spawn_rigid(
-                "/World/Box%d" % index, shape="cube", scale=[BOX, BOX, BOX],
+                "/World/Box%d" % index,
+                shape="cube",
+                scale=[BOX, BOX, BOX],
                 position=[REACH, offset, TABLE_H + BOX],
-                mass=BOX_MASS, friction=0.9,
+                mass=BOX_MASS,
+                friction=0.9,
             ).prim_path
         )
 
@@ -50,9 +57,7 @@ def build(scene: Scene | None = None) -> dict:
     # "Gripper not found" every frame while the Python side keeps reporting a
     # healthy Open. `create` stops the timeline itself now, but building it here
     # keeps the ordering obvious.
-    cup = arm.attach_suction_gripper(
-        max_grip_distance=0.05, cup_radius=0.08, cup_length=0.04
-    )
+    cup = arm.attach_suction_gripper(max_grip_distance=0.05, cup_radius=0.08, cup_length=0.04)
 
     return {
         "arm": ARM,

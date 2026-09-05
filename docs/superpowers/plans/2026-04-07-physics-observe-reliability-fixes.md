@@ -169,25 +169,26 @@ git commit -m "fix: use PhysX runtime API for observe velocity and position data
 In `get_joint_positions()` (line 484), add `_ensure_physics_world()` before trying to initialize the articulation:
 
 ```python
-    def get_joint_positions(self, prim_path: str) -> List[float]:
-        from isaacsim.core.prims import SingleArticulation
+def get_joint_positions(self, prim_path: str) -> List[float]:
+    from isaacsim.core.prims import SingleArticulation
 
-        # Ensure physics is initialized so SingleArticulation.initialize() works
-        self._ensure_physics_world()
+    # Ensure physics is initialized so SingleArticulation.initialize() works
+    self._ensure_physics_world()
 
-        art = SingleArticulation(prim_path=prim_path)
-        try:
-            art.initialize()
-            positions = art.get_joint_positions()
-            if positions is not None:
-                return positions.tolist()
-        except Exception:
-            pass
+    art = SingleArticulation(prim_path=prim_path)
+    try:
+        art.initialize()
+        positions = art.get_joint_positions()
+        if positions is not None:
+            return positions.tolist()
+    except Exception:
+        pass
 
-        # Fallback: read drive target positions from USD
-        # WARNING: these are authored targets, not actual physics positions
-        from pxr import Usd, UsdPhysics
-        ...  # rest unchanged
+    # Fallback: read drive target positions from USD
+    # WARNING: these are authored targets, not actual physics positions
+    from pxr import Usd, UsdPhysics
+
+    ...  # rest unchanged
 ```
 
 - [ ] **Step 2: Apply same fix to `_get_joint_names()` and `get_joint_config()`**

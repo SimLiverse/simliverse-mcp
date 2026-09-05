@@ -33,6 +33,19 @@ Manipulation example:
     print(verify_grasp(robot, ball, previous_position=before))
     print(robot.throw(ball, direction=[1, 0, 0.8], speed=2.5))
 
+Conveyor palletising example:
+
+    from simliverse_sim import Conveyor, Robot, pallet_slots
+
+    belt = Conveyor.build(length=3.0, width=0.8, position=[0, 0, 0.9], speed=0.3)
+    boxes = belt.load(4, box=(0.18, 0.13, 0.11))
+    arm = Robot.spawn("kuka_kr210")
+    arm.attach_suction_gripper()
+
+    slots = pallet_slots(origin=[0.0, 1.2, 0.145], box=(0.18, 0.13, 0.11),
+                         rows=2, cols=2)
+    ready = belt.box_at_gate()          # settled against the stop
+
 Navigation example:
 
     rover = Robot.spawn("carter", position=[0, 0, 0.1])
@@ -41,6 +54,7 @@ Navigation example:
 See `simliverse-core/docs/adr/012-agent-hierarchy-rewrite.md` for the design.
 """
 
+from . import controller
 from ._compat import IsaacSimUnavailable, isaac_version
 from .assertions import (
     Check,
@@ -58,9 +72,27 @@ from .assertions import (
     verify_navigation,
     verify_throw,
 )
-from . import controller
 from .controller import ControllerError
+from .conveyor import Conveyor, ConveyorError, drive_surface
+from .deadplate import DeadPlate, DeadPlateError, Escapement
+from .guarding import (
+    GuardingError,
+    SafetyFence,
+    spawn_beacon,
+    spawn_cabinet,
+    spawn_operator,
+    spawn_operator_platform,
+    spawn_pedestal,
+)
 from .objects import RigidObject
+from .palletizing import PalletError, pallet_slots, verify_pallet
+from .props import (
+    PropNotFound,
+    find_prop,
+    list_props,
+    spawn_prop,
+    verify_index,  # noqa: F401 -- re-exported
+)
 from .robots import (
     AerialRobot,
     DexterousHand,
@@ -82,19 +114,41 @@ from .robots import (
     list_robots,
     spawn_robot,
 )
-from .props import (
-    PropNotFound,
-    find_prop,
-    list_props,
-    spawn_prop,
-    verify_index,
-)
 from .scene import PhysicsConfig, Scene
+from .sketch import (
+    SketchError,
+    fence_from_sketch,
+    parse_sketch,
+    zones_from_sketch,
+)
+from .vision import STANDARD_VIEWS, VisionUnavailable, capture, look, png, views
 
 __all__ = [
     "AerialRobot",
     "Check",
     "ControllerError",
+    "Conveyor",
+    "DeadPlate",
+    "GuardingError",
+    "SketchError",
+    "fence_from_sketch",
+    "parse_sketch",
+    "zones_from_sketch",
+    "SafetyFence",
+    "spawn_beacon",
+    "spawn_cabinet",
+    "spawn_operator",
+    "spawn_operator_platform",
+    "spawn_pedestal",
+    "Escapement",
+    "DeadPlateError",
+    "STANDARD_VIEWS",
+    "VisionUnavailable",
+    "views",
+    "capture",
+    "look",
+    "png",
+    "ConveyorError",
     "controller",
     "DexterousHand",
     "FlightError",
@@ -110,6 +164,7 @@ __all__ = [
     "MotionError",
     "MotionResult",
     "NavigationError",
+    "PalletError",
     "PhysicsConfig",
     "Report",
     "RigidObject",
@@ -118,6 +173,7 @@ __all__ = [
     "StaleArticulation",
     "WheeledRobot",
     "airborne",
+    "drive_surface",
     "grasped",
     "isaac_version",
     "list_robots",
@@ -128,12 +184,14 @@ __all__ = [
     "spawn_robot",
     "moved_under_own_power",
     "not_teleported",
+    "pallet_slots",
     "physics_running",
     "reached_height",
     "reached_position",
     "travelled",
     "upright",
     "verify_grasp",
+    "verify_pallet",
     "verify_navigation",
     "verify_throw",
 ]

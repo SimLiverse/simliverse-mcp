@@ -9,6 +9,7 @@ manipulation became expressible — see ADR 012 §1.2.
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -91,26 +92,27 @@ def _slerp(start: Any, end: Any, fraction: float) -> np.ndarray:
     a = a / (np.linalg.norm(a) or 1.0)
     b = b / (np.linalg.norm(b) or 1.0)
     dot = float(a @ b)
-    if dot < 0.0:          # take the short way round
+    if dot < 0.0:  # take the short way round
         b, dot = -b, -dot
-    if dot > 0.9995:       # nearly parallel: lerp is exact enough and stable
+    if dot > 0.9995:  # nearly parallel: lerp is exact enough and stable
         result = a + (b - a) * fraction
         return result / (np.linalg.norm(result) or 1.0)
     theta = float(np.arccos(np.clip(dot, -1.0, 1.0)))
     sin_theta = float(np.sin(theta))
-    return (a * float(np.sin((1.0 - fraction) * theta)) / sin_theta
-            + b * float(np.sin(fraction * theta)) / sin_theta)
+    return a * float(np.sin((1.0 - fraction) * theta)) / sin_theta + b * float(np.sin(fraction * theta)) / sin_theta
 
 
 def _angle_between(rotation: Any, quaternion: Any) -> float:
     """Degrees between an achieved 3x3 rotation and a requested (w,x,y,z) quaternion."""
     achieved = np.asarray(rotation, dtype=float).reshape(3, 3)
     w, x, y, z = [float(v) for v in np.asarray(quaternion, dtype=float).reshape(4)]
-    wanted = np.array([
-        [1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)],
-        [2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)],
-        [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)],
-    ])
+    wanted = np.array(
+        [
+            [1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)],
+            [2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)],
+            [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)],
+        ]
+    )
     trace = float(np.trace(achieved.T @ wanted))
     return float(np.degrees(np.arccos(np.clip((trace - 1.0) / 2.0, -1.0, 1.0))))
 
@@ -127,10 +129,7 @@ def _quaternion_from_matrix(rotation: Any) -> np.ndarray:
     trace = float(np.trace(m))
     if trace > 0.0:
         scale = np.sqrt(trace + 1.0) * 2.0
-        quat = [0.25 * scale,
-                (m[2][1] - m[1][2]) / scale,
-                (m[0][2] - m[2][0]) / scale,
-                (m[1][0] - m[0][1]) / scale]
+        quat = [0.25 * scale, (m[2][1] - m[1][2]) / scale, (m[0][2] - m[2][0]) / scale, (m[1][0] - m[0][1]) / scale]
     else:
         i = int(np.argmax([m[0][0], m[1][1], m[2][2]]))
         j, k = (i + 1) % 3, (i + 2) % 3
@@ -173,9 +172,7 @@ def _is_sided(joint_name: str) -> bool:
     return any(token in lowered for token in _SIDE_TOKENS)
 
 
-def _match_motion_config(
-    supported: Any, joints: str, asset: str, leaf: str
-) -> str | None:
+def _match_motion_config(supported: Any, joints: str, asset: str, leaf: str) -> str | None:
     """Pick the RMPflow config for a robot from three normalised identifiers.
 
     Ordered by how much each is worth trusting. Joint names come from the
@@ -247,11 +244,7 @@ class Gripper:
         """
         if len(self.joint_indices) < 3:
             return None
-        unsided = [
-            index
-            for index, name in zip(self.joint_indices, self.joint_names)
-            if not _is_sided(name)
-        ]
+        unsided = [index for index, name in zip(self.joint_indices, self.joint_names) if not _is_sided(name)]
         return unsided[0] if len(unsided) == 1 else None
 
     @property
@@ -264,10 +257,7 @@ class Gripper:
             path
             for path in self._robot.links()
             if "knuckle" not in path.lower()
-            and any(
-                token in path.rsplit("/", 1)[-1].lower()
-                for token in ("finger", "pad", "jaw", "tip")
-            )
+            and any(token in path.rsplit("/", 1)[-1].lower() for token in ("finger", "pad", "jaw", "tip"))
         ]
         return pads[:2]
 
@@ -320,8 +310,7 @@ class Gripper:
         closed = min(gaps, key=lambda end: gaps[end])
         opened = high if closed == low else low
         logger.info(
-            "%s: jaw closes toward %.4f (pads %.4f m apart) and opens toward "
-            "%.4f (%.4f m apart).",
+            "%s: jaw closes toward %.4f (pads %.4f m apart) and opens toward %.4f (%.4f m apart).",
             self._robot.prim_path,
             closed,
             gaps[closed],
@@ -357,9 +346,7 @@ class Gripper:
                 primary = self.primary_index
                 low, high = limits[primary]
                 try:
-                    self._open_value, self._closed_value = self._ends_by_measurement(
-                        float(low), float(high)
-                    )
+                    self._open_value, self._closed_value = self._ends_by_measurement(float(low), float(high))
                 except Exception as exc:  # noqa: BLE001 - measuring needs live physics
                     logger.warning(
                         "%s: could not measure which end of the jaw closes (%s: "
@@ -397,9 +384,7 @@ class Gripper:
         """
         names = set(self.joint_names)
         disabled = [
-            problem["joint"]
-            for problem in self._robot.drive_health()
-            if problem["joint"].rsplit("/", 1)[-1] in names
+            problem["joint"] for problem in self._robot.drive_health() if problem["joint"].rsplit("/", 1)[-1] in names
         ]
         if not disabled:
             return
@@ -528,6 +513,74 @@ class SuctionGripper:
         "-Z": (0.0, 1.0, 0.0, 0.0),
     }
 
+    @staticmethod
+    def _link_reach(scene, link_path: str, direction) -> float:
+        """How far the body the cup is bolted to sticks out past the tool origin.
+
+        Measured in world space and projected onto the approach direction, then
+        sanity-capped. Everything about this was fiddly and each shortcut failed
+        in its own way:
+
+        - Local bounds are useless here. On a UR10 the links are flat siblings
+          under `/World/UR`, not a chain, so `ComputeLocalBound` on `ee_link`
+          answers in the robot root's frame - x around 1.1 for an arm nowhere
+          near that thick.
+        - A tool frame has no geometry of its own, so measuring only the named
+          mount link returns zero and the cup stays buried.
+        - Falling back to `GetParent()` therefore lands on the robot root and
+          measures the *entire arm* - which authored a 1.296 m standoff and put
+          the cup in the next room.
+
+        So find the link that actually encloses the tool origin: among the
+        robot's links, the one whose world bound contains that point is the body
+        the cup is mounted on. That is a geometric question with a geometric
+        answer, and it does not care how the hierarchy is arranged.
+        """
+        try:
+            from pxr import Gf, Usd, UsdGeom
+
+            cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_])
+            prim = scene.stage.GetPrimAtPath(link_path)
+            if not prim or not prim.IsValid():
+                return 0.0
+
+            xf = UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+            origin = np.array(xf.ExtractTranslation())
+            world_dir = np.array(xf.TransformDir(Gf.Vec3d(*[float(v) for v in direction])))
+            norm = float(np.linalg.norm(world_dir))
+            if norm < 1e-9:
+                return 0.0
+            world_dir = world_dir / norm
+
+            def reach_of(candidate) -> float:
+                box = cache.ComputeWorldBound(candidate).ComputeAlignedRange()
+                if box.IsEmpty():
+                    return 0.0
+                lo, hi = np.array(box.GetMin()), np.array(box.GetMax())
+                # The tool origin must lie inside this body, or it is not what
+                # the cup is bolted to. A 1 cm tolerance covers a flange face.
+                if np.any(origin < lo - 0.01) or np.any(origin > hi + 0.01):
+                    return 0.0
+                corners = np.array(np.meshgrid(*zip(lo, hi))).T.reshape(-1, 3)
+                return max(float(np.dot(c - origin, world_dir)) for c in corners)
+
+            best = reach_of(prim)
+            if best <= 1e-4:
+                root = prim.GetParent()
+                if root and root.IsValid():
+                    for sibling in root.GetChildren():
+                        if sibling == prim:
+                            continue
+                        best = max(best, reach_of(sibling))
+
+            # A cup standoff is centimetres. Anything larger means the wrong
+            # body was measured, and silently mounting the tool a metre away is
+            # worse than not moving it at all.
+            return float(best) if 1e-4 < best <= 0.25 else 0.0
+        except Exception:  # pragma: no cover - authoring must not die on this
+            logger.debug("Could not measure %s for a cup standoff", link_path)
+            return 0.0
+
     @classmethod
     def create(
         cls,
@@ -587,9 +640,21 @@ class SuctionGripper:
           entities created mid-play are never registered, and the gripper then
           ignores every action.
         """
-        from isaacsim.robot.surface_gripper import create_surface_gripper
         from pxr import Gf, UsdGeom, UsdPhysics
         from usd.schema.isaac import robot_schema
+
+        try:
+            from isaacsim.robot.surface_gripper import create_surface_gripper
+        except ImportError:
+            # Isaac 5.x ships no module-level helper. Its CreateSurfaceGripper
+            # *command* is a thin wrapper -- resolve a free child path, call
+            # the schema -- so go straight to the schema with the same layout
+            # 6.0's helper produces: the gripper prim is a child of the cup.
+            def create_surface_gripper(stage, parent_path):
+                import omni.usd
+
+                path = omni.usd.get_stage_next_free_path(stage, parent_path + "/SurfaceGripper", False)
+                return robot_schema.CreateSurfaceGripper(stage, path)
 
         from ..scene import Scene as _Scene
 
@@ -612,66 +677,129 @@ class SuctionGripper:
 
         axis = str(approach_axis).upper()
         if axis not in cls._Z_ONTO:
-            raise ValueError(
-                f"approach_axis must be one of {sorted(cls._Z_ONTO)}, not {approach_axis!r}"
-            )
+            raise ValueError(f"approach_axis must be one of {sorted(cls._Z_ONTO)}, not {approach_axis!r}")
         rot = Gf.Quatf(*cls._Z_ONTO[axis])
         direction = np.zeros(3)
         direction["XYZ".index(axis[-1])] = -1.0 if axis.startswith("-") else 1.0
-        mount = direction * (float(offset) + float(cup_length) / 2.0)
+        # Clear the mounting link's own body before the cup starts.
+        #
+        # `offset` used to default to 0, putting the cup's centre one half-length
+        # from the link's *origin*. On a UR10 that origin is not the flange face:
+        # `ee_link` and `wrist_3_link` share a world position, and wrist_3's
+        # geometry extends 45 mm past it along the approach axis. The cup was
+        # therefore authored inside the wrist, poking out of its side — which is
+        # exactly what "the suction gripper is mounted at 90 degrees" looks like,
+        # even though the cup's axis measured 0.05 degrees from straight down.
+        #
+        # No measurement caught this. The approach vector was right, the grip
+        # worked, the pick and place both succeeded. It was reported by a human
+        # looking at the screen, twice, before it was believed.
+        #
+        # So measure the link instead of assuming a number: take its bound along
+        # the approach direction and start the cup there. An explicit `offset`
+        # still wins, and a link with no geometry to measure falls back to the
+        # old behaviour rather than failing.
+        # Clear a previous cup before measuring, never after: on a rebuild the
+        # old cup is still a child of the mount link, and measuring it as the
+        # geometry to clear walks the new one further out every single build.
+        for stale in (
+            f"{parent_prim_path}/SuctionCup",
+            f"{parent_prim_path}/SuctionStem",
+            f"{parent_prim_path}/SuctionCup_AttachPoint",
+        ):
+            if scene.stage.GetPrimAtPath(stale):
+                scene.stage.RemovePrim(stale)
 
-        # Where the cup sits in the world right now, so it can be authored
-        # outside the articulation and still start in the right place.
-        link_world = UsdGeom.Xformable(
-            scene.stage.GetPrimAtPath(parent_prim_path)
-        ).ComputeLocalToWorldTransform(0)
-        local = Gf.Matrix4d(1.0)
-        local.SetRotateOnly(Gf.Quatd(rot))
-        local.SetTranslateOnly(Gf.Vec3d(*[float(v) for v in mount]))
-        cup_world = local * link_world
+        stand_off = float(offset)
+        if not stand_off:
+            stand_off = cls._link_reach(scene, parent_prim_path, direction)
+        logger.info("Cup standoff on %s: %.4f m", parent_prim_path, stand_off)
+        mount = direction * (stand_off + float(cup_length) / 2.0)
 
-        parent = cup_parent or parent_prim_path.rsplit("/", 1)[0]
-        stem = parent_prim_path.strip("/").replace("/", "_")
-        cup_path = f"{parent}/{stem}_SuctionCup"
+        # Under the end-effector link, not beside the robot. Isaac's own surface
+        # gripper documentation is explicit that the gripper "does not require a
+        # separate rigid body or cup geometry in the physics simulation" - the
+        # cup is decoration and the grasp is the D6 joint. Visual geometry
+        # parented to a link is not a rigid body, so the rule that parenting a
+        # *body* under an articulation link is fatal does not apply to it.
+        # `cup_parent` is accepted for callers that still pass it and ignored.
+        # The stem between the flange and the cup. Without it the cup hangs in
+        # mid-air: the standoff is real -- it is what lifts the cup clear of a
+        # conveyor's frame rail -- but nothing was drawn across it, so a
+        # perfectly correct tool rendered as a disc floating below the wrist,
+        # and the first person to look at it reasonably asked what was broken.
+        # Visual only: no collider, no rigid body, exactly like the cup.
+        if float(stand_off) > 1e-4:
+            stem_path = f"{parent_prim_path}/SuctionStem"
+            stem = UsdGeom.Cylinder.Define(scene.stage, stem_path)
+            stem_radius = max(0.02, float(cup_radius) * 0.35)
+            stem.CreateRadiusAttr(stem_radius)
+            stem.CreateHeightAttr(float(stand_off))
+            stem.CreateAxisAttr("Z")
+            stem.CreateExtentAttr(
+                [
+                    (-stem_radius, -stem_radius, -float(stand_off) / 2.0),
+                    (stem_radius, stem_radius, float(stand_off) / 2.0),
+                ]
+            )
+            stem_xform = UsdGeom.Xformable(stem.GetPrim())
+            stem_xform.ClearXformOpOrder()
+            stem_xform.AddTranslateOp().Set(Gf.Vec3d(*[float(v) for v in direction * (float(stand_off) / 2.0)]))
+            stem_xform.AddOrientOp().Set(rot)
+            UsdGeom.Gprim(stem.GetPrim()).CreateDisplayColorAttr([Gf.Vec3f(0.25, 0.25, 0.28)])
+
+        cup_path = f"{parent_prim_path}/SuctionCup"
         cup = UsdGeom.Cylinder.Define(scene.stage, cup_path)
         cup.CreateRadiusAttr(float(cup_radius))
         cup.CreateHeightAttr(float(cup_length))
         cup.CreateAxisAttr("Z")
-        cup.CreateExtentAttr([
-            (-cup_radius, -cup_radius, -cup_length / 2.0),
-            (cup_radius, cup_radius, cup_length / 2.0),
-        ])
+        cup.CreateExtentAttr(
+            [
+                (-cup_radius, -cup_radius, -cup_length / 2.0),
+                (cup_radius, cup_radius, cup_length / 2.0),
+            ]
+        )
         cup_prim = cup.GetPrim()
         xform = UsdGeom.Xformable(cup_prim)
-        xform.AddTranslateOp().Set(cup_world.ExtractTranslation())
-        xform.AddOrientOp().Set(Gf.Quatf(cup_world.ExtractRotationQuat()))
-        UsdPhysics.CollisionAPI.Apply(cup_prim)
-        UsdPhysics.RigidBodyAPI.Apply(cup_prim)
-        UsdPhysics.MassAPI.Apply(cup_prim).CreateMassAttr(float(cup_mass))
+        # Clear first. `Define` returns the *existing* prim when one is already
+        # at this path, and AddTranslateOp then throws "the xformOp
+        # 'xformOp:translate' already exists in xformOpOrder". That happens the
+        # second time a scene is built in one session, which is the normal way
+        # an agent works: build, look, adjust, build again. The first build
+        # succeeded and the second died inside attach_suction_gripper, so the
+        # cell could never be re-authored without restarting the simulator.
+        # `spawn_rigid` and `spawn_prop` have both cleared their op order for
+        # this reason; this was the one authoring path that did not.
+        xform.ClearXformOpOrder()
+        # A child of the link, so the offset is local and it simply rides along.
+        xform.AddTranslateOp().Set(Gf.Vec3d(*[float(v) for v in mount]))
+        xform.AddOrientOp().Set(rot)
+        # No collider, no rigid body, no mass. Deliberately. The cup used to be
+        # a dynamic body bolted to the flange with a fixed joint, and that extra
+        # body is what made the arm unusable: measured on a UR10, a Cartesian
+        # move that a bare arm completes to 8 mm could not get within 0.65 m
+        # with the cup fitted, and on a KR210 the tool drifted 0.21 m off the
+        # box during a slow descent and sealed on empty air.
 
-        # Two joints, and the split matters. A fixed joint carries the cup on the
-        # flange; the attachment joint - the one the gripper casts from - is left
-        # with `body1` empty for the gripper to fill in when it latches.
+        # One joint now, not two. The fixed joint that carried the cup is gone
+        # with the cup's rigid body, and the attachment joint anchors to the
+        # end-effector link itself rather than to a floating cup.
         #
-        # Wiring the attachment joint straight to the flange instead (body1 set)
-        # leaves nothing holding the cup: measured, it drifted 0.29 m away inside
-        # a second while the gripper reported a perfectly healthy status.
-        mount_path = f"{cup_path}_Mount"
-        fixed = UsdPhysics.FixedJoint.Define(scene.stage, mount_path)
-        fixed.CreateBody0Rel().SetTargets([parent_prim_path])
-        fixed.CreateBody1Rel().SetTargets([cup_path])
-        fixed.CreateLocalPos0Attr().Set(Gf.Vec3f(*[float(v) for v in mount]))
-        fixed.CreateLocalRot0Attr().Set(rot)
-        fixed.CreateLocalPos1Attr().Set(Gf.Vec3f(0.0, 0.0, 0.0))
-        fixed.CreateLocalRot1Attr().Set(Gf.Quatf(1, 0, 0, 0))
-        fixed.CreateExcludeFromArticulationAttr().Set(True)
-        fixed.CreateCollisionEnabledAttr().Set(False)
-
+        # The old arrangement is documented in git history as a known defect
+        # kept on purpose: the attachment joint left `body1` empty, PhysX reads
+        # an empty body as *the world*, and the resulting world-anchored joint
+        # fought the mount joint dragging the same cup along with the arm. The
+        # recorded symptom was a cup-to-flange gap swinging between 0.008 m and
+        # 0.180 m instead of holding at 0.010 m. With `body0` on the link there
+        # is no second joint to fight and nothing anchored to the world.
         attach_path = f"{cup_path}_AttachPoint"
         joint = UsdPhysics.Joint.Define(scene.stage, attach_path)
-        joint.CreateBody0Rel().SetTargets([cup_path])
-        joint.CreateLocalPos0Attr().Set(Gf.Vec3f(0.0, 0.0, 0.0))
-        joint.CreateLocalRot0Attr().Set(Gf.Quatf(1, 0, 0, 0))
+        # Body 0 is the end effector. Isaac requires every attachment point on a
+        # gripper to share the same Body 0, and that body is the link the
+        # gripper is mounted on.
+        joint.CreateBody0Rel().SetTargets([parent_prim_path])
+        joint.CreateLocalPos0Attr().Set(Gf.Vec3f(*[float(v) for v in mount]))
+        joint.CreateLocalRot0Attr().Set(rot)
         joint.CreateLocalPos1Attr().Set(Gf.Vec3f(0.0, 0.0, 0.0))
         joint.CreateLocalRot1Attr().Set(Gf.Quatf(1, 0, 0, 0))
         # KNOWN DEFECT, left enabled on purpose: this is the only setting that
@@ -704,20 +832,57 @@ class SuctionGripper:
         joint.CreateExcludeFromArticulationAttr().Set(True)
         joint.CreateCollisionEnabledAttr().Set(False)
 
+        # Five locked, and a short travel along the approach axis. Both halves
+        # of that were measured, and both matter.
+        #
+        # Free travel over the whole grip distance, with the rotations free to
+        # +/-3 rad, never latched at all: the cup sat 3 mm above a box, reported
+        # Closed, and gripped nothing, every time.
+        #
+        # Locking all six - what Isaac's documentation says an attachment point
+        # needs - latched, but only on contact. The cup then had to be driven
+        # onto the box to seal, and driving it onto a carton resting against a
+        # stop shoved it 1.6 cm before the seal formed, so the grip landed on an
+        # edge and the box hung off the cup 5.4 cm out.
+        #
+        # A 35 mm range along Z is the middle: enough for the cup to reach a box
+        # it is hovering over, not enough to wobble. Measured, sealing from a
+        # 30 mm standoff: the box was not nudged at all (0.0000 m), and came off
+        # the belt 0.2544 m with the cup centred on it to 0.3 mm.
+        # Compliant, not rigid - this is what NVIDIA's own shipped UR10 suction
+        # joint does, and it is the cup's bellows.
+        #
+        #     transX / transY   locked
+        #     transZ            0 .. 0.02
+        #     rotX / rotY       +/- 5 degrees
+        #     rotZ              +/- 3 degrees
+        #
+        # We locked all six for a long time on the strength of the attachment
+        # point documentation, which is right for `gripper_grasp.py` - there the
+        # gripper is a bare cube with no bellows to model. On a suction cup it
+        # makes the grasp brittle: with nothing able to give, every acceleration
+        # of the arm goes straight into the constraint, and the whole PhysX
+        # constraint force is what the coaxial and shear limits are compared
+        # against on a single substep.
+        reach = min(float(max_grip_distance), 0.02)
         for name, low, high in (
-            ("transX", 1.0, -1.0),          # locked: low > high
-            ("transY", 1.0, -1.0),          # locked: low > high
-            ("transZ", 0.0, float(max_grip_distance)),
-            ("rotX", -3.0, 3.0),
-            ("rotY", -3.0, 3.0),
+            ("transX", 1.0, -1.0),
+            ("transY", 1.0, -1.0),
+            ("transZ", 0.0, reach),
+            ("rotX", -5.0, 5.0),
+            ("rotY", -5.0, 5.0),
             ("rotZ", -3.0, 3.0),
         ):
             limit = UsdPhysics.LimitAPI.Apply(joint.GetPrim(), name)
             limit.CreateLowAttr().Set(low)
             limit.CreateHighAttr().Set(high)
+        # NVIDIA runs every axis at the same 1000 / 100. Ours were tuned by hand
+        # against the all-locked joint above and no longer describe anything.
         for name, stiffness, damping in (
-            ("rotX", 100.0, 0.0), ("rotY", 100.0, 0.0),
-            ("rotZ", 10000.0, 0.0), ("transZ", 5000.0, 100.0),
+            ("rotX", 1000.0, 100.0),
+            ("rotY", 1000.0, 100.0),
+            ("rotZ", 1000.0, 100.0),
+            ("transZ", 1000.0, 100.0),
         ):
             drive = UsdPhysics.DriveAPI.Apply(joint.GetPrim(), name)
             drive.CreateStiffnessAttr().Set(stiffness)
@@ -728,16 +893,47 @@ class SuctionGripper:
         joint_prim.GetAttribute("isaac:forwardAxis").Set("Z")
         joint_prim.GetAttribute("isaac:clearanceOffset").Set(float(clearance_offset))
 
+        # Clear any gripper already under this cup. `create_surface_gripper`
+        # does not reuse one: authoring the cell twice in a session left
+        # SurfaceGripper in place and made SurfaceGripper_01 beside it, and the
+        # arm then had two grippers with no way to tell which one was live.
+        for existing in list(scene.stage.GetPrimAtPath(cup_path).GetChildren()):
+            if "SurfaceGripper" in str(existing.GetTypeName()) or existing.GetName().startswith("SurfaceGripper"):
+                scene.stage.RemovePrim(existing.GetPath())
+
         prim = create_surface_gripper(scene.stage, cup_path)
         prim.GetRelationship("isaac:attachmentPoints").SetTargets([attach_path])
 
         gripper = cls(
-            prim.GetPath().pathString, scene=scene,
-            max_grip_distance=float(max_grip_distance), **kwargs,
+            prim.GetPath().pathString,
+            scene=scene,
+            max_grip_distance=float(max_grip_distance),
+            **kwargs,
         )
         gripper.approach_axis = axis
         gripper.cup_path = cup_path
-        gripper.tip_offset = float(offset) + float(cup_length)
+        # NOTE: this is the mount offset plus the cup, which is right - but
+        # `rebind_suction` recomputes it by measuring the cup cylinder alone and
+        # gets just `cup_length`. Since the standoff became non-zero those two
+        # disagree by the standoff, and a controller that rebinds after Play
+        # descends that much too low. Measured after the flange-face fix: the
+        # pick still succeeds (+0.271 m) but the cup lands 65 mm off centre
+        # against 43 mm before, which is the disagreement showing.
+        gripper.tip_offset = float(stand_off) + float(cup_length)
+        # And author it on the prim, so `rebind_suction` can read the truth
+        # back instead of re-measuring the cup cylinder alone -- which misses
+        # the standoff and sends every later pick that much too low.
+        try:
+            from pxr import Sdf as _Sdf
+
+            prim.CreateAttribute("simliverse:tip_offset", _Sdf.ValueTypeNames.Float).Set(float(gripper.tip_offset))
+            # And which axis it was mounted on. `rebind_suction` builds a
+            # fresh handle whose default is "Z", so an X-mounted tool came
+            # back claiming Z -- and the arm then aimed the wrong axis at the
+            # floor while the cup pointed sideways. Recorded, not inferred.
+            prim.CreateAttribute("simliverse:approach_axis", _Sdf.ValueTypeNames.String).Set(str(gripper.approach_axis))
+        except Exception:  # noqa: BLE001 -- a stamp that cannot be written is a warning
+            logger.debug("Could not stamp tip_offset on %s", cup_path, exc_info=True)
         # Author the schema attributes as well as setting them through the view:
         # the view sets them per-instance, the prim carries them across stop/play.
         for attr, value in (
@@ -771,6 +967,31 @@ class SuctionGripper:
         if not self.scene.is_playing():
             self.scene.play()
             self.scene.step(2)
+
+        # Turn on write-to-USD BEFORE the view exists, or building the view
+        # releases whatever the gripper is holding.
+        #
+        # Any USD change to the gripper prim fires the extension's
+        # `onComponentChange`, which re-reads every `isaac:*` attribute -
+        # including `isaac:status`. When that attribute has no authored value the
+        # token comes back empty and the C++ falls through to `return
+        # GripperStatus::Open`, so the in-memory state is clobbered to Open and
+        # the next physics step releases every attachment. Writing *any*
+        # property is enough; the handler is not per-attribute.
+        #
+        # `GripperView.__init__` ends by calling `set_surface_gripper_properties`,
+        # which is nothing but `attr.Set(...)` calls - so merely constructing a
+        # view over a closed gripper drops the payload. With write-to-USD on, the
+        # runtime keeps `isaac:status` current and the re-read is a no-op.
+        # NVIDIA's own `gripper_grasp.py` sets this immediately before building
+        # its view, which is where the ordering comes from.
+        try:
+            from isaacsim.robot.surface_gripper.bindings import _surface_gripper
+
+            _surface_gripper.acquire_surface_gripper_interface().set_write_to_usd(True)
+        except Exception:  # pragma: no cover - older builds lack the toggle
+            logger.debug("Could not enable surface-gripper write-to-USD")
+
         self._view = GripperView(paths=self.prim_path)
         # The view must be told its properties explicitly. Passing them to the
         # constructor was not enough - the gripper acknowledged actions and then
@@ -828,6 +1049,63 @@ class SuctionGripper:
         return any(prim_path in held for held in self.gripped_objects)
 
 
+class LulaRoute:
+    """A Lula c-space trajectory in the shape `Manipulator.follow` drives.
+
+    The same contract as `planning.MotionPlan` -- `joint_names`, `duration`,
+    `sample(t)` -- over Lula's own `start_time`/`end_time`/`get_joint_targets`
+    surface, so a route made without cuMotion is followed by the same code.
+    """
+
+    def __init__(self, trajectory: Any, joint_names: Any, start: Any = None, goal: Any = None) -> None:
+        self._trajectory = trajectory
+        self.joint_names = list(joint_names)
+        self._start = float(trajectory.start_time)
+        self.duration = float(trajectory.end_time) - self._start
+        #: The configurations this route runs between, so a caller choosing
+        #: among several routes to the same pose can ask what each one costs.
+        #: IK can reach a pose either by folding the arm or by turning the
+        #: base most of the way round, and both are valid answers -- but one
+        #: of them looks, to somebody watching the cell, like the robot has
+        #: decided to take the scenic route.
+        self.start = None if start is None else np.asarray(start, dtype=float)
+        self.goal = None if goal is None else np.asarray(goal, dtype=float)
+
+    @property
+    def base_turn(self) -> float:
+        """Radians the first joint turns over this route.
+
+        The first joint is the one that swings the whole arm, so it is the
+        one worth asking about: every other joint moving is the arm changing
+        shape, and that is what it is for.
+        """
+        if self.start is None or self.goal is None or not len(self.goal):
+            return 0.0
+        return float(abs(self.goal[0] - self.start[0]))
+
+    @property
+    def travel(self) -> float:
+        """The largest single-joint move on this route, in radians."""
+        if self.start is None or self.goal is None:
+            return 0.0
+        return float(np.max(np.abs(self.goal - self.start)))
+
+    def __repr__(self) -> str:
+        return (
+            f"<LulaRoute {self.duration:.2f}s, {len(self.joint_names)} joints, "
+            f"base {np.degrees(self.base_turn):.0f} deg>"
+        )
+
+    def sample(self, t: float) -> tuple[np.ndarray, np.ndarray]:
+        at = self._start + float(np.clip(t, 0.0, self.duration))
+        result = self._trajectory.get_joint_targets(at)
+        if isinstance(result, (tuple, list)) and len(result) == 2:
+            positions, velocities = result
+        else:
+            positions, velocities = result, np.zeros(len(self.joint_names))
+        return np.asarray(positions, dtype=float), np.asarray(velocities, dtype=float)
+
+
 class Manipulator(Robot):
     """A robot arm with an end effector."""
 
@@ -877,9 +1155,7 @@ class Manipulator(Robot):
         self._pose_phase = 0
         self.gripper = Gripper(self, self.groups.gripper)
 
-    def attach_suction_gripper(
-        self, parent_prim_path: str | None = None, **kwargs: Any
-    ) -> "SuctionGripper":
+    def attach_suction_gripper(self, parent_prim_path: str | None = None, **kwargs: Any) -> "SuctionGripper":
         """Fit a suction gripper to this arm and use it as the end effector.
 
         Mounts on the **tool flange** and casts out along whichever of that
@@ -895,13 +1171,222 @@ class Manipulator(Robot):
         """
         if parent_prim_path is None:
             parent_prim_path = self._tool_link()
-            kwargs.setdefault("approach_axis", self._approach_axis(parent_prim_path))
+            # The cup points along tool +Z, because that is the axis every
+            # down-orientation this library commands (`downward_orientation`,
+            # the `[0, 1, 0, 0]` family) points at the floor. The cup and the
+            # servo have to agree on one axis, and that is the whole rule.
+            #
+            # The old default asked `_approach_axis`, which projects the last
+            # structural link offset onto the tool frame. On a KR210 that
+            # offset is a 3.7 cm lateral wrist step along tool X, so the cup
+            # was mounted sideways: measured on a flange-down pick, the cup sat
+            # 18 cm beside the flange at the flange's own height, above a box
+            # 18 cm below, and eight seal retries found nothing. Pass
+            # `approach_axis="auto"` to get the old measurement back.
+            # Measured off the flange, not assumed. Hardcoding "Z" bolted the
+            # tool to the side of a KR210's wrist, at right angles to the
+            # plate it belongs on -- it picked boxes and looked broken.
+            axis = kwargs.get("approach_axis")
+            if axis in (None, "auto"):
+                axis = self._approach_axis(parent_prim_path)
+            kwargs["approach_axis"] = axis
             # Outside the robot's own hierarchy - see `SuctionGripper.create`.
             kwargs.setdefault("cup_parent", self.prim_path.rsplit("/", 1)[0])
-        self.suction = SuctionGripper.create(
-            parent_prim_path, scene=self.scene, **kwargs
-        )
+        self.suction = SuctionGripper.create(parent_prim_path, scene=self.scene, **kwargs)
         return self.suction
+
+    def tune_drives(
+        self,
+        *,
+        stiffness: float | None = None,
+        damping: float | None = None,
+        max_force: float | None = None,
+    ) -> dict[str, Any]:
+        """Set position-drive gains on every revolute joint of this arm.
+
+        **Changing a robot's gains is changing the robot**, so this is a call
+        you make deliberately and report, never a default applied behind the
+        user's back. It is here because two shipped assets cannot hold a pose
+        without it, and the failure does not look like a gains problem.
+
+        Measured on Isaac's UR10, which ships stiffness 1.5e5-8.3e5 against
+        damping 5-28 — underdamped by two orders of magnitude:
+
+        * Commanded to a home pose, the arm ran away to `wrist_3 = -66.9 rad`,
+          about ten revolutions, and ended collapsed at its own base. Every
+          Cartesian call afterwards failed with "the target is likely outside
+          the workspace", which was true of where the arm actually was and
+          false about the workspace.
+        * `maxForce` of 56-330 Nm then could not hold a reaching-down pose even
+          once the oscillation stopped: IK found the solution and `pose_to`
+          reported "the drives are not tracking it", 0.148 m short.
+
+        With `stiffness=1e5, damping=1e4, max_force=1e4` the same arm holds a
+        commanded home to 4.3e-4 rad and a reaching-down pick pose to 2.7 mm.
+        Swept alternatives all diverged by six orders of magnitude
+        (1e5/2e4, 5e4/1e4, 1e4/2e3), so this is a narrow window, not a taste.
+
+        Returns what it changed, so the run can say so.
+        """
+        from pxr import UsdPhysics
+
+        stage = get_stage()
+        touched: list[str] = []
+        for prim in stage.Traverse():
+            path = str(prim.GetPath())
+            if not path.startswith(self.prim_path):
+                continue
+            if not prim.IsA(UsdPhysics.RevoluteJoint):
+                continue
+            drive = UsdPhysics.DriveAPI.Get(prim, "angular")
+            if not drive:
+                continue
+            if stiffness is not None:
+                drive.GetStiffnessAttr().Set(float(stiffness))
+            if damping is not None:
+                drive.GetDampingAttr().Set(float(damping))
+            if max_force is not None:
+                drive.GetMaxForceAttr().Set(float(max_force))
+            touched.append(path.rsplit("/", 1)[-1])
+
+        if not touched:
+            logger.warning(
+                "%s: no revolute joints with an angular drive were found, so no "
+                "gains were changed. Check the prim path.",
+                self.prim_path,
+            )
+        return {
+            "joints": touched,
+            "stiffness": stiffness,
+            "damping": damping,
+            "max_force": max_force,
+        }
+
+    def rebind_suction(self, prim_path: str | None = None) -> "SuctionGripper":
+        """Bind to a suction cup that is already on the stage. Authors nothing.
+
+        A controller is the reason this exists. The cup is authored once, while
+        the scene is built, because a surface gripper created after the timeline
+        starts is never registered. But a controller builds fresh handles inside
+        `compute()` on every Play, and `Robot.attach` knows nothing about a cup
+        someone else authored — so `arm.suction` is None on a replay and the
+        obvious next move, calling `attach_suction_gripper` again, authors a
+        second cup on top of the first.
+
+        Note that `arm.gripper` is **not** the cup. It is the finger gripper,
+        which stays available so an arm can have both, and on an arm that ships
+        with a bare flange it exists and holds nothing. A KR210 palletising
+        controller that calls `arm.gripper.close()` commands fingers that are
+        not there and reports no error worth reading.
+
+        `tip_offset` **is** recovered, by measuring the cup. It has to be. A
+        pick height is `box top + tip_offset + clearance`, so a rebound gripper
+        reporting 0.0 sends the flange to where the tip belongs and buries the
+        cup in the box: measured here, the cup went 45 mm into a 30 cm carton,
+        shoved it off the belt sideways, and the seal never formed. The number
+        is the cup cylinder's own height, which is on the stage, so nothing has
+        to be remembered from the build.
+        """
+        path = prim_path or self._find_surface_gripper()
+        settings = {}
+        prim = get_stage().GetPrimAtPath(path)
+        if prim.IsValid():
+            # `create` writes these onto the prim precisely so they survive a
+            # stop/play, which is what makes rebinding give the same gripper
+            # rather than one wearing default limits.
+            for key, attr in (
+                ("max_grip_distance", "isaac:maxGripDistance"),
+                ("coaxial_force_limit", "isaac:coaxialForceLimit"),
+                ("shear_force_limit", "isaac:shearForceLimit"),
+                ("retry_interval", "isaac:retryInterval"),
+            ):
+                attribute = prim.GetAttribute(attr)
+                if attribute and attribute.Get() is not None:
+                    settings[key] = float(attribute.Get())
+        self.suction = SuctionGripper(path, scene=self.scene, **settings)
+        # The cup is the SurfaceGripper's parent: `create` authors the cylinder
+        # and puts the gripper prim beneath it.
+        cup_path = path.rsplit("/", 1)[0]
+        # The stamp first: `attach_suction_gripper` records standoff + cup on
+        # the gripper prim, and measuring the cup cylinder alone misses the
+        # standoff -- the two disagreed by exactly that much, and a controller
+        # that rebound after Play descended the difference too low.
+        height = None
+        try:
+            gripper_prim = get_stage().GetPrimAtPath(self._find_surface_gripper())
+            attr = gripper_prim.GetAttribute("simliverse:tip_offset")
+            if attr and attr.HasValue():
+                height = float(attr.Get())
+        except Exception:  # noqa: BLE001 - fall through to measuring
+            logger.debug("No tip stamp; measuring the cup", exc_info=True)
+        if not height:
+            try:
+                from pxr import UsdGeom
+
+                cup_prim = get_stage().GetPrimAtPath(cup_path)
+                height = UsdGeom.Cylinder(cup_prim).GetHeightAttr().Get() if cup_prim.IsValid() else None
+            except Exception:  # noqa: BLE001 - a cup we cannot measure is not fatal
+                logger.debug("Could not measure the cup at %s", cup_path, exc_info=True)
+                height = None
+        if height:
+            self.suction.cup_path = cup_path
+            self.suction.tip_offset = float(height)
+        try:
+            gripper_prim = get_stage().GetPrimAtPath(self._find_surface_gripper())
+            axis_attr = gripper_prim.GetAttribute("simliverse:approach_axis")
+            if axis_attr and axis_attr.HasValue():
+                self.suction.approach_axis = str(axis_attr.Get())
+        except Exception:  # noqa: BLE001 - an unreadable stamp leaves the default
+            logger.debug("Could not read the mounted approach axis", exc_info=True)
+        if height:
+            pass
+        else:
+            logger.warning(
+                "Could not measure the suction cup at %s, so tip_offset stays "
+                "0.0. Pick heights computed as 'box top + tip_offset' will send "
+                "the flange to where the tip belongs and bury the cup in the "
+                "object — measured at 45 mm into a carton, which shoved it off "
+                "the conveyor instead of sealing on it.",
+                cup_path,
+            )
+        return self.suction
+
+    def _find_surface_gripper(self) -> str:
+        """The one surface gripper on the stage, or an error naming what it found."""
+        from pxr import Usd
+
+        stage = get_stage()
+        found = [
+            str(prim.GetPath())
+            for prim in Usd.PrimRange(stage.GetPseudoRoot())
+            if "SurfaceGripper" in str(prim.GetTypeName())
+        ]
+        if not found:
+            raise MotionError(
+                f"{self.prim_path}: no surface gripper on the stage to bind to. "
+                f"A cup has to be authored before physics starts — call "
+                f"attach_suction_gripper() while building the scene, not from a "
+                f"controller."
+            )
+        if len(found) == 1:
+            return found[0]
+        # More than one arm, or a cup left behind by an earlier build. A cup is
+        # parented under the end-effector link, so "is it under this robot" is
+        # exact - and the old heuristic, matching a flattened name stem like
+        # `World_UR` against the path, stopped matching anything the moment the
+        # cup moved inside the robot. It reported every gripper as unowned.
+        owned = [path for path in found if path.startswith(self.prim_path + "/")]
+        if not owned:
+            stem = self.prim_path.strip("/").replace("/", "_")
+            owned = [path for path in found if stem in path]
+        if len(owned) == 1:
+            return owned[0]
+        raise MotionError(
+            f"{self.prim_path}: {len(found)} surface grippers on the stage "
+            f"({', '.join(found)}) and {len(owned)} of them name this robot, so "
+            f"which one to drive is ambiguous. Pass the path explicitly: "
+            f"rebind_suction('/World/...')."
+        )
 
     def remove_suction_gripper(self) -> None:
         """Delete a cup authored by `attach_suction_gripper`, if there is one."""
@@ -909,8 +1394,12 @@ class Manipulator(Robot):
         if gripper is None or not gripper.cup_path:
             return
         stage = get_stage()
-        for path in (gripper.prim_path, f"{gripper.cup_path}_AttachPoint",
-                     f"{gripper.cup_path}_Mount", gripper.cup_path):
+        for path in (
+            gripper.prim_path,
+            f"{gripper.cup_path}_AttachPoint",
+            f"{gripper.cup_path}_Mount",
+            gripper.cup_path,
+        ):
             stage.RemovePrim(path)
         self.suction = None
 
@@ -927,10 +1416,7 @@ class Manipulator(Robot):
                 if link.rsplit("/", 1)[-1] == frame:
                     return link
         if not links:
-            raise MotionError(
-                f"{self.prim_path} reports no links, so there is nothing to mount "
-                f"a gripper on."
-            )
+            raise MotionError(f"{self.prim_path} reports no links, so there is nothing to mount a gripper on.")
         return links[-1]
 
     def _approach_axis(self, tool_link: str) -> str:
@@ -1007,9 +1493,7 @@ class Manipulator(Robot):
         and a handle built any way at all can find it.
         """
         try:
-            attr = get_stage().GetPrimAtPath(self.prim_path).GetAttribute(
-                "simliverse:motion_config"
-            )
+            attr = get_stage().GetPrimAtPath(self.prim_path).GetAttribute("simliverse:motion_config")
             value = attr.Get() if attr and attr.IsValid() else None
             return str(value) if value else None
         except Exception:  # noqa: BLE001 — absence is the normal case
@@ -1048,10 +1532,7 @@ class Manipulator(Robot):
                 prim = stage.GetPrimAtPath(path)
                 if prim and prim.IsValid():
                     for spec in prim.GetPrimStack():
-                        paths.extend(
-                            str(item.assetPath)
-                            for item in spec.referenceList.prependedItems
-                        )
+                        paths.extend(str(item.assetPath) for item in spec.referenceList.prependedItems)
                 path = path.rsplit("/", 1)[0]
             return " ".join(paths).lower().replace("_", "")
         except Exception:  # noqa: BLE001 - identity is a hint, the caller still raises
@@ -1108,11 +1589,12 @@ class Manipulator(Robot):
             default_physics_dt=self.scene.dt,
         )
         frame = self._end_effector_frame or config.get("end_effector_frame_name")
+        # Kept: the c-space trajectory generator behind `route_to` is built
+        # from the same description and URDF.
+        self._lula_kinematics_config = loader.load_supported_lula_kinematics_solver_config(name)
         self._ik = mg.ArticulationKinematicsSolver(
             robot_articulation=self._articulation,
-            kinematics_solver=mg.LulaKinematicsSolver(
-                **loader.load_supported_lula_kinematics_solver_config(name)
-            ),
+            kinematics_solver=mg.LulaKinematicsSolver(**self._lula_kinematics_config),
             end_effector_frame_name=frame,
         )
         self._end_effector_frame = frame
@@ -1153,7 +1635,7 @@ class Manipulator(Robot):
             return self._arm_base_view
 
         self._arm_base_view = None
-        candidates = [str(l) for l in self.links()]
+        candidates = [str(link) for link in self.links()]
         # `*_link0` is the convention for an arm's root frame (panda_link0,
         # ur_link0); `base_link` is the usual fallback for the body an arm is
         # bolted to. Anything else and the articulation root is as good a guess
@@ -1391,10 +1873,9 @@ class Manipulator(Robot):
                 raise MotionError(
                     f"{self.prim_path}: no inverse-kinematics solution for position "
                     f"{np.round(target, 4).tolist()}"
-                    + (f" with orientation {np.round(rotation, 4).tolist()}"
-                       if rotation is not None else "")
+                    + (f" with orientation {np.round(rotation, 4).tolist()}" if rotation is not None else "")
                     + ". The pose is out of reach or the orientation cannot be held "
-                      "there. This is a property of the arm, not of this run."
+                    "there. This is a property of the arm, not of this run."
                 )
             return False
 
@@ -1408,9 +1889,7 @@ class Manipulator(Robot):
         self._pose_from = self.ee_position.copy()
         self._pose_from_quat = self.ee_orientation
         current = np.asarray(self.joint_positions, dtype=float)
-        self._pose_seed = np.asarray(
-            [current[i] for i in self._solver_indices()], dtype=float
-        )
+        self._pose_seed = np.asarray([current[i] for i in self._solver_indices()], dtype=float)
         self._pose_ramp = max(0, int(ramp))
         self._pose_phase = 0
         if self._pose_ramp:
@@ -1426,9 +1905,7 @@ class Manipulator(Robot):
         `compute` without ever stepping physics itself.
         """
         if self._pose_command is None:
-            raise MotionError(
-                f"{self.prim_path}: advance_pose() before any command_pose()."
-            )
+            raise MotionError(f"{self.prim_path}: advance_pose() before any command_pose().")
         if not self._pose_ramp:
             return True
         self._pose_phase = min(self._pose_phase + 1, self._pose_ramp)
@@ -1461,7 +1938,8 @@ class Manipulator(Robot):
             logger.warning(
                 "%s: no IK solution for waypoint %s on the way to %s; holding. "
                 "The straight path between these poses leaves the workspace.",
-                self.prim_path, np.round(waypoint, 3).tolist(),
+                self.prim_path,
+                np.round(waypoint, 3).tolist(),
                 np.round(self._pose_goal, 3).tolist(),
             )
         return False
@@ -1482,9 +1960,7 @@ class Manipulator(Robot):
         rather than merely measured.
         """
         if self._pose_command is None:
-            raise MotionError(
-                f"{self.prim_path}: refine_pose() before any command_pose()."
-            )
+            raise MotionError(f"{self.prim_path}: refine_pose() before any command_pose().")
         achieved = np.asarray(self.joint_positions, dtype=float)
         size = self._pose_solution.size
         error = self._pose_solution - achieved[:size]
@@ -1495,9 +1971,7 @@ class Manipulator(Robot):
     def pose_error(self) -> dict[str, float]:
         """How far the tool is from the last commanded pose, as measured."""
         if self._pose_command is None:
-            raise MotionError(
-                f"{self.prim_path}: pose_error() before any command_pose()."
-            )
+            raise MotionError(f"{self.prim_path}: pose_error() before any command_pose().")
         achieved = np.asarray(self.joint_positions, dtype=float)
         size = self._pose_solution.size
         joint = float(np.max(np.abs(self._pose_solution - achieved[:size])))
@@ -1527,8 +2001,7 @@ class Manipulator(Robot):
         reactive policy and will not hold an orientation; this will, or will say
         it could not.
         """
-        if not self.command_pose(position, orientation, ramp=ramp,
-                                 raise_on_fail=raise_on_fail):
+        if not self.command_pose(position, orientation, ramp=ramp, raise_on_fail=raise_on_fail):
             return MotionResult(False, 0, float("inf"), list(as_vec3(position)), 180.0)
 
         steps = 0
@@ -1540,8 +2013,7 @@ class Manipulator(Robot):
             steps += settle_steps
             error = self.pose_error()
             if error["position"] <= tolerance and error["angle"] <= angle_tolerance:
-                return MotionResult(True, steps, error["position"],
-                                    self._pose_goal.tolist(), error["angle"])
+                return MotionResult(True, steps, error["position"], self._pose_goal.tolist(), error["angle"])
             if attempt < corrections:
                 self.refine_pose()
 
@@ -1553,8 +2025,7 @@ class Manipulator(Robot):
                 f"{np.round(self._pose_goal, 4).tolist()}. The solution exists (IK "
                 f"found it); the drives are not tracking it."
             )
-        return MotionResult(False, steps, error["position"],
-                            self._pose_goal.tolist(), error["angle"])
+        return MotionResult(False, steps, error["position"], self._pose_goal.tolist(), error["angle"])
 
     def move_ee_to(
         self,
@@ -1586,9 +2057,7 @@ class Manipulator(Robot):
         best = float("inf")
 
         for step in range(max_steps):
-            reached = self.servo_to(
-                target, orientation, tolerance=tolerance, hold=hold_steps
-            )
+            reached = self.servo_to(target, orientation, tolerance=tolerance, hold=hold_steps)
             self.scene.step(1)
             best = min(best, self._servo_error)
             if reached:
@@ -1611,8 +2080,7 @@ class Manipulator(Robot):
             raise MotionError(
                 f"End effector did not reach {target.round(3).tolist()} within "
                 f"{max_steps} steps (closest approach {best:.4f} m, last "
-                f"{error:.4f} m, tolerance {tolerance} m)."
-                + self._why_it_could_not_reach(orientation)
+                f"{error:.4f} m, tolerance {tolerance} m)." + self._why_it_could_not_reach(orientation)
             )
         return result
 
@@ -1666,12 +2134,69 @@ class Manipulator(Robot):
         for index, (low, high) in enumerate(limits):
             if index in finger or index >= len(positions) or low is None or high is None:
                 continue
-            if high - low <= 0:          # `low > high` is USD for "locked"
+            if high - low <= 0:  # `low > high` is USD for "locked"
                 continue
             value = float(positions[index])
             if value - low < margin or high - value < margin:
                 pinned.append(f"{names[index]}={value:.3f} (limits {low:.3f}..{high:.3f})")
         return pinned
+
+    @property
+    def approach_axis(self) -> str:
+        """Which of the tool frame's own axes the end effector points along.
+
+        Read from the suction cup if one is fitted -- it was mounted on that
+        axis -- and otherwise measured off the flange. It matters because the
+        two are not the same on every arm: a KR210's flange *face* normal is
+        its tool X, not Z, so a tool mounted along Z bolts to the side of the
+        wrist and sticks out at right angles to the plate it should be bolted
+        to. Correct enough to pick with, and obviously wrong in a render.
+        """
+        fitted = getattr(getattr(self, "suction", None), "approach_axis", None)
+        if fitted:
+            return str(fitted)
+        try:
+            return self._approach_axis(self._tool_link())
+        except Exception:  # noqa: BLE001 - the Z convention is the fallback
+            return "Z"
+
+    def down_at_yaw(self, yaw_degrees: float) -> list:
+        """Point the tool's approach axis at the floor, yawed as asked.
+
+        The orientation the arm must hold depends on which axis the tool
+        points along, so this is the one place that knows both.
+
+        * Approach along **Z**: `qz(yaw) * qx(pi)` sends tool Z to world -Z.
+        * Approach along **X**: `qz(yaw) * qy(pi/2)` sends tool X to world -Z,
+          which is what puts a KR210's flange plate face-down with the tool
+          hanging off it, rather than the plate on edge.
+        """
+        import math
+
+        half = math.radians(float(yaw_degrees)) / 2.0
+        axis = self.approach_axis.upper().lstrip("-")
+        if axis == "X":
+            root = math.sqrt(0.5)
+            return [root * math.cos(half), -root * math.sin(half), root * math.cos(half), root * math.sin(half)]
+        return [0.0, math.cos(half), math.sin(half), 0.0]
+
+    def downward_orientation(self, target: Any) -> list:
+        """A tool-down orientation whose yaw faces the reach, as (w, x, y, z).
+
+        A fixed down quaternion also pins the tool's yaw, and the wrist must
+        then absorb the whole base rotation. In the quadrant the demos were
+        built in that cost nothing; on a cell mirrored to the other side of
+        the arm the servo plateaued a measured 0.18 m from a reachable target
+        and never converged, because the demanded yaw sat past the wrist's
+        travel. Yawing toward the target keeps the wrist mid-range wherever
+        the cell is drawn.
+        """
+        import math
+
+        base, _ = self._arm_base_pose()
+        goal = as_vec3(target, name="target")
+        yaw = math.atan2(float(goal[1]) - float(base[1]), float(goal[0]) - float(base[0]))
+        return self.down_at_yaw(math.degrees(yaw))
 
     def servo_to(
         self,
@@ -1680,11 +2205,21 @@ class Manipulator(Robot):
         *,
         tolerance: float = 0.005,
         hold: int = 3,
+        tilt_tolerance: float = 0.09,
     ) -> bool:
         """Advance the arm one control tick toward a Cartesian target.
 
         Does NOT step physics, and does not block. Returns True once the end
-        effector has stayed inside `tolerance` for `hold` consecutive ticks.
+        effector has stayed inside `tolerance` for `hold` consecutive ticks --
+        and, when an orientation was asked for, the tool's approach axis (its
+        own Z) is within `tilt_tolerance` radians of the target's. Yaw about
+        that axis is deliberately not checked: a suction cup is round.
+
+        The tilt check exists because success used to mean position alone.
+        Measured on a sketch-built KR210 cell: every servo reported converged,
+        and the cartons landed 12-27 cm past their pallet slots in one
+        direction -- the flange was never pointing down at the edge of reach,
+        and the 0.21 m tool swung each carton outward by the tilt.
 
         This is the form a controller needs. `move_ee_to` steps physics itself,
         which is correct when driving the sim from outside but wrong inside a
@@ -1708,15 +2243,23 @@ class Manipulator(Robot):
             self._servo_target = target
             self._servo_orientation = rotation
             self._servo_settled = 0
-            self._rmpflow.set_end_effector_target(
-                target_position=target, target_orientation=rotation
-            )
+            self._rmpflow.set_end_effector_target(target_position=target, target_orientation=rotation)
 
         self._rmpflow.update_world()
         self._controller().apply_action(self._policy.get_next_articulation_action())
 
         self._servo_error = float(np.linalg.norm(self.ee_position - target))
-        self._servo_settled = self._servo_settled + 1 if self._servo_error < tolerance else 0
+        self._servo_tilt = 0.0
+        if rotation is not None:
+            w, x, y, z = (float(v) for v in rotation)
+            want_z = np.array([2 * (x * z + w * y), 2 * (y * z - w * x), 1 - 2 * (x * x + y * y)])
+            have_z = np.asarray(self.ee_rotation)[:, 2]
+            cosine = float(
+                np.clip(have_z @ want_z / (np.linalg.norm(have_z) * np.linalg.norm(want_z) + 1e-12), -1.0, 1.0)
+            )
+            self._servo_tilt = float(np.arccos(cosine))
+        arrived = self._servo_error < tolerance and self._servo_tilt < tilt_tolerance
+        self._servo_settled = self._servo_settled + 1 if arrived else 0
         return self._servo_settled >= hold
 
     def move_ee_by(self, delta: Any, **kwargs: Any) -> MotionResult:
@@ -1755,8 +2298,211 @@ class Manipulator(Robot):
                 return str(source).lower()
         return self.prim_path.rstrip("/").rsplit("/", 1)[-1].lower()
 
-    def plan_to(self, position: Any, orientation: Any = None) -> Any:
+    def route_to(self, position: Any, orientation: Any = None, *, seed: Any = None) -> "LulaRoute":
+        """A joint-space route to a Cartesian pose, without a collision checker.
+
+        What a long move needs on an install with no cuMotion (Isaac 5.x ships
+        none): `plan_to` raises there, and `servo_to` is a reactive policy that
+        winds the wrist up over a base swing -- measured on a belt-to-pallet
+        traverse, every later placement "converged" with the flange tilted
+        0.25-0.50 rad, or never converged at all.
+
+        Two steps. The goal joints come from Lula IK warm-started at `seed`
+        -- the arm's ready pose, so the solution is an unwound configuration
+        rather than the one nearest whatever the wrist has accumulated. Then a
+        Lula c-space trajectory from the current joints to that goal, time-
+        parameterised within the arm's own limits, driven by `follow` exactly
+        as a cuMotion plan would be. It checks nothing for collisions: keep
+        the route above the cell (a carry height over the belt's frame) the
+        way the palletizing controller does.
+        """
+        self._ensure_motion_policy()
+        self._sync_base_pose()
+        solver = self._ik.get_kinematics_solver()
+        names = list(solver.get_joint_names())
+        indices = self._solver_indices()
+        q_now = np.asarray(self.joint_positions, dtype=float)[indices]
+        warm = np.asarray(seed, dtype=float).reshape(-1) if seed is not None else q_now
+        target = as_vec3(position, name="position")
+        rotation = as_quat(orientation) if orientation is not None else None
+        q_goal, solved = solver.compute_inverse_kinematics(
+            self._end_effector_frame,
+            np.asarray(target, dtype=float),
+            np.asarray(rotation, dtype=float) if rotation is not None else None,
+            warm_start=warm,
+        )
+        if not solved:
+            raise MotionError(
+                f"{self.prim_path}: no inverse-kinematics solution for "
+                f"{np.round(target, 3).tolist()} with the flange as asked."
+            )
+        generator = self._cspace_generator()
+
+        # Lula's IK will hand back a solution outside the arm's joint limits,
+        # and the trajectory generator then dies on a bare
+        # "Failed check (q(i) >= min_pos(i))" naming neither the joint nor the
+        # pose that produced it. Checked here so an unreachable orientation
+        # comes back as MotionError -- which callers already treat as "try a
+        # different orientation" -- instead of a crash mid-task.
+        goal = np.asarray(q_goal, dtype=float)
+        try:
+            low = np.asarray(generator.get_c_space_position_limits()[0], dtype=float)
+            high = np.asarray(generator.get_c_space_position_limits()[1], dtype=float)
+        except Exception:  # noqa: BLE001 - unreadable limits are not a failure
+            low = high = None
+        # The *measured* start pose drifts a hair outside the limits under
+        # position control -- PhysX settles a joint at its stop, the encoder
+        # reads a whisker past it, and the trajectory generator refuses the
+        # whole trajectory over a micro-radian. Clamped, because this is
+        # measurement noise about where the arm already is, not a request.
+        start = np.asarray(q_now, dtype=float)
+        if low is not None:
+            start = np.clip(start, low, high)
+
+        if low is not None and (np.any(goal < low - 1e-6) or np.any(goal > high + 1e-6)):
+            over = [
+                f"{name}={value:.3f} outside [{lo:.3f}, {hi:.3f}]"
+                for name, value, lo, hi in zip(names, goal, low, high)
+                if value < lo - 1e-6 or value > hi + 1e-6
+            ]
+            raise MotionError(
+                f"{self.prim_path}: the inverse-kinematics solution for "
+                f"{np.round(target, 3).tolist()} needs {'; '.join(over)}. "
+                f"That pose is reachable only past a joint limit."
+            )
+
+        trajectory = generator.compute_c_space_trajectory(np.asarray([start, goal], dtype=float))
+        if trajectory is None:
+            raise MotionError(f"{self.prim_path}: Lula could not time-parameterise the route.")
+        return LulaRoute(trajectory, names, start=start, goal=goal)
+
+    def solve_ik(self, position: Any, orientation: Any = None, *, seed: Any = None) -> np.ndarray | None:
+        """The joint configuration that reaches a pose, or None. No trajectory.
+
+        `route_to` is inverse kinematics followed by a time-parameterised
+        c-space trajectory, and the trajectory is most of the cost. A
+        controller choosing among candidate postures does not need the
+        trajectory to choose -- it needs the goal joints, to ask how far the
+        base turns and whether the set-down is reachable from there -- and
+        building a trajectory for every candidate froze the simulator for
+        seconds after each lift while the search ran inside the physics
+        step. Rank with this; build the route for the winner.
+
+        Same seeding rule as `route_to`: nearest solution to `seed`, the
+        current pose when `seed` is None.
+        """
+        self._ensure_motion_policy()
+        self._sync_base_pose()
+        solver = self._ik.get_kinematics_solver()
+        indices = self._solver_indices()
+        q_now = np.asarray(self.joint_positions, dtype=float)[indices]
+        warm = np.asarray(seed, dtype=float).reshape(-1) if seed is not None else q_now
+        target = as_vec3(position, name="position")
+        rotation = as_quat(orientation) if orientation is not None else None
+        q_goal, solved = solver.compute_inverse_kinematics(
+            self._end_effector_frame,
+            np.asarray(target, dtype=float),
+            np.asarray(rotation, dtype=float) if rotation is not None else None,
+            warm_start=warm,
+        )
+        if not solved:
+            return None
+        goal = np.asarray(q_goal, dtype=float)
+        try:
+            low, high = (np.asarray(v, dtype=float) for v in self._cspace_generator().get_c_space_position_limits())
+            if np.any(goal < low - 1e-6) or np.any(goal > high + 1e-6):
+                return None  # reachable only past a joint limit
+        except Exception:  # noqa: BLE001 -- unreadable limits are not a failure
+            pass
+        return goal
+
+    def route_clearance(
+        self, route: Any, obstacles: Sequence[Any], *, margin: float = 0.25, samples: int = 24, carry: float = 0.0
+    ) -> dict | None:
+        """Does this route sweep any link through an obstacle?
+
+        Lula's routes are not collision-checked -- the trajectory generator
+        knows joint limits and nothing else -- and a KR210 on a 286-degree
+        base turn took its forearm through the north fence panel with a
+        carton in the cup. This is the check that was missing: the route is
+        sampled, every frame the kinematics knows is placed by forward
+        kinematics at each sample, and each placed point is tested against
+        the obstacles' boxes inflated by `margin` (link thickness; a KR210
+        forearm is about 0.25 m across).
+
+        `obstacles` are axis-aligned boxes as (min_xyz, max_xyz) pairs -- see
+        `simliverse_sim.objects.bounds_of`. `carry` extends the last frame
+        along -Z by that much, for the carton hanging under the cup.
+
+        Returns None when the route is clear, else a dict naming the sample
+        time, frame, and obstacle that touch. Point-on-link against boxes is
+        an approximation, chosen because it runs in milliseconds inside a
+        controller step; it catches sweeps, not grazes.
+        """
+        if not obstacles:
+            return None
+        self._ensure_motion_policy()
+        self._sync_base_pose()
+        solver = self._ik.get_kinematics_solver()
+        frames = list(solver.get_all_frame_names())
+        boxes = [
+            (np.asarray(lo, dtype=float) - margin, np.asarray(hi, dtype=float) + margin) for lo, hi, *_ in obstacles
+        ]
+        names = [o[2] if len(o) > 2 else str(i) for i, o in enumerate(obstacles)]
+        # A contact that exists at the START of the route is where the arm
+        # already is, not something the route sweeps into. After setting a
+        # carton down against the fence -- a pallet drawn 0.3 m from the
+        # panels, with a 0.25 m margin -- the wrist begins every following
+        # route inside the panel's box, and refusing those left the arm with
+        # no route it was allowed to take: "cannot reach over carton 1 in
+        # any grip orientation", on a pick it had just made. So a (frame,
+        # obstacle) pair in contact at sample 0 is tolerated for as long as
+        # that contact is continuous, and only an ENTRY is a hit.
+        grace: set[tuple[str, str]] = set()
+        for k in range(samples + 1):
+            t = route.duration * k / samples
+            q, _ = route.sample(t)
+            touching: set[tuple[str, str]] = set()
+            for frame in frames:
+                try:
+                    pos, rot = solver.compute_forward_kinematics(frame, q)
+                except Exception:  # noqa: BLE001 -- a frame FK cannot place
+                    continue
+                points = [np.asarray(pos, dtype=float)]
+                if carry > 0.0 and frame == frames[-1]:
+                    points.append(points[0] - np.asarray(rot, dtype=float) @ np.array([0.0, 0.0, carry]))
+                for pt in points:
+                    for (lo, hi), name in zip(boxes, names):
+                        if np.all(pt >= lo) and np.all(pt <= hi):
+                            key = (frame, name)
+                            touching.add(key)
+                            if k == 0:
+                                grace.add(key)
+                            elif key not in grace:
+                                return {"t": float(t), "frame": frame, "obstacle": name, "point": pt.round(3).tolist()}
+            # Leaving a box ends its grace: coming back into it is an entry.
+            grace &= touching
+        return None
+
+    def _cspace_generator(self) -> Any:
+        if getattr(self, "_cspace_gen", None) is None:
+            from isaacsim.robot_motion.motion_generation.lula.trajectory_generator import (
+                LulaCSpaceTrajectoryGenerator,
+            )
+
+            cfg = self._lula_kinematics_config
+            self._cspace_gen = LulaCSpaceTrajectoryGenerator(cfg["robot_description_path"], cfg["urdf_path"])
+        return self._cspace_gen
+
+    def plan_to(self, position: Any, orientation: Any = None, *, robot_name: str | None = None) -> Any:
         """Plan a collision-free route to a Cartesian target. Does not move.
+
+        `robot_name` names the cuMotion configuration when this arm cannot say
+        which one it is. An arm from `Robot.spawn` carries its catalogue entry
+        and needs nothing; one from `Robot.attach` has only its prim path, so a
+        UR10 at `/World/UR` asks the planner for a configuration called "ur" and
+        is told the install ships "franka, ur10". That is a correct message
+        about a robot nobody meant to describe.
 
         Returns a `MotionPlan`; drive it with `follow` one tick at a time inside
         a controller, or `move_along` while exploring. Raises `NoPathFound` when
@@ -1764,6 +2510,9 @@ class Manipulator(Robot):
         to reactive control silently — RMPflow would drive at the same target
         and stall against whatever the planner just told you is in the way.
         """
+        if robot_name and not getattr(self, "_robot_type", None):
+            self._robot_type = str(robot_name).lower()
+            self._planner = None  # rebuild against the named config
         planner = self.planner()
         planner.set_base_pose(self.base_position, self.base_orientation)
         q_initial = planner.joint_subset(self.joint_positions, self.joint_names)
@@ -2057,9 +2806,7 @@ class Manipulator(Robot):
 
     # ── Grasping ──────────────────────────────────────────────────────────────
 
-    def is_grasping(
-        self, obj: "RigidObject", *, min_contacts: int = 1, min_force: float = 0.05
-    ) -> bool:
+    def is_grasping(self, obj: "RigidObject", *, min_contacts: int = 1, min_force: float = 0.05) -> bool:
         """True when the object is genuinely held — measured from contact reports.
 
         `min_force` (newtons) is what separates holding from touching. A closed
@@ -2069,9 +2816,7 @@ class Manipulator(Robot):
         indistinguishable from a grasp.
         """
         touching = {
-            c["body"]
-            for c in obj.contacts()
-            if c["body"].startswith(self.prim_path) and c["force"] >= min_force
+            c["body"] for c in obj.contacts() if c["body"].startswith(self.prim_path) and c["force"] >= min_force
         }
         return len(touching) >= min_contacts
 
@@ -2124,8 +2869,7 @@ class Manipulator(Robot):
         """
         if not self.is_grasping(obj):
             raise MotionError(
-                "Cannot throw: the object is not currently grasped. Call grasp() "
-                "first and confirm it returned True."
+                "Cannot throw: the object is not currently grasped. Call grasp() first and confirm it returned True."
             )
         if observe_steps < 0:
             raise ValueError("observe_steps must be >= 0")
@@ -2200,11 +2944,7 @@ class Manipulator(Robot):
                     reason = "reached the requested hand speed"
                 elif float(np.dot(current - release_at, unit)) >= 0.0:
                     reason = "passed the geometric release point"
-                elif (
-                    step >= spinup_steps
-                    and stalled >= stall_steps
-                    and (set_dt is None or scale >= max_scale)
-                ):
+                elif step >= spinup_steps and stalled >= stall_steps and (set_dt is None or scale >= max_scale):
                     # The arm is being driven as hard as this will drive it and
                     # it is not getting any faster. Carrying on to the geometric
                     # release point means letting go at a crawl -- which is what
@@ -2214,10 +2954,7 @@ class Manipulator(Robot):
                     # travel. Measured: released at 0.145 m/s against a
                     # requested 2.8, and the ball rolled. Letting go at the peak
                     # is the honest reading of a swing with nothing left.
-                    reason = (
-                        "the arm stopped gaining speed before the release "
-                        "point — this is as fast as it swings"
-                    )
+                    reason = "the arm stopped gaining speed before the release point — this is as fast as it swings"
                 else:
                     continue
 
@@ -2230,7 +2967,6 @@ class Manipulator(Robot):
                 # leaving it set turns the next ordinary move_ee_to into another
                 # one -- including the release fallback below.
                 set_dt(base_dt)
-
 
         if not released:
             self.release()
@@ -2275,11 +3011,7 @@ class Manipulator(Robot):
                 trajectory.append(position.round(4).tolist())
 
         final = obj.position
-        flight = (
-            round(float(np.linalg.norm((landed_at - release_position)[:2])), 4)
-            if landed_at is not None
-            else None
-        )
+        flight = round(float(np.linalg.norm((landed_at - release_position)[:2])), 4) if landed_at is not None else None
         total = float(np.linalg.norm((final - release_position)[:2]))
         return {
             "released": not still_held,
@@ -2337,8 +3069,7 @@ class DexterousHand(Robot):
         for index in indices:
             name = names[index].lower()
             key = next(
-                (token for token in ("thumb", "index", "middle", "ring", "little", "pinky")
-                 if token in name),
+                (token for token in ("thumb", "index", "middle", "ring", "little", "pinky") if token in name),
                 name.split("_")[0],
             )
             fingers.setdefault(key, []).append(index)
@@ -2364,7 +3095,5 @@ class DexterousHand(Robot):
     def describe(self) -> dict[str, Any]:
         info = super().describe()
         names = self.joint_names
-        info["fingers"] = {
-            finger: [names[i] for i in indices] for finger, indices in self.fingers.items()
-        }
+        info["fingers"] = {finger: [names[i] for i in indices] for finger, indices in self.fingers.items()}
         return info

@@ -64,10 +64,7 @@ import pytest
 # touches Kit, and every test here replaces it.
 _SPEC = importlib.util.spec_from_file_location(
     "_sl_socket_server",
-    Path(__file__).resolve().parents[1]
-    / "isaac.sim.mcp_extension"
-    / "isaac_sim_mcp_extension"
-    / "socket_server.py",
+    Path(__file__).resolve().parents[1] / "isaac.sim.mcp_extension" / "isaac_sim_mcp_extension" / "socket_server.py",
 )
 _module = importlib.util.module_from_spec(_SPEC)
 sys.modules[_SPEC.name] = _module
@@ -262,10 +259,7 @@ def test_commands_do_not_overlap() -> None:
 
     server = _server(slow)
     clients = [_Client() for _ in range(4)]
-    threads = [
-        threading.Thread(target=server._dispatch_command, args=(c, {"type": "run_control"}))
-        for c in clients
-    ]
+    threads = [threading.Thread(target=server._dispatch_command, args=(c, {"type": "run_control"})) for c in clients]
     for thread in threads:
         thread.start()
     for thread in threads:

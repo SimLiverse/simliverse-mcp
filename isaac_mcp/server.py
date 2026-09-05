@@ -102,7 +102,7 @@ get_joint_config, get_isaac_logs, create_action_graph, edit_action_graph.
 6. **JSON TYPES:** When an argument expects a `List[float]`, you MUST provide a raw JSON array of actual numbers (e.g. `[0.1, 0.2, -0.3]`). NEVER pass Python code, list comprehensions, strings, or `"[random.uniform(...)]"`.
 """
 
-import os
+import os  # noqa: E402 -- after the sys.path tweak above
 
 mcp = FastMCP(
     "IsaacSimMCP",

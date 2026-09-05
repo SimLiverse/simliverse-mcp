@@ -88,11 +88,41 @@ def set_physics(
     gpu_enabled: Optional[bool] = None,
 ) -> Dict[str, Any]:
     try:
-        # Physics params are set via the PhysicsContext on the World
-        # For now, gravity is the most common parameter
         if gravity is not None:
             adapter.create_physics_scene(gravity=gravity)
-        return {"status": "success", "message": "Physics parameters updated"}
+
+        # time_step and gpu_enabled were in the signature, in the schema, and
+        # in nobody's code path: an agent asking for 1/240 s to steady a
+        # delicate contact got 1/60 and a "success". A silently ignored
+        # argument is the worst kind of wrong answer, because every later
+        # measurement is consistent with it having worked. Both live on the
+        # PhysX scene prim, so they are set there.
+        applied = ["gravity"] if gravity is not None else []
+        if time_step is not None or gpu_enabled is not None:
+            from pxr import Sdf, UsdPhysics
+
+            scene = None
+            for prim in adapter.get_stage().Traverse():
+                if prim.HasAPI(UsdPhysics.Scene) or prim.IsA(UsdPhysics.Scene):
+                    scene = prim
+                    break
+            if scene is None:
+                return {
+                    "status": "error",
+                    "message": ("No physics scene on the stage to set time_step or gpu_enabled on. Create one first."),
+                }
+            if time_step is not None:
+                if not time_step > 0:
+                    return {"status": "error", "message": f"time_step must be positive, got {time_step}."}
+                scene.CreateAttribute("physxScene:timeStepsPerSecond", Sdf.ValueTypeNames.UInt).Set(
+                    int(round(1.0 / float(time_step)))
+                )
+                applied.append("time_step")
+            if gpu_enabled is not None:
+                scene.CreateAttribute("physxScene:enableGPUDynamics", Sdf.ValueTypeNames.Bool).Set(bool(gpu_enabled))
+                applied.append("gpu_enabled")
+
+        return {"status": "success", "applied": applied, "message": "Physics parameters updated: " + ", ".join(applied)}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 

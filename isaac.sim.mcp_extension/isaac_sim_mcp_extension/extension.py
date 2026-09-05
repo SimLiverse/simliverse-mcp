@@ -53,6 +53,7 @@ class MCPExtension(omni.ext.IExt):
     def on_startup(self, ext_id: str) -> None:
         print("trigger  on_startup for: ", ext_id)
         self.ext_id = ext_id
+        self._put_scene_library_on_path()
         port = self._settings.get("/exts/isaac.sim.mcp/server.port") or 8766
         host = self._settings.get("/exts/isaac.sim.mcp/server.host") or "localhost"
 
@@ -62,6 +63,31 @@ class MCPExtension(omni.ext.IExt):
 
         self._server = SocketServer(host, port, self._execute_command)
         self._server.start()
+
+    @staticmethod
+    def _put_scene_library_on_path() -> None:
+        """Make `simliverse_sim` importable from a cold boot.
+
+        The `--ext-folder` mechanism puts the *extension* on the path, not the
+        repository it sits in -- and `simliverse_sim` lives at the repo root.
+        Every `execute_script` that says `from simliverse_sim import ...`
+        therefore fails on a fresh worker with "No module named
+        'simliverse_sim'", while working perfectly in any session where some
+        earlier script happened to insert the path by hand. That is the worst
+        kind of works-on-the-warm-box bug, and this is its one fix: walk up
+        from this file to the directory that actually contains the library.
+        """
+        import sys
+        from pathlib import Path
+
+        for parent in Path(__file__).resolve().parents:
+            if (parent / "simliverse_sim" / "__init__.py").is_file():
+                root = str(parent)
+                if root not in sys.path:
+                    sys.path.insert(0, root)
+                    print(f"simliverse_sim on sys.path from {root}")
+                return
+        print("WARNING: simliverse_sim not found above the extension; execute_script imports of it will fail")
 
     def on_shutdown(self) -> None:
         print("trigger  on_shutdown for: ", self.ext_id)

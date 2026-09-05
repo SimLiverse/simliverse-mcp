@@ -71,16 +71,65 @@ def register_tools(mcp: FastMCP, get_connection: "Callable[[], IsaacConnection]"
 
         Key API (full reference: docs/control_library.md):
           Scene.get() / .configure_physics() / .play() / .step(n) / .settle(s)
+          scene.clear_world()                  # stop() does NOT empty the stage
           scene.spawn_rigid(path, shape=, radius=, position=, mass=, friction=)
           scene.list_prims(root, recursive=True) / scene.find("ball")
           Robot.spawn(type, position=) / Robot(prim_path)
           robot.describe() -> joints, gripper, end effector, drive problems
           robot.move_ee_to([x, y, z])          # Cartesian, blocking
+          robot.plan_to(pos, quat, robot_name=) + robot.follow(plan)   # cuMotion
           robot.gripper.open() / .close()
           robot.grasp(obj) -> bool             # approach, close, verify
           robot.is_grasping(obj) -> bool       # from contact reports
           robot.throw(obj, direction=, speed=) -> trajectory report
           verify_grasp(robot, obj) / verify_throw(obj, result) -> Report
+          list_props(q) / find_prop(q) / spawn_prop(q, position=)
+          Conveyor.build(...) / belt.dress("conveyorbelt_a05") / belt.start()
+          SafetyFence.build(centre=, size=, gate=, crossings=)
+          spawn_pedestal(...) / spawn_operator(...) / vision.look(scale=)
+          fence_from_sketch(text) / zones_from_sketch(text)
+
+        IF THE USER DREW A LAYOUT, BUILD WHAT THEY DREW. A message carrying a
+        `[LAYOUT SKETCH ...]` block holds plan-view shapes in metres, taken off
+        a grid by hand. Those are the requested layout, not an approximation to
+        re-derive: pass the block to `fence_from_sketch(text)` and it returns
+        the guarding, or to `zones_from_sketch(text)` for the pallet spots and
+        travel directions. Isaac is Z-up so the numbers transfer one-to-one; do
+        not rescale or re-project them. A rectangle is the cell, an arrow that
+        crosses it is a conveyor entering and becomes an opening, a circle is
+        where something goes. A circle labelled "operator"/"worker"/"person"
+        picks which side the GATE opens on, nearest that circle — leave `gate`
+        unset for this to fire; passing `gate=` explicitly always wins. The
+        result reports `chosen_by` for the footprint and `gate.chosen_by` for
+        the gate — say so if either reads "unlabelled" or "no operator was
+        drawn", because then nobody told you and it guessed.
+
+        BUILD CELLS OUT OF REAL ASSETS. The library indexes 175 props,
+        including 47 conveyor sections and 23 people. A cell authored from
+        cubes and cylinders reads as a mock-up however good the physics is.
+        Search first — `list_props("conveyor")`, `list_props("worker")` — and
+        say so if a search comes up empty rather than quietly building the
+        thing out of primitives.
+
+        Placement traps, all measured, none of which raise:
+          - Props are placed by their CENTRE and are large. A pallet is 1.21 m
+            long, so pallet_y=0.60 puts its near edge at -0.005 and the arm's
+            base inside the pallet.
+          - A character's origin is NOT at its feet: the bound sits 0.12-0.16 m
+            below it. Use guarding.spawn_operator, which measures and drops.
+          - A conveyor prop carries at 0.767 m (its rollers). Its bounding box
+            says 1.166 because that includes the side frames.
+          - `size` means height, and only Cube has a size attribute; for a
+            cylinder it maps to height. Getting this wrong is silent.
+          - scene.stop() leaves every prim on the stage. Two cells in one
+            session share it and the older one is still solid.
+          - A halted belt is a sleeping belt: PhysX does not wake a body
+            because the surface under it started moving. belt.start() nudges.
+
+        LOOK BEFORE YOU BELIEVE IT. `vision.look()` renders four viewpoints,
+        because every visual defect found in this cell was visible from one
+        direction and invisible from the others. Pass `scale=` for a cell
+        bigger than about a metre.
 
         Args:
             code: Python source to execute in the simulator process.
@@ -138,9 +187,7 @@ def register_tools(mcp: FastMCP, get_connection: "Callable[[], IsaacConnection]"
         result = conn.send_command("control.capture_view", params)
         encoded = result.get("image_base64")
         if not encoded:
-            raise RuntimeError(
-                f"Render returned no image data: {result.get('message', 'unknown error')}"
-            )
+            raise RuntimeError(f"Render returned no image data: {result.get('message', 'unknown error')}")
         return Image(data=base64.b64decode(encoded), format=result.get("format", "png"))
 
     @mcp.tool("observe")

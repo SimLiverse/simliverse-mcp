@@ -285,6 +285,7 @@ class IsaacAdapterBase(ABC):
             pass  # Non-v5 runtimes may not have isaacsim.core.api
         except Exception as e:
             import logging
+
             logging.getLogger(__name__).warning(f"Could not initialize physics world: {e}")
 
     @abstractmethod
