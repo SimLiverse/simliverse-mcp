@@ -336,7 +336,7 @@ def test_a_prop_already_on_or_above_the_floor_is_left_alone() -> None:
 
 def test_resting_is_relative_to_the_requested_height() -> None:
     from simliverse_sim.props import floor_lift
-    assert floor_lift(0.9, 1.0) == 0.1, "a prop asked for at 1.0 m rests at 1.0 m"
+    assert abs(floor_lift(0.9, 1.0) - 0.1) < 1e-9, "a prop asked for at 1.0 m rests at 1.0 m"
 
 
 def test_spawn_prop_rests_on_the_floor_by_default() -> None:
