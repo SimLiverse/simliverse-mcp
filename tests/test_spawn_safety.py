@@ -564,3 +564,23 @@ def test_scene_clear_scene_is_clear_world_by_another_name():
         tree = ast.parse(f.read())
     names = {n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
     assert {"clear_scene", "clear_world"} <= names
+
+
+def test_from_prop_turns_the_section_to_face_the_flow_before_measuring_it():
+    """
+    The shipped sections are authored along +X and `direction` drove the
+    surface velocity only. A line drawn down the page got four sections each
+    still 2.7 m wide in X, positioned 2.7 m apart down the page -- sideways,
+    with 1.5 m of floor between them -- and three of four cartons on the
+    floor while the arm waited for them until it gave up.
+    """
+    import ast, os
+    path = os.path.join(os.path.dirname(__file__), "..", "simliverse_sim", "conveyor.py")
+    with open(path) as f:
+        tree = ast.parse(f.read())
+    fn = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "from_prop")
+    src = ast.unparse(fn)
+    assert "AddRotateZOp" in src, "the prop is never turned to the flow"
+    assert src.index("arctan2(heading[1], heading[0])") < src.index("_world_bounds(deck_path)"), (
+        "the deck must be measured AFTER it is turned, or length and width swap"
+    )

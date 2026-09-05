@@ -670,6 +670,25 @@ class Conveyor:
         scene = scene or _Scene.get()
         entry = spawn_prop(query, prim_path=prim_path, position=position, scene=scene)
 
+        # Turn the prop to face the flow BEFORE measuring it. The shipped
+        # sections are authored along +X, and `direction` used to drive the
+        # surface velocity only: a line drawn down the page got four sections
+        # each still 2.7 m wide in X and 1.2 m in Y, positioned 2.7 m apart
+        # down the page -- sideways, with 1.5 m of floor between them. The
+        # first carton happened to sit on the first section and was picked;
+        # the other three were on the floor, and the arm waited for them
+        # until it gave up. Everything below measures the rotated deck.
+        heading = _unit(direction)
+        yaw_deg = float(np.degrees(np.arctan2(heading[1], heading[0])))
+        if abs(yaw_deg) > 1e-3:
+            from pxr import UsdGeom as _UsdGeom
+
+            _prim = get_stage().GetPrimAtPath(prim_path)
+            _xf = _UsdGeom.Xformable(_prim)
+            _ops = {op.GetOpName(): op for op in _xf.GetOrderedXformOps()}
+            _rot = _ops.get("xformOp:rotateZ") or _xf.AddRotateZOp()
+            _rot.Set(yaw_deg)
+
         deck_path = _belt_surface(prim_path)
         bounds = _world_bounds(deck_path)
         if bounds is None:
@@ -678,7 +697,6 @@ class Conveyor:
                 f"is unknown. Use Conveyor.build() and state the dimensions."
             )
         low, high = bounds
-        heading = _unit(direction)
         across_v = np.array([-heading[1], heading[0], 0.0])
         span = np.array(high) - np.array(low)
         along = float(abs(np.dot(span, heading)))
