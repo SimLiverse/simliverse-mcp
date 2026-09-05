@@ -374,3 +374,26 @@ class RigidObject:
             "mass": self.mass,
             "contacts": self.contacts(),
         }
+
+
+def bounds_of(scene: Any, prim_path: str) -> tuple[list[float], list[float]] | None:
+    """World-space axis-aligned bounds of a prim and everything under it.
+
+    For turning cell furniture -- fence panels, belt frames -- into the boxes
+    `Manipulator.route_clearance` tests routes against. Returns None for a
+    prim that has no extent, so a missing panel is skipped rather than
+    treated as a box at the origin.
+    """
+    from pxr import Usd, UsdGeom
+
+    stage = scene.stage
+    prim = stage.GetPrimAtPath(prim_path)
+    if not prim or not prim.IsValid():
+        return None
+    cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_],
+                              useExtentsHint=True)
+    box = cache.ComputeWorldBound(prim).ComputeAlignedRange()
+    if box.IsEmpty():
+        return None
+    lo, hi = box.GetMin(), box.GetMax()
+    return [float(lo[0]), float(lo[1]), float(lo[2])], [float(hi[0]), float(hi[1]), float(hi[2])]

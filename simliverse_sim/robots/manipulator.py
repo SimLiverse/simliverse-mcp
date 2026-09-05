@@ -8,6 +8,8 @@ manipulation became expressible — see ADR 012 §1.2.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -2422,6 +2424,56 @@ class Manipulator(Robot):
         if trajectory is None:
             raise MotionError(f"{self.prim_path}: Lula could not time-parameterise the route.")
         return LulaRoute(trajectory, names, start=start, goal=goal)
+
+    def route_clearance(self, route: Any, obstacles: Sequence[Any], *,
+                        margin: float = 0.25, samples: int = 24,
+                        carry: float = 0.0) -> dict | None:
+        """Does this route sweep any link through an obstacle?
+
+        Lula's routes are not collision-checked -- the trajectory generator
+        knows joint limits and nothing else -- and a KR210 on a 286-degree
+        base turn took its forearm through the north fence panel with a
+        carton in the cup. This is the check that was missing: the route is
+        sampled, every frame the kinematics knows is placed by forward
+        kinematics at each sample, and each placed point is tested against
+        the obstacles' boxes inflated by `margin` (link thickness; a KR210
+        forearm is about 0.25 m across).
+
+        `obstacles` are axis-aligned boxes as (min_xyz, max_xyz) pairs -- see
+        `simliverse_sim.objects.bounds_of`. `carry` extends the last frame
+        along -Z by that much, for the carton hanging under the cup.
+
+        Returns None when the route is clear, else a dict naming the sample
+        time, frame, and obstacle that touch. Point-on-link against boxes is
+        an approximation, chosen because it runs in milliseconds inside a
+        controller step; it catches sweeps, not grazes.
+        """
+        if not obstacles:
+            return None
+        self._ensure_motion_policy()
+        self._sync_base_pose()
+        solver = self._ik.get_kinematics_solver()
+        frames = list(solver.get_all_frame_names())
+        boxes = [(np.asarray(lo, dtype=float) - margin, np.asarray(hi, dtype=float) + margin)
+                 for lo, hi, *_ in obstacles]
+        names = [o[2] if len(o) > 2 else str(i) for i, o in enumerate(obstacles)]
+        for k in range(samples + 1):
+            t = route.duration * k / samples
+            q, _ = route.sample(t)
+            for frame in frames:
+                try:
+                    pos, rot = solver.compute_forward_kinematics(frame, q)
+                except Exception:  # noqa: BLE001 -- a frame FK cannot place
+                    continue
+                points = [np.asarray(pos, dtype=float)]
+                if carry > 0.0 and frame == frames[-1]:
+                    points.append(points[0] - np.asarray(rot, dtype=float) @ np.array([0.0, 0.0, carry]))
+                for pt in points:
+                    for (lo, hi), name in zip(boxes, names):
+                        if np.all(pt >= lo) and np.all(pt <= hi):
+                            return {"t": float(t), "frame": frame, "obstacle": name,
+                                    "point": pt.round(3).tolist()}
+        return None
 
     def _cspace_generator(self) -> Any:
         if getattr(self, "_cspace_gen", None) is None:
