@@ -2425,6 +2425,47 @@ class Manipulator(Robot):
             raise MotionError(f"{self.prim_path}: Lula could not time-parameterise the route.")
         return LulaRoute(trajectory, names, start=start, goal=goal)
 
+    def solve_ik(self, position: Any, orientation: Any = None, *,
+                 seed: Any = None) -> np.ndarray | None:
+        """The joint configuration that reaches a pose, or None. No trajectory.
+
+        `route_to` is inverse kinematics followed by a time-parameterised
+        c-space trajectory, and the trajectory is most of the cost. A
+        controller choosing among candidate postures does not need the
+        trajectory to choose -- it needs the goal joints, to ask how far the
+        base turns and whether the set-down is reachable from there -- and
+        building a trajectory for every candidate froze the simulator for
+        seconds after each lift while the search ran inside the physics
+        step. Rank with this; build the route for the winner.
+
+        Same seeding rule as `route_to`: nearest solution to `seed`, the
+        current pose when `seed` is None.
+        """
+        self._ensure_motion_policy()
+        self._sync_base_pose()
+        solver = self._ik.get_kinematics_solver()
+        indices = self._solver_indices()
+        q_now = np.asarray(self.joint_positions, dtype=float)[indices]
+        warm = np.asarray(seed, dtype=float).reshape(-1) if seed is not None else q_now
+        target = as_vec3(position, name="position")
+        rotation = as_quat(orientation) if orientation is not None else None
+        q_goal, solved = solver.compute_inverse_kinematics(
+            self._end_effector_frame, np.asarray(target, dtype=float),
+            np.asarray(rotation, dtype=float) if rotation is not None else None,
+            warm_start=warm,
+        )
+        if not solved:
+            return None
+        goal = np.asarray(q_goal, dtype=float)
+        try:
+            low, high = (np.asarray(v, dtype=float)
+                         for v in self._cspace_generator().get_c_space_position_limits())
+            if np.any(goal < low - 1e-6) or np.any(goal > high + 1e-6):
+                return None          # reachable only past a joint limit
+        except Exception:  # noqa: BLE001 -- unreadable limits are not a failure
+            pass
+        return goal
+
     def route_clearance(self, route: Any, obstacles: Sequence[Any], *,
                         margin: float = 0.25, samples: int = 24,
                         carry: float = 0.0) -> dict | None:

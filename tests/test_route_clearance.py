@@ -115,3 +115,16 @@ def test_leaving_and_re_entering_is_a_sweep():
     box = ([-0.1, -0.1, 0.5], [0.3, 0.1, 1.5], "panel")
     hit = _arm().route_clearance(_Bounce(), [box], margin=0.0, samples=40)
     assert hit is not None and hit["t"] > 0.8
+
+
+def test_solve_ik_exists_and_builds_no_trajectory():
+    """Ranking candidates needs goal joints, not trajectories; building a
+    trajectory per candidate froze the sim for seconds after every lift."""
+    import ast
+    src = _root.read_text()
+    tree = ast.parse(src)
+    fn = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "solve_ik")
+    body = ast.unparse(fn)
+    assert "compute_inverse_kinematics" in body
+    assert "compute_c_space_trajectory" not in body, "solve_ik must not build a trajectory"
+    assert "get_c_space_position_limits" in body, "a solution past a joint limit is not a solution"
