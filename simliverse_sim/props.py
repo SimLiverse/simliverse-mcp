@@ -200,7 +200,7 @@ def spawn_prop(
     prim_path: str | None = None,
     position: Any = (0.0, 0.0, 0.0),
     orientation: Any = None,
-    scene: Any = None,
+    scene: Any = None,    rest_on_floor: bool = True,
 ) -> dict[str, Any]:
     """Reference a real prop onto the stage. Returns its index entry plus the path.
 
@@ -240,6 +240,28 @@ def spawn_prop(
 
     xform = UsdGeom.Xformable(get_stage().GetPrimAtPath(prim_path))
     _place(xform, position, orientation)
+    lift = 0.0
+    if rest_on_floor:
+        # Props do not agree on where their origin is. The small KLT has it
+        # at the centre of the bin: placed at z=0 it stands half buried, and
+        # PhysX pops it 73 mm up on Play -- which reads as something having
+        # knocked it. Measure the placed asset and lift it so its lowest
+        # point sits at the requested z, never below. Pass rest_on_floor=False
+        # to place the origin exactly where asked (a prop on a shelf, say,
+        # where the bounds of the shelf are not the floor).
+        try:
+            from simliverse_sim.objects import bounds_of as _bounds_of
+            from simliverse_sim.scene import Scene as _Scene
+            lo_hi = _bounds_of(_Scene.get(), prim_path)
+        except Exception:  # noqa: BLE001 -- unmeasurable: leave it
+            lo_hi = None
+        base_z = float(as_vec3(position, name="position")[2])
+        lift = floor_lift(lo_hi[0][2] if lo_hi is not None else None, base_z)
+        if lift:
+            pos = as_vec3(position, name="position").astype(float)
+            pos[2] += lift
+            _place(xform, pos, orientation)
+            logger.info("%s rested on the floor: lifted %.3f m", prim_path, lift)
 
     if entry["physics"] != "dynamic":
         logger.warning(
@@ -271,7 +293,8 @@ def spawn_prop(
     # still came back well-formed.
     #
     # So the caller is handed the body to measure, not the handle to hold.
-    result = {**entry, "prim_path": prim_path, "body_path": _body_path(prim_path)}
+    result = {**entry, "prim_path": prim_path, "body_path": _body_path(prim_path),
+              "lifted_m": round(lift, 4)}
     overlaps = _overlapping_robots(prim_path)
     if overlaps:
         result["overlaps"] = overlaps
@@ -286,6 +309,17 @@ def spawn_prop(
                 max(entry.get("extent") or [0.0]),
             )
     return result
+
+
+def floor_lift(lowest_z: float | None, base_z: float, *, tolerance: float = 0.005) -> float:
+    """How far up a placed prop must move so its lowest point sits at `base_z`.
+
+    Zero when it already does, or stands above it, or could not be measured:
+    a prop is lifted out of the floor, never pushed down onto it.
+    """
+    if lowest_z is None or lowest_z >= base_z - tolerance:
+        return 0.0
+    return float(base_z - lowest_z)
 
 
 def _body_path(prim_path: str) -> str:

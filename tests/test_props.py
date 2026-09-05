@@ -311,3 +311,35 @@ def test_a_second_placement_replaces_the_first_rather_than_stacking(xformable) -
     ops = xform.GetOrderedXformOps()
     assert len(ops) == 2
     assert tuple(ops[0].Get()) == pytest.approx((2.0, 2.0, 2.0))
+
+
+
+# ── resting on the floor ─────────────────────────────────────────────────────
+#
+# The small KLT has its origin at the centre of the bin: placed at z=0 it
+# stood half buried and PhysX popped it 73 mm up on Play, which the sketch
+# evaluation read as the arm having knocked it. spawn_prop measures the
+# placed asset and lifts it out of the floor by default.
+
+def test_a_buried_prop_is_lifted_by_exactly_its_burial() -> None:
+    from simliverse_sim.props import floor_lift
+    assert floor_lift(-0.0732, 0.0) == 0.0732
+
+
+def test_a_prop_already_on_or_above_the_floor_is_left_alone() -> None:
+    from simliverse_sim.props import floor_lift
+    assert floor_lift(0.0, 0.0) == 0.0
+    assert floor_lift(0.3, 0.0) == 0.0, "never pushed down"
+    assert floor_lift(-0.003, 0.0) == 0.0, "inside tolerance"
+    assert floor_lift(None, 0.0) == 0.0, "unmeasurable: leave it"
+
+
+def test_resting_is_relative_to_the_requested_height() -> None:
+    from simliverse_sim.props import floor_lift
+    assert floor_lift(0.9, 1.0) == 0.1, "a prop asked for at 1.0 m rests at 1.0 m"
+
+
+def test_spawn_prop_rests_on_the_floor_by_default() -> None:
+    import inspect
+    from simliverse_sim.props import spawn_prop
+    assert inspect.signature(spawn_prop).parameters["rest_on_floor"].default is True
