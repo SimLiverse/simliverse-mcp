@@ -23,6 +23,7 @@ import hashlib
 import json
 import logging
 import os
+import time
 from typing import Any
 
 import numpy as np
@@ -416,9 +417,22 @@ def _isolating_shim(script_path: str, node_path: str) -> str:
     own path. `setup`/`compute` look the caller's node up in that dict.
     """
     stem = os.path.splitext(os.path.basename(script_path))[0]
+    # Unique per attach, module name included. A node recreated at the same
+    # prim path with the same scriptPath kept its previous script: the rail
+    # layout ran the previous layout's controller (TAG s3, RAIL None) while
+    # the file on disk said otherwise. A path nobody has seen before cannot
+    # be reused, and a module name nobody has seen before cannot be found
+    # in sys.modules by mistake. Older shims of the same stem are removed.
+    stamp = f"{int(time.time() * 1000):x}"
     module_name = "simliverse_ctl_" + "".join(
-        ch if ch.isalnum() else "_" for ch in node_path.strip("/"))
-    shim_path = os.path.join(os.path.dirname(script_path), f"{stem}__node.py")
+        ch if ch.isalnum() else "_" for ch in node_path.strip("/")) + "_" + stamp
+    directory = os.path.dirname(script_path)
+    for old in glob.glob(os.path.join(directory, f"{stem}__node*.py")):
+        try:
+            os.remove(old)
+        except OSError:
+            pass
+    shim_path = os.path.join(directory, f"{stem}__node_{stamp}.py")
     code = SHIM_TEMPLATE.format(
         node_path=node_path, script_path=script_path, module_name=module_name,
         shim_log=os.path.join(os.path.dirname(script_path), "shim.log"))

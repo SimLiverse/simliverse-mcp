@@ -158,11 +158,18 @@ def test_every_node_gets_its_own_module_via_the_shim(tmp_path):
     script = tmp_path / "sketch_palletizing_x8.py"
     script.write_text("STATE = 1\ndef setup(db):\n    pass\ndef compute(db):\n    return True\n")
     shim = controller._isolating_shim(str(script), "/World/TaskGraph_x8/ScriptNode")
-    assert shim == str(tmp_path / "sketch_palletizing_x8__node.py")
+    assert shim.startswith(str(tmp_path / "sketch_palletizing_x8__node_"))
     text = open(shim).read()
     assert "_SIMLIVERSE_NODE_MODULES" in text
     assert "'/World/TaskGraph_x8/ScriptNode'" in text
-    assert "simliverse_ctl_World_TaskGraph_x8_ScriptNode" in text
+    assert "simliverse_ctl_World_TaskGraph_x8_ScriptNode_" in text
+    # a second attach gets a path and module name nobody has seen, and the
+    # previous shim is gone: a node recreated at the same prim path must not
+    # find its old script
+    import time as _t
+    _t.sleep(0.002)
+    again = controller._isolating_shim(str(script), "/World/TaskGraph_x8/ScriptNode")
+    assert again != shim and not (tmp_path / shim.rsplit("/", 1)[-1]).exists()
     assert "def compute(db):" in text and "def setup(db):" in text
 
     # The shim really does isolate: exec two shims in ONE namespace, as the
@@ -172,7 +179,7 @@ def test_every_node_gets_its_own_module_via_the_shim(tmp_path):
     shim2 = controller._isolating_shim(str(other), "/World/TaskGraph/ScriptNode")
     shared = {}
     exec(open(shim2).read(), shared)
-    exec(open(shim).read(), shared)
+    exec(open(again).read(), shared)
 
     class _Node:
         def __init__(self, path):
