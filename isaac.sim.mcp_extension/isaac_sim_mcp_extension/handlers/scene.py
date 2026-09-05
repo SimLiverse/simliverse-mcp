@@ -169,7 +169,18 @@ def clear(adapter: IsaacAdapterBase, keep_physics: bool = True) -> Dict[str, Any
                 if child.GetName() in world_keep:
                     continue
                 path = str(child.GetPath())
-                adapter.delete_prim(path)
+                if child.GetTypeName() == "OmniGraph":
+                    # An action graph removed with a plain RemovePrim came
+                    # back: /World/TaskGraph_x8 from one layout was still
+                    # on the stage, nodes ticking, two layouts later. Kit's
+                    # own delete command tells OmniGraph about it.
+                    try:
+                        import omni.kit.commands
+                        omni.kit.commands.execute("DeletePrims", paths=[path], destructive=True)
+                    except Exception:  # noqa: BLE001 -- fall through to the plain delete
+                        pass
+                if stage.GetPrimAtPath(path).IsValid():
+                    adapter.delete_prim(path)
                 removed.append(path)
 
         keep_paths = {
