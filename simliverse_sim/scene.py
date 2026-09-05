@@ -256,6 +256,18 @@ class Scene:
             logger.info("cleared %d stale prims from /World", len(doomed))
         return doomed
 
+    def clear_scene(self, keep: "tuple[str, ...] | None" = None) -> list[str]:
+        """`clear_world`, under the name every caller reaches for.
+
+        The MCP tool is called `clear_scene`, the prompts say `clear_scene`,
+        and an evaluation harness wrote `scene.clear_scene()` and shipped it.
+        On this class that was an AttributeError inside `run_control`, which
+        the harness did not read -- so nothing cleared, every layout was
+        built on top of the previous one's prims, and a short line ran with
+        the long line's carton queue. A name people guess should exist.
+        """
+        return self.clear_world(keep)
+
     def ensure_ground_plane(self, path: str = "/World/GroundPlane", z: float = 0.0) -> str:
         from pxr import UsdGeom, UsdPhysics
 

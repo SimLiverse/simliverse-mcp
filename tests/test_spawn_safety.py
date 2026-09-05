@@ -552,3 +552,15 @@ def test_spawn_box_replaces_a_prim_already_at_the_path():
     assert src.index("RemovePrim(prim_path)") < src.index("UsdGeom.Mesh.Define(stage, prim_path)"), (
         "a stale prim at the path must go before the new one is defined"
     )
+
+
+def test_scene_clear_scene_is_clear_world_by_another_name():
+    """The MCP tool, the prompts and an evaluation harness all say
+    `clear_scene`; on the class it was an AttributeError the harness never
+    read, and nothing cleared."""
+    import ast, os
+    path = os.path.join(os.path.dirname(__file__), "..", "simliverse_sim", "scene.py")
+    with open(path) as f:
+        tree = ast.parse(f.read())
+    names = {n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
+    assert {"clear_scene", "clear_world"} <= names
