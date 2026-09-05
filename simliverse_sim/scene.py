@@ -478,6 +478,16 @@ class Scene:
         hx, hy, hz = (float(d) / 2.0 for d in dims)
 
         stage = self.stage
+        # Define() on a path that already holds a prim returns THAT prim, with
+        # whatever pose and physics state it has -- and a rigid body that
+        # existed before is where the last run left it, or where PhysX reset
+        # it to on stop. Measured: a rebuilt short line asked for four cartons
+        # 1.57 m apart and got the previous long line's four, 3.36 m apart,
+        # two of them past the end of the belt on the floor. A spawn is a
+        # spawn: whatever was at the path goes first.
+        stale = stage.GetPrimAtPath(prim_path)
+        if stale and stale.IsValid():
+            stage.RemovePrim(prim_path)
         mesh = UsdGeom.Mesh.Define(stage, prim_path)
         prim = mesh.GetPrim()
 

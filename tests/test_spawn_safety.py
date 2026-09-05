@@ -534,3 +534,21 @@ def test_spawn_robot_accepts_a_mounting_yaw():
     assert "yaw" in {a.arg for a in fn.args.kwonlyargs}
     src = ast.unparse(fn)
     assert "AddRotateZOp" in src, "the yaw must be applied to the prim, not just accepted"
+
+
+def test_spawn_box_replaces_a_prim_already_at_the_path():
+    """
+    Define() on an occupied path returns the existing prim with whatever
+    pose and physics state it has. A rebuilt short line asked for four
+    cartons 1.57 m apart and got the previous long line's four, 3.36 m
+    apart, two of them past the end of the belt on the floor.
+    """
+    import ast, os
+    path = os.path.join(os.path.dirname(__file__), "..", "simliverse_sim", "scene.py")
+    with open(path) as f:
+        tree = ast.parse(f.read())
+    fn = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "spawn_box")
+    src = ast.unparse(fn)
+    assert src.index("RemovePrim(prim_path)") < src.index("UsdGeom.Mesh.Define(stage, prim_path)"), (
+        "a stale prim at the path must go before the new one is defined"
+    )
