@@ -147,3 +147,43 @@ def test_routing_does_not_duplicate_an_already_named_robot(monkeypatch):
     monkeypatch.setattr(controller, "_is_articulation", lambda p: p == "/World/Franka")
     _, robots, _ = controller._split_by_kind(["/World/Franka"], ["/World/Franka"])
     assert robots == ["/World/Franka"]
+
+
+def test_every_node_gets_its_own_module_via_the_shim(tmp_path):
+    """Two ScriptNodes share one Python namespace on the stage (measured), so
+    attach() points each node at a shim that loads the controller as a module
+    named after the node and dispatches by node path."""
+    from simliverse_sim import controller
+
+    script = tmp_path / "sketch_palletizing_x8.py"
+    script.write_text("STATE = 1\ndef setup(db):\n    pass\ndef compute(db):\n    return True\n")
+    shim = controller._isolating_shim(str(script), "/World/TaskGraph_x8/ScriptNode")
+    assert shim == str(tmp_path / "sketch_palletizing_x8__node.py")
+    text = open(shim).read()
+    assert "_SIMLIVERSE_NODE_MODULES" in text
+    assert "'/World/TaskGraph_x8/ScriptNode'" in text
+    assert "simliverse_ctl_World_TaskGraph_x8_ScriptNode" in text
+    assert "def compute(db):" in text and "def setup(db):" in text
+
+    # The shim really does isolate: exec two shims in ONE namespace, as the
+    # stage does, and each node still reaches its own module.
+    other = tmp_path / "sketch_palletizing.py"
+    other.write_text("STATE = 2\ndef setup(db):\n    pass\ndef compute(db):\n    return STATE\n")
+    shim2 = controller._isolating_shim(str(other), "/World/TaskGraph/ScriptNode")
+    shared = {}
+    exec(open(shim2).read(), shared)
+    exec(open(shim).read(), shared)
+
+    class _Node:
+        def __init__(self, path):
+            self._p = path
+
+        def get_prim_path(self):
+            return self._p
+
+    class _Db:
+        def __init__(self, path):
+            self.node = _Node(path)
+
+    assert shared["compute"](_Db("/World/TaskGraph/ScriptNode")) == 2
+    assert shared["compute"](_Db("/World/TaskGraph_x8/ScriptNode")) is True
