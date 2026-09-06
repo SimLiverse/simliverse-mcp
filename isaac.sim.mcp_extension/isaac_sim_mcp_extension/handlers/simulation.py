@@ -68,12 +68,49 @@ def stop(adapter: IsaacAdapterBase) -> Dict[str, Any]:
         return {"status": "error", "message": str(e)}
 
 
+#: Frames one step_simulation call may advance. 600 is ten seconds at 60 Hz,
+#: comfortably inside the caller's 300 s tool timeout even on a loaded cell.
+MAX_STEPS_PER_CALL = 600
+
+
 def step(
     adapter: IsaacAdapterBase,
     num_steps: int = 1,
     observe_prims: Optional[Sequence[str]] = None,
     observe_joints: Optional[Sequence[str]] = None,
 ) -> Dict[str, Any]:
+    # Stepping is for a PAUSED simulation. An agent asked to let a running cell
+    # progress reached for step_simulation(7200) on a playing timeline: the
+    # frames were already advancing on their own, the call blocked the bridge
+    # for the whole request and timed out at 300 s, and the verification it was
+    # part of never happened. Refuse in a millisecond and say what to do instead.
+    playing = False
+    try:
+        import omni.timeline
+
+        playing = bool(omni.timeline.get_timeline_interface().is_playing())
+    except Exception:  # noqa: BLE001 -- outside Kit there is no timeline to ask
+        playing = False
+    if playing:
+        return {
+            "status": "error",
+            "message": (
+                "The timeline is already playing, so the simulation advances on its own; "
+                "step_simulation is for a paused one. To let time pass while watching a "
+                "running cell, wait (the orchestrator's watch tools, or observe again "
+                "later) instead of stepping."
+            ),
+        }
+    if num_steps > MAX_STEPS_PER_CALL:
+        return {
+            "status": "error",
+            "message": (
+                f"num_steps={num_steps} is more than one call can carry ({MAX_STEPS_PER_CALL}, "
+                f"about {MAX_STEPS_PER_CALL // 60} s of simulation): the bridge blocks for "
+                "the whole call and the caller times out at 300 s. Step in smaller pieces, "
+                "or play the timeline and observe."
+            ),
+        }
     try:
         result = adapter.step(num_steps=num_steps, observe_prims=observe_prims, observe_joints=observe_joints)
         return {"status": "success", "message": f"Stepped {num_steps} frames", **result}
