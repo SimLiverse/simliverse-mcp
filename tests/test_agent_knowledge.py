@@ -261,6 +261,24 @@ def test_the_guide_covers_palletising_with_a_finger_jaw() -> None:
     assert demo.JAW_GEOMETRY["native"]["drop"] == 0.0
 
 
+def test_the_agent_is_told_to_edit_the_drawing_not_just_the_scene() -> None:
+    """When the user asks in words to change what they drew, the sketch must
+    change - it is the source of truth. The tool exists, is registered, and the
+    docstring says to use it and hand the block back."""
+    from isaac_mcp.tools import sketch as tool_module
+    from simliverse_sim import sketch as S
+
+    source = _control_source()
+    assert "edit_sketch" in source
+    assert "CHANGE THE DRAWING" in source
+    assert hasattr(tool_module, "register_tools")
+    for name in ("edit_sketch", "render_sketch", "route_from_sketch"):
+        assert hasattr(S, name), "sketch has no %s" % name
+    # register_all_tools wires the sketch module in.
+    init_src = (ROOT / "isaac_mcp" / "tools" / "__init__.py").read_text(encoding="utf-8")
+    assert "sketch" in init_src
+
+
 def test_the_guide_states_the_working_envelope_rather_than_implying_it() -> None:
     """A demo that only says what works has not said what does not."""
     text = GUIDE.read_text(encoding="utf-8")

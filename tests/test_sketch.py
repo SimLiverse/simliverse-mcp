@@ -484,3 +484,74 @@ def test_a_start_circle_overrides_where_the_route_begins():
 def test_a_sketch_with_no_route_says_so():
     with pytest.raises(SketchError):
         S.route_from_sketch('[LAYOUT SKETCH]\ncircle "pallet" centre (0,0) radius 0.5 m\n')
+
+
+# ── Writing the sketch back ──────────────────────────────────────────────────
+
+FULL = (
+    '[LAYOUT SKETCH]\n'
+    'rect   "cell" centre (0.00, 0.00) 6.50 x 6.50 m (x -3.25..3.25, y -3.25..3.25)\n'
+    'arrow  "infeed" (4.00, -0.40) -> (-1.00, -0.40) length 5.00 m heading 180.00 deg (-X)\n'
+    'circle "pallet" centre (0.00, 0.75) radius 0.60 m\n'
+    'path   "route" (-2.00, -2.00) -> (2.00, -2.00) -> (2.00, 1.50)\n'
+)
+
+
+def test_render_round_trips_through_parse():
+    """What render emits, parse reads back identically - and a second render
+    of that is byte-identical, so an edited sketch never drifts on re-emit."""
+    shapes = S.parse_sketch(FULL)
+    text = S.render_sketch(shapes)
+    again = S.parse_sketch(text)
+    assert again == shapes
+    assert S.render_sketch(again) == text
+
+
+def test_render_emits_the_dashboard_format_exactly():
+    """Byte-compatible with dashboard/src/lib/sketch.ts describeSketch, so the
+    dashboard can redraw an agent-edited sketch as if it drew it."""
+    text = S.render_sketch(S.parse_sketch(FULL))
+    assert 'rect   "cell" centre (0.00, 0.00) 6.50 x 6.50 m (x -3.25..3.25, y -3.25..3.25)' in text
+    assert 'arrow  "infeed" (4.00, -0.40) -> (-1.00, -0.40) length 5.00 m heading 180.00 deg (-X)' in text
+    assert 'circle "pallet" centre (0.00, 0.75) radius 0.60 m' in text
+    assert text.startswith("[LAYOUT SKETCH - plan view of the floor")
+
+
+def test_edit_adds_moves_resizes_relabels_and_removes():
+    out = S.edit_sketch(
+        FULL,
+        [
+            {"op": "add", "kind": "circle", "label": "operator", "centre": [0, -3.1], "radius": 0.5},
+            {"op": "move", "label": "pallet", "centre": [1.0, 2.0]},
+            {"op": "resize", "label": "cell", "size": [8.0, 6.0]},
+            {"op": "relabel", "label": "infeed", "to": "belt"},
+            {"op": "remove", "label": "route"},
+        ],
+    )
+    shapes = S.parse_sketch(out)
+    labels = {s["label"] for kind in shapes.values() for s in kind}
+    assert labels == {"cell", "belt", "pallet", "operator"}
+    assert shapes["circles"][0]["centre"] == (1.0, 2.0)  # pallet moved
+    assert shapes["rects"][0]["size"] == (8.0, 6.0)  # cell resized
+    assert shapes["paths"] == []  # route removed
+
+
+def test_moving_a_path_translates_every_point():
+    out = S.edit_sketch(FULL, [{"op": "move", "label": "route", "centre": [10.0, 10.0]}])
+    pts = np.asarray(S.parse_sketch(out)["paths"][0]["points"])
+    # The renderer rounds to 2 decimals (the dashboard's format), so a mean
+    # of thirds lands within a centimetre of the target, not on it exactly.
+    assert np.allclose(pts.mean(axis=0), [10.0, 10.0], atol=0.02)
+    # Shape preserved: the same L, just translated.
+    assert np.allclose(pts[1] - pts[0], [4.0, 0.0], atol=0.02)
+
+
+def test_editing_a_missing_label_refuses_rather_than_duplicating():
+    """'Move the pallet' on a sketch with no pallet must not quietly add one."""
+    with pytest.raises(SketchError):
+        S.edit_sketch(FULL, [{"op": "move", "label": "forklift", "centre": [0, 0]}])
+
+
+def test_an_empty_sketch_can_be_started_from_nothing():
+    out = S.edit_sketch("", [{"op": "add", "kind": "rect", "label": "cell", "centre": [0, 0], "size": [4, 4]}])
+    assert len(S.parse_sketch(out)["rects"]) == 1

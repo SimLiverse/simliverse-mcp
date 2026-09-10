@@ -117,6 +117,14 @@ def register_tools(mcp: FastMCP, get_connection: "Callable[[], IsaacConnection]"
         the gate — say so if either reads "unlabelled" or "no operator was
         drawn", because then nobody told you and it guessed.
 
+        IF THE USER ASKS TO CHANGE THE DRAWING, CHANGE THE DRAWING. "Add a
+        pallet at (1, 2)", "move the operator north", "draw the AMR's route":
+        call the `edit_sketch` tool with the sketch block and the edits, hand
+        the returned block back so the dashboard redraws it, THEN build from
+        the new sketch. The sketch is the source of truth; editing only the 3D
+        scene leaves the drawing stale and the next build starts from the
+        wrong picture.
+
         BUILD CELLS OUT OF REAL ASSETS. The library indexes 175 props,
         including 47 conveyor sections and 23 people. A cell authored from
         cubes and cylinders reads as a mock-up however good the physics is.
