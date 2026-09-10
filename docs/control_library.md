@@ -520,11 +520,17 @@ opens** — `_JawEE.fits` refuses a 150 mm carton on an 85 mm jaw up front, so a
 finger gripper is for small parcels and a cup is the tool for cartons. And the
 pad centre is ~4 mm off the flange's tool axis, so the pick servos on
 `gripper.pad_center()` to put the pads — not the flange — over the box before
-closing, or a symmetric jaw shoves a light box out of the grasp. KNOWN GAP: a
-top-down jaw pick off the belt mounts, orients, gates and closes on the parcel
-with both inner fingers in contact, but the friction pinch does not yet reliably
-survive the lift; the grip force and approach still need work before a jaw
-palletises end to end the way the cup does. Feed non-cube parcels with
+closing, or a symmetric jaw shoves a light box out of the grasp. KNOWN GAP,
+diagnosed not guessed: a top-down jaw pick off the belt mounts, orients, gates,
+centres and closes on the parcel with both inner fingers in contact, but the
+box does not survive the lift — and it is GEOMETRY, not grip force. A 2F is a
+LINKAGE jaw whose fingers arc down-and-in as they close, so a top-down pick of a
+box on a belt presses it into the deck (measured: the box's belt-contact force
+rose to 132 N as the fingers closed) instead of squeezing its sides, and lifting
+then knocks it off. Cranking box and pad friction to 1.4 made it worse, not
+better, which is the proof the pinch is not the problem. A jaw palletising end
+to end needs a different approach — a true parallel jaw without the down-arc, or
+a side/horizontal grip — not more tuning of this one. Feed non-cube parcels with
 `build(box=<footprint>, box_h=<height>)`.
 
 Suction: force limits of 500 (Isaac's tutorial value) break the seal within
