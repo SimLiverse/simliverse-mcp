@@ -114,7 +114,13 @@ def generated_scenarios(
             for k in ("box_mass", "rows", "cols", "layers", "speed", "deck", "dressing", "guides")
         }
         spec = cell_mod.layout_for(robot, box=box)
+        layout_deck = float(spec["deck"])
         spec.update(pick)
+        # Never RAISE the belt above the deck the arm's own layout chose: a short
+        # ur5e/ur16e whose belt was sampled up to 0.55 had no IK solution at the
+        # pick ("arm did not move"). A lower sampled deck is a fair variation; a
+        # higher one is out of the arm's reach, so clamp to the layout deck.
+        spec["deck"] = min(float(pick["deck"]), layout_deck)
         # Cap the pattern to what the deck holds and the arm can reach with this
         # carton, so a generated cell is challenging-but-placeable, not the
         # mid-place failure a UR10e hit on a 22 cm carton at 2x3. A cell that
