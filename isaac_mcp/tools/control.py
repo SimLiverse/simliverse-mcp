@@ -88,6 +88,7 @@ def register_tools(mcp: FastMCP, get_connection: "Callable[[], IsaacConnection]"
           Conveyor.build(..., pitch=30.7, dressing="conveyorbelt_a42")  # incline
           CurvedConveyor.build_curve(centre=, radius=, turn=, dressing="conveyorbelt_a01")
           Robot.spawn("carter").drive_to([x, y]) / verify_navigation(rover, goal, start_position=)
+          Robot.spawn("quadcopter").fly_to([x, y, z]) / .hover(steps=)  # rigid body, no re-attach
           SafetyFence.build(centre=, size=, gate=, crossings=)
           spawn_pedestal(...) / spawn_operator(...) / vision.look(scale=)
           fence_from_sketch(text) / zones_from_sketch(text)

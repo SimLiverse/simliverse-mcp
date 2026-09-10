@@ -373,6 +373,33 @@ a Carter drove ~4 m in the Simple_Warehouse and passed all three.
 
 ---
 
+## 5e. Other morphologies: drones, quadrupeds, humanoids
+
+`list_robots()` carries a `morphology` and a `cartesian_control` flag per asset.
+The library drives each body by the primitive that suits it, and refuses to fake
+the ones that need more than it has.
+
+- **Drones fly.** `Robot.spawn("quadcopter")` is an `AerialRobot`, thrust-
+  controlled: `hover(steps=)`, `fly_to([x, y, z])` (a PD controller, not a
+  planner - it flies straight through obstacles, so route it with waypoints),
+  `apply_thrust`, `altitude`. A drone is a **rigid body, not an articulation** -
+  keep the spawn handle after a timeline cycle; `Robot.attach` fails on it with
+  "no articulation registered". Measured: a quadcopter flew a four-waypoint loop,
+  each reached within 0.3 m, hover held to millimetres. `demo/drone_patrol.py`.
+  Other airframes: `crazyflie`, NASA `ingenuity`.
+- **Quadrupeds and humanoids stand, but walking needs a trained policy.** `spot`,
+  `anymal_c/d`, `go1/go2`, `laikago` (quadruped) and `h1`, `g1`, `digit`
+  (humanoid) spawn and hold a commanded joint pose, and `is_upright()` verifies
+  it, but there is no built-in gait: locomotion is a learned policy this library
+  does not ship. Say so rather than teleporting the body across the floor, which
+  is what `not_teleported` exists to catch.
+- **More AMRs and mobile manipulators.** `turtlebot3`, `novacarter`, `dingo`,
+  `jetbot`, `kaya` drive like the Carter (section 5d); `ridgebackfranka` /
+  `ridgebackur` are arms on a driven base (`MobileManipulator`) - drive the base,
+  then move the arm.
+
+---
+
 ## 6. Robots
 
 `list_robots()` discovers everything under `/Isaac/Robots/<Vendor>/<Model>`:

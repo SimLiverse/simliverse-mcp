@@ -121,6 +121,21 @@ def test_the_mobile_robot_api_the_guide_advertises_exists() -> None:
         assert hasattr(WheeledRobot, name), "WheeledRobot has no %s" % name
 
 
+def test_the_guide_covers_the_other_morphologies() -> None:
+    """Drones fly; quadrupeds and humanoids need a policy to walk - both are
+    things the agent must know before it spawns one and asks it to move."""
+    text = GUIDE.read_text(encoding="utf-8")
+    for token in ("quadcopter", "fly_to", "trained policy", "rigid body, not an articulation"):
+        assert token in text, "the guide never mentions %r" % token
+
+
+def test_the_aerial_api_the_guide_advertises_exists() -> None:
+    from simliverse_sim.robots.aerial import AerialRobot
+
+    for name in ("fly_to", "hover", "apply_thrust", "altitude"):
+        assert hasattr(AerialRobot, name), "AerialRobot has no %s" % name
+
+
 def test_the_agent_is_told_to_look_at_more_than_one_view() -> None:
     source = _control_source()
     assert "vision.look" in source
