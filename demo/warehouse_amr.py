@@ -177,3 +177,41 @@ def deliver(
         "legs": reached,
         "checks": [{"name": c.name, "passed": bool(c.passed)} for c in report.checks],
     }
+
+
+def drive_route(
+    scene: "Scene | None" = None,
+    *,
+    sketch: str,
+    robot: str = "carter",
+    environment: str = "Simple_Warehouse",
+    **kwargs,
+) -> dict:
+    """Drive `robot` along a path DRAWN on a sketch.
+
+    A person draws the route as a polyline -
+    `path "route" (0,-2) -> (2,-2) -> (2,1) -> (5,1)` - and this follows it: the
+    first point is where the robot starts, the last is the goal, and the bends
+    are the waypoints that keep it clear of the racks. That is the whole point
+    of drawing a route rather than naming a goal, because `drive_to` is a
+    turn-then-go controller and will not find its own way around obstacles - so
+    the human draws the way around, exactly as `fence_from_sketch` builds the
+    guarding a human drew. Returns the delivery report plus the drawn points and
+    how the route was chosen, so a mislabelled sketch is visible rather than
+    silently driving the wrong line.
+    """
+    from simliverse_sim.sketch import route_from_sketch
+
+    route = route_from_sketch(sketch, robot=robot)
+    result = deliver(
+        scene,
+        dock=route["start"],
+        goal=route["goal"],
+        waypoints=route["waypoints"],
+        robot=robot,
+        environment=environment,
+        **kwargs,
+    )
+    result["route_chosen_by"] = route["chosen_by"]
+    result["drawn_points"] = route["points"]
+    return result

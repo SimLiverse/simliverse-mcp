@@ -446,3 +446,41 @@ def test_nearest_side_ties_are_a_real_ambiguity_not_an_artefact(scene) -> None:
     is what an honest tie looks like once the artefact one is gone."""
     side = S._nearest_side((0.0, 0.0), (6.0, 6.0), (5.0, 5.0))
     assert side in ("north", "east")
+
+
+def test_a_drawn_path_becomes_drive_waypoints():
+    """A `path` polyline is a route a mobile robot follows: first point the
+    start, last the goal, the bends the waypoints that keep it off the racks."""
+    text = (
+        "[LAYOUT SKETCH]\n"
+        'path "route" (-2.0, -2.0) -> (2.0, -2.0) -> (2.0, 1.5) -> (5.5, 1.5)\n'
+    )
+    route = S.route_from_sketch(text)
+    assert route["start"] == [-2.0, -2.0]
+    assert route["waypoints"] == [[2.0, -2.0], [2.0, 1.5]]
+    assert route["goal"] == [5.5, 1.5]
+    assert route["chosen_by"] == "label"
+
+
+def test_a_labelled_arrow_is_a_two_point_route():
+    """A single straight run needs no polyline; a labelled arrow is a route."""
+    text = '[LAYOUT SKETCH]\narrow "drive" (0.0, 0.0) -> (4.0, 0.0)\n'
+    route = S.route_from_sketch(text)
+    assert route["start"] == [0.0, 0.0]
+    assert route["goal"] == [4.0, 0.0]
+    assert route["waypoints"] == []
+
+
+def test_a_start_circle_overrides_where_the_route_begins():
+    text = (
+        "[LAYOUT SKETCH]\n"
+        'path "route" (0.0, 0.0) -> (3.0, 0.0)\n'
+        'circle "start" centre (-1.0, -1.0) radius 0.4 m\n'
+    )
+    route = S.route_from_sketch(text)
+    assert route["start"] == [-1.0, -1.0]
+
+
+def test_a_sketch_with_no_route_says_so():
+    with pytest.raises(SketchError):
+        S.route_from_sketch('[LAYOUT SKETCH]\ncircle "pallet" centre (0,0) radius 0.5 m\n')

@@ -53,11 +53,26 @@ _ARROW = re.compile(
 _CIRCLE = re.compile(
     r'circle\s+"(?P<label>[^"]*)"\s+centre\s+\(' + _NUM + r",\s*" + _NUM + r"\)\s+radius\s+" + _NUM + r"\s*m"
 )
+#: A drawn route: two or more points chained with arrows. An `arrow` is one
+#: segment (a conveyor's direction); a `path` is a whole polyline for a mobile
+#: robot to follow, which an arrow cannot express without turning every bend
+#: into a separate shape the parser could not tell belonged together.
+_PATH = re.compile(
+    r'path\s+"(?P<label>[^"]*)"\s+(?P<points>\(\s*' + _NUM + r"\s*,\s*" + _NUM + r"\s*\)(?:\s*->\s*\(\s*"
+    + _NUM
+    + r"\s*,\s*"
+    + _NUM
+    + r"\s*\))+)"
+)
+_POINT = re.compile(r"\(\s*" + _NUM + r"\s*,\s*" + _NUM + r"\s*\)")
 
 #: Words a person uses for the thing they want fenced. Checked before falling
 #: back to "the biggest rectangle", because the biggest rectangle is only the
 #: cell until someone draws a bigger floor around it.
 FENCE_WORDS = ("fence", "cell", "guard", "enclosure", "perimeter", "cage", "safety")
+
+#: Words that mark a drawn route, and a circle that marks where the robot starts.
+ROUTE_WORDS = ("route", "path", "amr", "agv", "rover", "robot", "drive", "aisle")
 
 #: Words for a thing that has to get through the fence line.
 FEED_WORDS = ("conveyor", "belt", "infeed", "outfeed", "feed", "line")
@@ -108,7 +123,59 @@ def parse_sketch(text: str) -> dict[str, list[dict[str, Any]]]:
         cx, cy, r = (float(match.group(i)) for i in range(2, 5))
         circles.append({"label": match.group("label"), "centre": (cx, cy), "radius": r})
 
-    return {"rects": rects, "arrows": arrows, "circles": circles}
+    paths = []
+    for match in _PATH.finditer(text):
+        points = [(float(a), float(b)) for a, b in _POINT.findall(match.group("points"))]
+        paths.append({"label": match.group("label"), "points": points})
+
+    return {"rects": rects, "arrows": arrows, "circles": circles, "paths": paths}
+
+
+def route_from_sketch(text: str, *, robot: str = "carter") -> dict[str, Any]:
+    """A drawn path a mobile robot should follow, as drive waypoints.
+
+    A `path "route" (0,-2) -> (2,-2) -> (2,1) -> (5,1)` line is a polyline the
+    canvas drew by hand; its first point is where the robot starts, the last is
+    the goal, and the bends in between are the waypoints that keep it clear of
+    the shelving - which is the whole reason to draw a route rather than a
+    straight line, since `drive_to` is a turn-then-go controller, not a planner
+    that finds its own way around obstacles. A single labelled `arrow` counts
+    as a two-point route. A circle labelled for the robot (or "start") overrides
+    where it begins, so the drawn dock and the drawn route need not share a point.
+
+    Returned rather than driven, the way `fence_from_sketch` returns guarding:
+    the numbers transfer one-to-one (Isaac is Z-up), and driving them is the
+    caller's move - `demo.warehouse_amr.drive_route` does it.
+    """
+    shapes = parse_sketch(text)
+    paths = shapes.get("paths", [])
+    if not paths:
+        # Fall back to a labelled arrow: a single straight leg is still a route.
+        arrows = _labelled(shapes["arrows"], ROUTE_WORDS) or shapes["arrows"]
+        if arrows:
+            arrow = arrows[0]
+            paths = [{"label": arrow["label"], "points": [arrow["from"], arrow["to"]]}]
+    if not paths:
+        raise SketchError(
+            "The sketch has no route to drive. Draw it as a path, e.g. "
+            'path "route" (0.0,-2.0) -> (2.0,-2.0) -> (2.0,1.0), or a single '
+            "labelled arrow for a straight run."
+        )
+
+    named = _labelled(paths, ROUTE_WORDS)
+    chosen = named[0] if named else max(paths, key=lambda p: len(p["points"]))
+    pts = [list(p) for p in chosen["points"]]
+
+    start_circle = _labelled(shapes["circles"], ROUTE_WORDS + ("start", str(robot).lower()))
+    start = list(start_circle[0]["centre"]) if start_circle else pts[0]
+    return {
+        "robot": robot,
+        "chosen_by": "label" if named else "the longest path drawn",
+        "start": start,
+        "waypoints": pts[1:-1],
+        "goal": pts[-1],
+        "points": pts,
+    }
 
 
 def _labelled(shapes: list[dict[str, Any]], words: tuple[str, ...]):

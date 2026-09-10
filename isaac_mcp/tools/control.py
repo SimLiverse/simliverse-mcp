@@ -101,11 +101,16 @@ def register_tools(mcp: FastMCP, get_connection: "Callable[[], IsaacConnection]"
         `[LAYOUT SKETCH ...]` block holds plan-view shapes in metres, taken off
         a grid by hand. Those are the requested layout, not an approximation to
         re-derive: pass the block to `fence_from_sketch(text)` and it returns
-        the guarding, or to `zones_from_sketch(text)` for the pallet spots and
-        travel directions. Isaac is Z-up so the numbers transfer one-to-one; do
-        not rescale or re-project them. A rectangle is the cell, an arrow that
+        the guarding, to `zones_from_sketch(text)` for the pallet spots and
+        travel directions, or to `route_from_sketch(text)` for a mobile robot's
+        drawn route. Isaac is Z-up so the numbers transfer one-to-one; do not
+        rescale or re-project them. A rectangle is the cell, an arrow that
         crosses it is a conveyor entering and becomes an opening, a circle is
-        where something goes. A circle labelled "operator"/"worker"/"person"
+        where something goes, and a `path "route" (x,y) -> (x,y) -> ...` polyline
+        is a route to DRIVE - `demo.warehouse_amr.drive_route(sketch=text)` sends
+        an AMR along it, the first point the dock, the bends the waypoints round
+        the racks (because `drive_to` is turn-then-go, not a planner). A circle
+        labelled "operator"/"worker"/"person"
         picks which side the GATE opens on, nearest that circle — leave `gate`
         unset for this to fire; passing `gate=` explicitly always wins. The
         result reports `chosen_by` for the footprint and `gate.chosen_by` for
