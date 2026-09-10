@@ -402,6 +402,15 @@ the ones that need more than it has.
   `kaya` are the same primitive. `ridgebackfranka` / `ridgebackur` are arms on a
   driven base (`MobileManipulator`) - drive the base, then move the arm.
 
+**Two harnesses test the whole fleet, not one cell.** `scenario_sweep`
+(`generated_scenarios`) invents 100 palletising cells across arm x carton x
+pattern x deck x dressing x guards, each reach- and deck-bounded so it is
+placeable. `fleet_scenarios` (`fleet`, `run_fleet`) crosses the *other* bodies -
+every mobile base x every warehouse floor, plus drone routes - by pointing each
+scenario at the verified demo that runs it (`deliver`, `patrol`). Run them to
+prove a change still works on a different body in a different environment, not
+just on the one cell it was tuned on.
+
 ---
 
 ## 6. Robots

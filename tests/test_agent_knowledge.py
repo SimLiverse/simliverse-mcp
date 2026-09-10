@@ -136,6 +136,21 @@ def test_the_aerial_api_the_guide_advertises_exists() -> None:
         assert hasattr(AerialRobot, name), "AerialRobot has no %s" % name
 
 
+def test_the_guide_points_at_both_scenario_harnesses() -> None:
+    """The agent must know both harnesses exist: one crosses palletising cells,
+    the other crosses the whole fleet across floors."""
+    text = GUIDE.read_text(encoding="utf-8")
+    for token in ("generated_scenarios", "fleet_scenarios", "run_fleet"):
+        assert token in text, "the guide never mentions %r" % token
+
+
+def test_the_fleet_harness_exists_and_dispatches_to_the_verified_demos() -> None:
+    import demo.fleet_scenarios as fs
+
+    for name in ("mobile_scenarios", "drone_scenarios", "fleet", "run_fleet", "report"):
+        assert hasattr(fs, name), "fleet_scenarios has no %s" % name
+
+
 def test_the_agent_is_told_to_look_at_more_than_one_view() -> None:
     source = _control_source()
     assert "vision.look" in source
