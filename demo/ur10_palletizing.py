@@ -53,10 +53,13 @@ where the arm was; false about the workspace.
 IK finds the solution and `pose_to` reports "the drives are not tracking it",
 0.148 m short. At 1e4 the same pose holds to 2.7 mm.
 
-**3. `approach_axis="Z"`.** Auto-detection picks X for this flange, which
-rotates the cup ninety degrees so it raycasts *sideways* while the box sits
-directly beneath it. Measured: cup forward `[1.0, 0.0, -0.005]` — horizontal.
-With Z it reads `[-0.025, -0.016, -1.0]`, straight down.
+**3. `approach_axis` is measured, not "Z".** The flange's own tool axis is X on
+a UR, and `down_at_yaw` sends *that* axis at the floor, so the cup faces down
+AND the wrist stands vertical over the carton, the way a real UR palletiser
+holds it. "Z" was an old workaround from before `down_at_yaw` was axis-aware: a
+fixed down quat aimed tool Z at the floor, which sealed the carton but laid the
+flange on its side (`wrist_3` Z reads `[1,0,0]`, horizontal). Measured with the
+axis, `wrist_3` Z is `[0,0,-1]` and the cup faces `[0,0,-1]` - both right.
 
 **4. Gripper limits from Isaac's own tutorial** — grip distance 0.1, force
 limits 500, retry 0.1. Ours were 0.05 and 10000, and 0.05 cannot bridge the gap
@@ -564,12 +567,16 @@ def build(
 
     cup_radius = shape["cup_radius"]
 
-    # "Z" was measured on the UR family and is right there. It is not right
-    # everywhere: a Fanuc CRX flange's tool axis is -Y, and "Z" bolted the cup
-    # on sideways so it descended to 0.2 mm of its target and never sealed.
-    # Every other arm gets the axis measured off its own flange.
+    # Measure the flange's own tool axis for every arm - a UR answers X, a
+    # KR210 X, a Fanuc CRX -Y. "Z" was once hard-coded for the UR family as a
+    # workaround from before `down_at_yaw` was axis-aware: a fixed down quat
+    # sent tool Z at the floor, so an X-mounted cup raycast sideways and "Z"
+    # was the only thing that pointed it down. Now down_at_yaw sends the
+    # MEASURED axis down, so "auto" gives both a down-facing cup and a flange
+    # that stands vertical over the carton - measured, wrist_3 Z is [0,0,-1]
+    # with the axis (correct look), and [1,0,0] with "Z" (flange on its side).
     cup = arm.attach_suction_gripper(
-        approach_axis="Z" if _is_ur(robot) else "auto",
+        approach_axis="auto",
         max_grip_distance=(shape["max_grip_distance"] if grip_distance is None else float(grip_distance)),
         cup_radius=cup_radius,
         cup_length=0.04,
