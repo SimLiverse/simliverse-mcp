@@ -344,6 +344,35 @@ what makes it a cable: at 0 it is a bar.
 
 ---
 
+## 5d. Mobile robots in a warehouse
+
+```python
+from demo.warehouse_amr import deliver
+
+print(deliver(goal=[6, 3], waypoints=[[4, 0]], environment="Simple_Warehouse"))
+```
+
+`Robot.spawn("carter")` is a `WheeledRobot`; `jetbot` and `kaya` also exist.
+`drive_to([x, y])` closes the loop on the base pose and returns whether it
+arrived after braking (a base coasts, so it is measured stopped, not moving).
+`verify_navigation(rover, goal, start_position=)` is the acceptance check —
+physics running, moved under its own wheels, reached the goal — measured live:
+a Carter drove ~4 m in the Simple_Warehouse and passed all three.
+
+- **`drive_to` is not a planner** — it turns to face the goal and drives at
+  it, into any rack in the way. `plan_path(waypoints)` smooths a route you
+  supply but finds and avoids nothing. Hand `deliver` the via-points that keep
+  the aisle; it drives them loosely (`VIA`), the goal to the arrival tolerance.
+- **One tolerance for the drive and the verifier.** `drive_to(0.3)` reaching
+  0.30 m while `verify_navigation(0.25)` calls it failed is two truths that
+  disagree; `deliver` hands both the same number.
+- **Reference the environment and add a light.** A `clear_world()` drops the
+  warehouse's own lights and the scene renders black; `deliver` adds a dome.
+  Spawn the base at z=0.3 and settle 20 steps or the first wheel command
+  launches it off the interpenetrated floor.
+
+---
+
 ## 6. Robots
 
 `list_robots()` discovers everything under `/Isaac/Robots/<Vendor>/<Model>`:

@@ -105,6 +105,22 @@ def test_the_curve_api_the_guide_advertises_exists() -> None:
         assert hasattr(CurvedConveyor, name), "CurvedConveyor has no %s" % name
 
 
+def test_the_guide_covers_the_mobile_robot() -> None:
+    """drive_to is not a planner and the arrival tolerance must be shared with
+    the verifier - two things the agent cannot guess and both cost a run."""
+    text = GUIDE.read_text(encoding="utf-8")
+    for token in ("drive_to", "verify_navigation", "not a planner", "Carter", "One tolerance"):
+        assert token in text, "the guide never mentions %r" % token
+
+
+def test_the_mobile_robot_api_the_guide_advertises_exists() -> None:
+    from simliverse_sim import verify_navigation  # noqa: F401
+    from simliverse_sim.robots.mobile import WheeledRobot
+
+    for name in ("drive_to", "plan_path", "drive", "stop"):
+        assert hasattr(WheeledRobot, name), "WheeledRobot has no %s" % name
+
+
 def test_the_agent_is_told_to_look_at_more_than_one_view() -> None:
     source = _control_source()
     assert "vision.look" in source
