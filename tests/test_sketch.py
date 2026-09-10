@@ -555,3 +555,53 @@ def test_editing_a_missing_label_refuses_rather_than_duplicating():
 def test_an_empty_sketch_can_be_started_from_nothing():
     out = S.edit_sketch("", [{"op": "add", "kind": "rect", "label": "cell", "centre": [0, 0], "size": [4, 4]}])
     assert len(S.parse_sketch(out)["rects"]) == 1
+
+
+# ── A line somebody drew is never dropped in silence ────────────────────────
+#
+# Found by acting as the agent: a hand-written `arrow "infeed" from (3.5, 0)
+# to (0.5, 0)` parsed as nothing, so the fence had no opening for the belt,
+# zones reported no flow, and an edit re-emitted the block without the arrow.
+# Nothing said a word.
+
+HAND_WRITTEN = (
+    '[LAYOUT SKETCH]\n'
+    'rect   "cell" centre (0.0, 0.0) 4.0 x 3.0 m\n'
+    'arrow  "infeed" from (3.5, 0.0) to (0.5, 0.0)\n'
+    'circle "operator" centre (0.0, 2.6) radius 0.3 m\n'
+)
+
+
+def test_an_arrow_written_from_to_is_read_like_the_dashboards_form():
+    shapes = S.parse_sketch(HAND_WRITTEN)
+    assert shapes["unparsed"] == []
+    (arrow,) = shapes["arrows"]
+    assert arrow["from"] == (3.5, 0.0) and arrow["to"] == (0.5, 0.0)
+    # And it does what an infeed arrow is for: an opening in the fence line.
+    zones = S.zones_from_sketch(HAND_WRITTEN)
+    assert zones["flows"][0]["label"] == "infeed"
+
+
+def test_a_shape_line_nothing_could_read_is_reported_not_skipped():
+    text = HAND_WRITTEN + 'arrow "outfeed" starts (0, 0) ends (4, 0)\ncircle pallet at (1, 1)\n'
+    shapes = S.parse_sketch(text)
+    assert shapes["unparsed"] == [
+        'arrow "outfeed" starts (0, 0) ends (4, 0)',
+        "circle pallet at (1, 1)",
+    ]
+    assert S.zones_from_sketch(text)["unparsed"] == shapes["unparsed"]
+    # The prose header is still free to say "rect" mid-sentence.
+    assert S.parse_sketch("[LAYOUT SKETCH - a rect is a footprint]\n" + HAND_WRITTEN)["unparsed"] == []
+
+
+def test_editing_refuses_rather_than_re_emit_a_sketch_missing_a_drawn_line():
+    text = HAND_WRITTEN + 'circle pallet at (1, 1)\n'
+    with pytest.raises(SketchError, match="circle pallet at"):
+        S.edit_sketch(text, [{"op": "move", "label": "operator", "centre": [0, -2.6]}])
+    # The same edit on the readable sketch goes through, and nothing is lost.
+    out = S.edit_sketch(HAND_WRITTEN, [{"op": "move", "label": "operator", "centre": [0, -2.6]}])
+    assert {s["label"] for k in ("rects", "arrows", "circles") for s in S.parse_sketch(out)[k]} == {
+        "cell",
+        "infeed",
+        "operator",
+    }

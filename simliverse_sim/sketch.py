@@ -47,9 +47,26 @@ _NUM = r"(-?\d+(?:\.\d+)?)"
 _RECT = re.compile(
     r'rect\s+"(?P<label>[^"]*)"\s+centre\s+\(' + _NUM + r",\s*" + _NUM + r"\)\s+" + _NUM + r"\s*x\s*" + _NUM + r"\s*m"
 )
+#: The dashboard emits `arrow "x" (a, b) -> (c, d)`; a person, or the agent
+#: writing a sketch by hand, types `arrow "x" from (a, b) to (c, d)`. Both are
+#: read. The second form used to be dropped without a word, so the belt never
+#: got its opening in the fence and nothing said why.
 _ARROW = re.compile(
-    r'arrow\s+"(?P<label>[^"]*)"\s+\(' + _NUM + r",\s*" + _NUM + r"\)\s*->\s*\(" + _NUM + r",\s*" + _NUM + r"\)"
+    r'arrow\s+"(?P<label>[^"]*)"\s+(?:from\s+)?\('
+    + _NUM
+    + r",\s*"
+    + _NUM
+    + r"\)\s*(?:->|to)\s*\("
+    + _NUM
+    + r",\s*"
+    + _NUM
+    + r"\)"
 )
+#: A line that starts like a shape is one somebody meant to draw. If none of
+#: the shape patterns read it, it is reported rather than skipped: the prose
+#: header is the reason unknown lines are ignored, and the header never starts
+#: a line with one of these words.
+_SHAPE_LINE = re.compile(r"^\s*(rect|arrow|circle|path)\b", re.IGNORECASE)
 _CIRCLE = re.compile(
     r'circle\s+"(?P<label>[^"]*)"\s+centre\s+\(' + _NUM + r",\s*" + _NUM + r"\)\s+radius\s+" + _NUM + r"\s*m"
 )
@@ -99,7 +116,13 @@ def parse_sketch(text: str) -> dict[str, list[dict[str, Any]]]:
         raise SketchError("The sketch is empty, so there is nothing to build.")
 
     rects, arrows, circles = [], [], []
+    read_from: set[int] = set()  # offsets of the lines a shape pattern matched
+
+    def _mark(match: re.Match) -> None:
+        read_from.add(text.rfind("\n", 0, match.start()) + 1)
+
     for match in _RECT.finditer(text):
+        _mark(match)
         cx, cy, w, h = (float(match.group(i)) for i in range(2, 6))
         rects.append(
             {
@@ -110,6 +133,7 @@ def parse_sketch(text: str) -> dict[str, list[dict[str, Any]]]:
             }
         )
     for match in _ARROW.finditer(text):
+        _mark(match)
         ax, ay, bx, by = (float(match.group(i)) for i in range(2, 6))
         arrows.append(
             {
@@ -120,15 +144,27 @@ def parse_sketch(text: str) -> dict[str, list[dict[str, Any]]]:
             }
         )
     for match in _CIRCLE.finditer(text):
+        _mark(match)
         cx, cy, r = (float(match.group(i)) for i in range(2, 5))
         circles.append({"label": match.group("label"), "centre": (cx, cy), "radius": r})
 
     paths = []
     for match in _PATH.finditer(text):
+        _mark(match)
         points = [(float(a), float(b)) for a, b in _POINT.findall(match.group("points"))]
         paths.append({"label": match.group("label"), "points": points})
 
-    return {"rects": rects, "arrows": arrows, "circles": circles, "paths": paths}
+    # Shape-looking lines nothing read. Reported, not skipped: a dropped
+    # `arrow` is a belt with no opening in the fence and a re-emitted sketch
+    # missing a line the user drew.
+    unparsed: list[str] = []
+    offset = 0
+    for line in text.splitlines(keepends=True):
+        if offset not in read_from and _SHAPE_LINE.match(line):
+            unparsed.append(line.strip())
+        offset += len(line)
+
+    return {"rects": rects, "arrows": arrows, "circles": circles, "paths": paths, "unparsed": unparsed}
 
 
 def route_from_sketch(text: str, *, robot: str = "carter") -> dict[str, Any]:
@@ -160,6 +196,11 @@ def route_from_sketch(text: str, *, robot: str = "carter") -> dict[str, Any]:
             "The sketch has no route to drive. Draw it as a path, e.g. "
             'path "route" (0.0,-2.0) -> (2.0,-2.0) -> (2.0,1.0), or a single '
             "labelled arrow for a straight run."
+            + (
+                " These lines look like shapes but could not be read: %r." % (shapes["unparsed"],)
+                if shapes["unparsed"]
+                else ""
+            )
         )
 
     named = _labelled(paths, ROUTE_WORDS)
@@ -297,8 +338,18 @@ def edit_sketch(text: str, ops: list[dict[str, Any]]) -> str:
     thing with that name, which is how a "move the pallet" turns into two
     pallets. An empty `text` starts a fresh sketch.
     """
-    empty: dict[str, list[dict[str, Any]]] = {"rects": [], "arrows": [], "circles": [], "paths": []}
+    empty: dict[str, list[Any]] = {"rects": [], "arrows": [], "circles": [], "paths": [], "unparsed": []}
     shapes = parse_sketch(text) if text and text.strip() else empty
+    if shapes["unparsed"]:
+        # Re-emitting would drop these lines, and an edit that loses part of
+        # the drawing is worse than one that is refused with the line named.
+        raise SketchError(
+            "These lines look like shapes but could not be read, and re-emitting the sketch "
+            "would drop them: %r. Fix the line first - an arrow is "
+            'arrow "label" (x, y) -> (x, y), a rect is rect "label" centre (x, y) W x H m, '
+            'a circle is circle "label" centre (x, y) radius R m, a path is '
+            'path "label" (x, y) -> (x, y) -> ...' % (shapes["unparsed"],)
+        )
     for op in ops:
         what = str(op.get("op", "")).lower()
         if what == "add":
@@ -564,6 +615,9 @@ def fence_from_sketch(
         "ignored": {
             "rects": [r["label"] for r in shapes["rects"] if r is not footprint and r["label"] != footprint["label"]],
             "circles": [c["label"] for c in shapes["circles"] if c is not operator_spot],
+            # Lines that start like a shape and read as nothing. Worth saying:
+            # an infeed arrow nobody read is a belt with no gap in the fence.
+            "unparsed": list(shapes["unparsed"]),
         },
         "describe": fence.describe(),
     }
@@ -593,4 +647,5 @@ def zones_from_sketch(text: str) -> dict[str, Any]:
             {"label": a["label"], "from": list(a["from"]), "to": list(a["to"]), "length": round(a["length"], 3)}
             for a in shapes["arrows"]
         ],
+        "unparsed": list(shapes["unparsed"]),
     }
