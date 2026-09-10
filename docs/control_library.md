@@ -387,16 +387,20 @@ the ones that need more than it has.
   "no articulation registered". Measured: a quadcopter flew a four-waypoint loop,
   each reached within 0.3 m, hover held to millimetres. `demo/drone_patrol.py`.
   Other airframes: `crazyflie`, NASA `ingenuity`.
-- **Quadrupeds and humanoids stand, but walking needs a trained policy.** `spot`,
-  `anymal_c/d`, `go1/go2`, `laikago` (quadruped) and `h1`, `g1`, `digit`
-  (humanoid) spawn and hold a commanded joint pose, and `is_upright()` verifies
-  it, but there is no built-in gait: locomotion is a learned policy this library
-  does not ship. Say so rather than teleporting the body across the floor, which
-  is what `not_teleported` exists to catch.
-- **More AMRs and mobile manipulators.** `turtlebot3`, `novacarter`, `dingo`,
-  `jetbot`, `kaya` drive like the Carter (section 5d); `ridgebackfranka` /
-  `ridgebackur` are arms on a driven base (`MobileManipulator`) - drive the base,
-  then move the arm.
+- **Humanoids stand; walking needs a trained policy.** `Robot.spawn("h1")` is a
+  `Humanoid` with `stand`, `walk`, `is_upright`, `limbs`. Measured: it spawned,
+  stood, and `is_upright()` returned True (base at 1.04 m). `walk` is there, but
+  a gait is a learned policy this library does not ship - a `walk()` with no
+  policy holds a pose, it does not stride. Say so rather than teleporting the
+  body, which is what `not_teleported` exists to catch. `g1`, `digit` likewise.
+- **Quadrupeds spawn but their control is rough.** `spot`, `anymal_c/d`,
+  `go1/go2`, `laikago` load, but some keys are mis-typed (measured: `spot` came
+  back as a `Manipulator` and fell), and a 12-DOF gait needs a policy either
+  way. Spawn and hold a pose; do not claim a walk you cannot run.
+- **More AMRs and mobile manipulators, measured.** `turtlebot3` and `novacarter`
+  drove ~1.8 m to a goal exactly like the Carter (section 5d); `dingo`, `jetbot`,
+  `kaya` are the same primitive. `ridgebackfranka` / `ridgebackur` are arms on a
+  driven base (`MobileManipulator`) - drive the base, then move the arm.
 
 ---
 
