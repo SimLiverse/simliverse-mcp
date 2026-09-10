@@ -323,6 +323,29 @@ def layout_for(robot: str, *, box: float = BOX) -> dict:
     return out
 
 
+def max_pattern(robot: str, box: float, pallet_y: float, *, gap: float = 0.01) -> tuple[int, int]:
+    """The largest (rows, cols) whose far slot stays inside this arm's reach.
+
+    A UR10e carrying a 22 cm carton to the far slot of a 2x3 pattern was 0.31 m
+    short - a real reach limit the cell only found mid-place. The pallet grid
+    spreads (rows-1)*pitch along X and (cols-1)*pitch along Y about pallet_y,
+    so the far corner sits at that planar distance from the base; keep it under
+    the tool-down stack radius (0.60 x reach) and the cell is placeable, not a
+    late failure.
+    """
+    reach = REACH.get(robot, 1.3)
+    limit = 0.60 * reach
+    pitch = float(box) + gap
+    best_rows, best_cols = 1, 1
+    for rows in (1, 2, 3):
+        for cols in (1, 2, 3):
+            x = (rows - 1) / 2.0 * pitch
+            y = float(pallet_y) + (cols - 1) / 2.0 * pitch
+            if float(np.hypot(x, y)) <= limit and rows * cols >= best_rows * best_cols:
+                best_rows, best_cols = rows, cols
+    return best_rows, best_cols
+
+
 #: Air between the arm's body and anything built beside it.
 CLEARANCE = 0.05
 

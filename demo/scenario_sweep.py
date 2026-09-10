@@ -105,7 +105,7 @@ def generated_scenarios(
     out: list[tuple[str, dict[str, Any]]] = []
     seen: set[tuple] = set()
     tries = 0
-    while len(out) < count and tries < count * 40:
+    while len(out) < count and tries < count * 60:
         tries += 1
         robot = rng.choice(pool)
         box = rng.choice(_AXES["box"])
@@ -113,33 +113,37 @@ def generated_scenarios(
             k: rng.choice(_AXES[k])
             for k in ("box_mass", "rows", "cols", "layers", "speed", "deck", "dressing", "guides")
         }
+        spec = cell_mod.layout_for(robot, box=box)
+        spec.update(pick)
+        # Cap the pattern to what the deck holds and the arm can reach with this
+        # carton, so a generated cell is challenging-but-placeable, not the
+        # mid-place failure a UR10e hit on a 22 cm carton at 2x3. A cell that
+        # wanted more is still real, just at the arm's own pattern limit.
+        if spec.get("pallet") in ("tote", "half"):
+            spec["rows"], spec["cols"] = min(spec["rows"], 2), min(spec["cols"], 2)
+        mr, mc = cell_mod.max_pattern(robot, box, spec["pallet_y"])
+        spec["rows"], spec["cols"] = min(spec["rows"], mr), min(spec["cols"], mc)
+        # Distinct by the CAPPED spec: two picks that collapse to the same cell
+        # are the same cell, and a seed should not count it twice.
         key = (
             robot,
             box,
-            *(pick[k] for k in ("box_mass", "rows", "cols", "layers", "speed", "deck", "dressing", "guides")),
+            *(spec[k] for k in ("box_mass", "rows", "cols", "layers", "speed", "deck", "dressing", "guides")),
         )
         if key in seen:
             continue
         seen.add(key)
-        spec = cell_mod.layout_for(robot, box=box)
-        spec.update(pick)
-        # A small arm cannot reach a full pallet's far column at two layers; the
-        # layout already chose a tote for it, and a 3x3 tote is over-packed - cap
-        # the pattern to what the deck holds so the cell is testable, not absurd.
-        if spec.get("pallet") in ("tote", "half"):
-            spec["rows"] = min(spec["rows"], 2)
-            spec["cols"] = min(spec["cols"], 2)
         name = "%s b%.2f m%.1f %dx%dx%d v%.2f d%.2f%s%s" % (
             robot,
             box,
-            pick["box_mass"],
-            pick["rows"],
-            pick["cols"],
-            pick["layers"],
-            pick["speed"],
-            pick["deck"],
-            " dressed" if pick["dressing"] else "",
-            " guided" if pick["guides"] else "",
+            spec["box_mass"],
+            spec["rows"],
+            spec["cols"],
+            spec["layers"],
+            spec["speed"],
+            spec["deck"],
+            " dressed" if spec["dressing"] else "",
+            " guided" if spec["guides"] else "",
         )
         out.append((name, spec))
     return out
