@@ -137,12 +137,23 @@ def test_the_guide_carries_the_reach_ceiling_and_the_arm_table() -> None:
 
 def test_the_reach_api_the_agent_is_told_about_exists() -> None:
     import demo.ur10_palletizing as demo
+    import simliverse_sim as sim
     from simliverse_sim.robots.manipulator import Manipulator
 
     assert hasattr(Manipulator, "can_reach")
     assert hasattr(Manipulator, "reach_ceiling")
-    for name in ("go_home", "slot_reach", "drive_gains", "DRIVE_GAINS"):
+    for name in ("go_home", "slot_reach", "drive_gains", "DRIVE_GAINS", "layout_for"):
         assert hasattr(demo, name), "the docstring advertises %s" % name
+    for name in ("Cable", "verify_cable"):
+        assert hasattr(sim, name), "the docstring advertises %s" % name
+
+
+def test_the_agent_is_told_there_is_no_cable_asset() -> None:
+    """`list_props("cable")` is empty; the guide must say what to do instead."""
+    text = GUIDE.read_text(encoding="utf-8")
+    for token in ("Cable.build", "slack", "deformabletube_tube", "layout_for"):
+        assert token in text, "the guide never mentions %r" % token
+    assert "Cable.build" in _control_source()
 
 
 def test_the_guide_states_the_working_envelope_rather_than_implying_it() -> None:

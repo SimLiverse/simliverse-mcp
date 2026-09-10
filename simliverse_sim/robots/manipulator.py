@@ -1110,6 +1110,9 @@ class Manipulator(Robot):
     """A robot arm with an end effector."""
 
     morphology = Morphology.MANIPULATOR
+    #: A joint move this large between two solutions of one pose is a branch
+    #: change, not a route: the wrist flip measured on the KR210 was 3.1 rad.
+    SWING = 1.5
 
     def __init__(
         self,
@@ -1978,10 +1981,18 @@ class Manipulator(Robot):
         1.28 m. The base has the same ambiguity at +/-pi.
 
         `solve(seed)` must return `(joints, ok)`. The choice is by the largest
-        single joint move from `current`, which is what a swing is.
+        single joint move from `current`, which is what a swing is - and the
+        solver's own answer is kept unless an alternative saves more than
+        `SWING` of it. A UR10 whose every traverse was fine at 4/4 came back
+        0.58 m short once the nearest-by-a-little candidate was allowed to
+        win: the ramp waypoints walk toward the solver's branch and the final
+        command then snapped to the other one.
         """
         n = int(solution.size)
         if n < 6 or int(current.size) != n:
+            return solution
+        own = float(np.max(np.abs(solution - current)))
+        if own < Manipulator.SWING:
             return solution
         seeds = []
         for flip in (np.pi, -np.pi):
@@ -2003,7 +2014,10 @@ class Manipulator(Robot):
                 continue
             if ok and out.size == n:
                 candidates.append(np.asarray(out, dtype=float))
-        return min(candidates, key=lambda c: float(np.max(np.abs(c - current))))
+        best = min(candidates, key=lambda c: float(np.max(np.abs(c - current))))
+        if own - float(np.max(np.abs(best - current))) < Manipulator.SWING:
+            return solution
+        return best
 
     def advance_pose(self) -> bool:
         """Issue the next increment of a ramped move. True once the target is out.

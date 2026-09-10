@@ -88,6 +88,9 @@ def register_tools(mcp: FastMCP, get_connection: "Callable[[], IsaacConnection]"
           SafetyFence.build(centre=, size=, gate=, crossings=)
           spawn_pedestal(...) / spawn_operator(...) / vision.look(scale=)
           fence_from_sketch(text) / zones_from_sketch(text)
+          Cable.build(path, start=, end=, slack=, anchor_end=) / verify_cable
+          arm.can_reach(pos, quat) / arm.reach_ceiling(xy, quat, floor=)
+          demo.ur10_palletizing: build(**layout_for(robot)), palletise(cell)
 
         IF THE USER DREW A LAYOUT, BUILD WHAT THEY DREW. A message carrying a
         `[LAYOUT SKETCH ...]` block holds plan-view shapes in metres, taken off

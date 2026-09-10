@@ -277,6 +277,32 @@ end to end; each one was a failure first.
 
 ---
 
+## 5c. Cables, hoses and dress packs
+
+Isaac Sim 6.0.1 has no cable. `deformabletube_tube` is a static collision
+mesh; `PhysxDeformableBodyAPI` is gone and its FEM replacement needs GPU
+dynamics and a scene rebuild. `list_props("cable")`, `hose`, `wire`, `rope`
+all come back empty — say so rather than spawning a grey cylinder.
+
+```python
+from simliverse_sim import Cable, verify_cable
+
+cable = Cable.build("/World/Dress", start=[0, 0, 1.5], end=[2, 0, 1.5],
+                    slack=0.10, radius=0.012,
+                    anchor_start="", anchor_end="/World/KUKA/link_6")
+scene.settle(2.0)
+print(verify_cable(cable))     # ends on their anchors, sag, settled
+```
+
+A chain of capsules on spherical joints, laid along a parabola with the
+slack already in it. Measured in the live cell with GPU dynamics off:
+sixteen 12.5 cm links over 2 m settle in 2 s to a 7.7 cm sag, no
+self-collision, no drift. `anchor_*` is `""` for the world, a prim path to
+ride on a body (a flange, a cabinet), or `None` to hang free. `slack` is
+what makes it a cable: at 0 it is a bar.
+
+---
+
 ## 6. Robots
 
 `list_robots()` discovers everything under `/Isaac/Robots/<Vendor>/<Model>`:
@@ -297,7 +323,11 @@ an RMPflow/Lula config, and only 21 arms have one. Check
 | Kawasaki, Denso, Techman, Franka, Flexiv | — | yes | untested | RMPflow configs ship for these |
 
 Gains are per robot (`demo.ur10_palletizing.DRIVE_GAINS`), not one global
-default. `HOME` in the demos is six joint angles measured on a UR10. Do not
+default. Lay the cell out to the arm, not the arm into the UR10's cell:
+`layout_for("ur5e")` scales the pick point, belt height and stack to the
+arm's reach and swaps the 1.21 m pallet for a tote a small arm can span —
+`build(**layout_for(robot))`. The pallet is the constraint: 0.80 m wide and
+placed by its centre, it cannot get nearer than 0.65 m, past a UR5e's stack. `HOME` in the demos is six joint angles measured on a UR10. Do not
 hand it to another arm — it is either a shape error or, worse, a silent pose
 on a different kinematic chain.
 

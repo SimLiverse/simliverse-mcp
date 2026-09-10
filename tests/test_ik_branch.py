@@ -20,7 +20,7 @@ CLEAN_FAR_BASE = np.array([3.18, 0.87, 0.1, 0.05, 2.17, 0.03])
 def _lula_like(seed):
     """Converge to whichever branch the seed's wrist is nearest, and keep the
     base on the seed's side of +/-pi - which is what Lula does."""
-    wrist_flipped = abs(seed[3]) > np.pi / 2
+    wrist_flipped = seed[4] < 0
     out = (FLIPPED if wrist_flipped else CLEAN).copy()
     out[0] = 3.18 if seed[0] > 0 else -3.1
     return out, True
@@ -57,6 +57,33 @@ def test_a_solver_that_raises_on_a_seed_is_survived():
 
     chosen = Manipulator._nearest_branch(touchy, FLIPPED.copy(), PICK.copy())
     np.testing.assert_allclose(chosen, CLEAN)
+
+
+def test_a_solution_that_is_merely_a_little_nearer_does_not_win():
+    """The UR10 regression: every traverse fine, then 0.58 m short once a
+    candidate nearer by a few tenths of a radian was allowed to replace the
+    solver's own answer while the ramp walked toward the original."""
+    own = PICK + np.array([1.2, 0.3, 0.2, 0.1, 0.1, 0.1])
+    nearer = PICK + np.array([0.9, 0.3, 0.2, 0.1, 0.1, 0.1])
+
+    def solver(seed):
+        return nearer.copy(), True
+
+    chosen = Manipulator._nearest_branch(solver, own.copy(), PICK.copy())
+    np.testing.assert_allclose(chosen, own)
+
+
+def test_a_small_move_is_never_second_guessed():
+    calls = []
+
+    def solver(seed):
+        calls.append(seed)
+        return PICK.copy(), True
+
+    own = PICK + 0.2
+    chosen = Manipulator._nearest_branch(solver, own.copy(), PICK.copy())
+    np.testing.assert_allclose(chosen, own)
+    assert calls == [], "under SWING the solver is not asked again"
 
 
 def test_arms_with_fewer_than_six_joints_are_left_alone():

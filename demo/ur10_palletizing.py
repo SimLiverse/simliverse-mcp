@@ -221,6 +221,86 @@ def drive_gains(robot: str) -> dict:
     return dict(DRIVE_GAINS.get(robot, DRIVE_GAINS["default"]))
 
 
+#: Nominal reach in metres, from the vendors' data sheets. The library records
+#: none of this, and the cell's layout scales with it: a pick point 0.85 m out
+#: is comfortable for a UR10 and outside a UR5e altogether.
+REACH = {
+    "ur3": 0.50,
+    "ur3e": 0.50,
+    "ur5": 0.85,
+    "ur5e": 0.85,
+    "ur10": 1.30,
+    "ur10e": 1.30,
+    "ur16e": 0.90,
+    "ur20": 1.75,
+    "ur30": 1.30,
+    "crx5ia": 0.99,
+    "crx10ia": 1.25,
+    "crx10ia_l": 1.42,
+    "crx20ia_l": 1.42,
+    "kuka_kr210": 2.70,
+    "tm12": 1.30,
+    "rs007l": 0.93,
+    "rs013n": 1.46,
+    "rs025n": 1.73,
+    "rs080n": 2.10,
+    "cobottapro900": 0.90,
+    "cobottapro1300": 1.30,
+    "franka": 0.855,
+    "fr3": 0.855,
+}
+
+#: RMPflow configurations the library cannot match by name on its own.
+RMP_CONFIG = {"crx10ia_l": "Fanuc_CRX10IAL"}
+
+#: Decks a stack can be built on: the real pallet prop, or a static slab for
+#: loads a small arm can actually span. (length, width, height) in metres.
+DECKS = {
+    "pallet": None,
+    "half": (0.80, 0.60, 0.1425),
+    "tote": (0.60, 0.40, 0.1425),
+}
+
+
+def layout_for(robot: str, *, box: float = BOX) -> dict:
+    """Build arguments that put this arm's cell inside its reach.
+
+    The measured UR10 cell picks at 0.85 m (65 % of reach) and stacks at
+    0.75-0.95 m. Scaled by reach, that ratio is where every arm here was
+    happy; the pallet is the constraint. A full pallet is 0.80 m wide and is
+    placed by its centre, so it needs pallet_y >= 0.65 m to clear the base -
+    beyond a UR5e's stack radius - and gets a tote instead.
+    """
+    reach = REACH.get(robot)
+    if reach is None:
+        raise ValueError("%s: no reach on record; add it to REACH" % robot)
+    pick_r = 0.65 * reach
+    stop_x = round(pick_r * (STOP_X / 0.85), 3)
+    offset_y = round(-pick_r * (-OFFSET_Y / 0.85), 3)
+    stack_r = 0.60 * reach
+    deck = "pallet" if stack_r >= 0.65 + 0.10 else "half" if stack_r >= 0.55 else "tote"
+    half_width = 0.40 if deck == "pallet" else DECKS[deck][1] / 2.0
+    pallet_y = round(max(stack_r, half_width + 0.30), 3)
+    out = {
+        "robot": robot,
+        "stop_x": stop_x,
+        "offset_y": offset_y,
+        "pallet_y": pallet_y,
+        "pallet": deck,
+        "box": box,
+        # The belt too. At the UR10's 0.45 m deck a UR5e's pick hover sat
+        # 0.82 m up at 0.49 m out - the edge of the arm - and RMPflow got
+        # within 65 mm and no closer. A small arm gets a low belt.
+        "deck": round(max(0.25, DECK * reach / REACH["ur10"]), 3) if reach < REACH["ur10"] else DECK,
+    }
+    if robot in RMP_CONFIG:
+        out["rmp_config"] = RMP_CONFIG[robot]
+    if reach >= 2.0:
+        # A big arm cannot fold in to a deck at its own feet; raise the base.
+        out["pedestal"] = 0.35
+    return out
+
+
 def build(
     scene: Scene | None = None,
     *,
@@ -240,6 +320,8 @@ def build(
     grip_distance: float | None = None,
     pedestal: float = 0.0,
     dressing: str | None = None,
+    pallet: str = "pallet",
+    rmp_config: str | None = None,
 ) -> dict:
     """Author the cell and leave it playing with a box waiting at the stop.
 
@@ -282,7 +364,8 @@ def build(
         )
         base_z = plinth["top"]
 
-    arm = Robot.spawn(robot, position=[0.0, 0.0, base_z], prim_path=ARM)
+    spawn_kwargs = {"rmp_config": rmp_config} if rmp_config else {}
+    arm = Robot.spawn(robot, position=[0.0, 0.0, base_z], prim_path=ARM, **spawn_kwargs)
     gains = arm.tune_drives(**drive_gains(robot))
 
     shape = cell_geometry(box)
@@ -316,20 +399,39 @@ def build(
     )
     belt.load(boxes, box=(box, box, box), mass=box_mass, spacing=spacing, start_offset=0.20)
 
-    spawn_prop("pallet", prim_path=PALLET, position=[0.0, pallet_y, 0.0], scene=scene)
-    # A pallet is 1.21 m long and is placed by its centre, so a pallet_y that
-    # sounds merely close - 0.60 - puts its near edge at -0.005 and the arm's
-    # base inside it. `spawn_prop` warns; a warning in a sweep of twelve cells
-    # scrolls past. Recording it lets a caller tell "this cell is impossible"
-    # apart from "this code is wrong", which are not the same result.
-    from simliverse_sim.props import _overlapping_robots
+    if pallet not in DECKS:
+        raise ValueError("pallet=%r: one of %s" % (pallet, sorted(DECKS)))
+    if DECKS[pallet] is None:
+        spawn_prop("pallet", prim_path=PALLET, position=[0.0, pallet_y, 0.0], scene=scene)
+        deck_top = 0.1425
+        # A pallet is 1.21 m long and is placed by its centre, so a pallet_y
+        # that sounds merely close - 0.60 - puts its near edge at -0.005 and
+        # the arm's base inside it. `spawn_prop` warns; a warning in a sweep
+        # of twelve cells scrolls past. Recording it lets a caller tell "this
+        # cell is impossible" apart from "this code is wrong".
+        from simliverse_sim.props import _overlapping_robots
 
-    try:
-        fouled = _overlapping_robots(PALLET)
-    except Exception:  # noqa: BLE001 - a diagnostic must not break the build
-        fouled = []
+        try:
+            fouled = _overlapping_robots(PALLET)
+        except Exception:  # noqa: BLE001 - a diagnostic must not break the build
+            fouled = []
+    else:
+        # A static slab, sized for what a small arm can span: a full pallet is
+        # 0.80 m wide and 0.65 m out at the nearest, past a UR5e's stack.
+        length, width_, height = DECKS[pallet]
+        scene.spawn_rigid(
+            PALLET,
+            shape="Cube",
+            size=1.0,
+            scale=(length, width_, height),
+            position=[0.0, pallet_y, height / 2.0],
+            color=(0.55, 0.40, 0.25),
+            static=True,
+        )
+        deck_top = height
+        fouled = [{"robot": ARM}] if pallet_y - width_ / 2.0 < 0.25 else []
     slots = pallet_slots(
-        origin=[0.0, pallet_y, 0.1425], box=(box, box, box), rows=rows, cols=cols, layers=layers, gap=0.01
+        origin=[0.0, pallet_y, deck_top], box=(box, box, box), rows=rows, cols=cols, layers=layers, gap=0.01
     )
 
     cup_radius = shape["cup_radius"]
@@ -356,9 +458,12 @@ def build(
     scene.settle(8.0)
 
     # Handles do not survive the play; re-bind rather than reuse.
-    arm = Robot.attach(ARM, scene=scene)
+    # The configuration name given at spawn does not survive a re-attach on
+    # its own: the Fanuc came back "No RMPflow configuration matches" with
+    # Fanuc_CRX10IAL in the list it printed.
+    arm = Robot.attach(ARM, scene=scene, **spawn_kwargs)
     cup = arm.rebind_suction()
-    if robot == "ur10":
+    if _is_ur(robot):
         arm.set_joint_positions(HOME, settle_steps=120)
     else:
         # HOME was measured on a UR10's six joints. Handing it to another arm
@@ -408,6 +513,8 @@ def build(
         "grip_distance": grip_distance,
         "pedestal": pedestal,
         "dressing": dressing,
+        "pallet": pallet,
+        "rmp_config": rmp_config,
     }
     return cell
 
@@ -535,9 +642,14 @@ def slot_reach(cell: dict) -> dict:
 def _home_of(cell: dict) -> list[float]:
     """A parked pose with the right number of joints for this cell's arm."""
     spec = cell.get("spec") or {}
-    if spec.get("robot", "ur10") == "ur10":
+    if _is_ur(spec.get("robot", "ur10")):
         return list(HOME)
     return [0.0] * int(cell["arm"].dof)
+
+
+def _is_ur(robot: str) -> bool:
+    """The whole UR family shares the UR10's kinematic chain, so HOME fits."""
+    return str(robot).lower().startswith("ur")
 
 
 def go_home(cell: dict, *, settle_steps: int = 90) -> None:
@@ -582,7 +694,16 @@ def pick_waiting_box(cell: dict) -> dict:
 
     here = np.asarray(box.position, dtype=float)
     box_top = float(here[2]) + size / 2.0
-    arm.move_ee_to([float(here[0]), float(here[1]), box_top + cup.tip_offset + 0.18], DOWN, tolerance=0.015)
+    # Route the hover, do not servo it. RMPflow never moved a Fanuc CRX
+    # toward its hover point at all (closest approach 0.67 m, i.e. where it
+    # started) while Lula IK drove the same arm to 0.3 mm; and on a UR5e the
+    # servo stalled 65 mm out at the edge of reach. `pose_to` either arrives
+    # or says so.
+    hover = arm.pose_to(
+        [float(here[0]), float(here[1]), box_top + cup.tip_offset + 0.18], DOWN, corrections=6, raise_on_fail=False
+    )
+    if not _arrived(hover):
+        return {"picked": False, "reason": "hover over the carton not reached: %s" % _describe(hover)}
 
     # Re-read once more now the arm is parked above it, so the descent is
     # centred on the face rather than on where the box used to be.

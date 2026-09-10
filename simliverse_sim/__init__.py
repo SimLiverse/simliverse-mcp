@@ -72,6 +72,7 @@ from .assertions import (
     verify_navigation,
     verify_throw,
 )
+from .cable import Cable, chain_layout, verify_cable
 from .controller import ControllerError
 from .conveyor import Conveyor, ConveyorError, drive_surface
 from .deadplate import DeadPlate, DeadPlateError, Escapement
@@ -192,6 +193,9 @@ __all__ = [
     "upright",
     "verify_grasp",
     "verify_pallet",
+    "Cable",
+    "chain_layout",
+    "verify_cable",
     "verify_navigation",
     "verify_throw",
 ]
