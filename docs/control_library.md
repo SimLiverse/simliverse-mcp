@@ -533,6 +533,17 @@ to end needs a different approach — a true parallel jaw without the down-arc, 
 a side/horizontal grip — not more tuning of this one. Feed non-cube parcels with
 `build(box=<footprint>, box_h=<height>)`.
 
+The parallel jaw is the right instinct and half-proven: `build(gripper="egu_50")`
+mounts the Schunk EGU-50 as a genuine PRISMATIC jaw (`gripper.is_linkage` is
+False, two `Jaw_Drive` joints, span 51 mm), which closes straight in with no
+down-arc. But its `attach_gripper` corrupts the physics scene on play — the belt
+and its boxes launch to z ~ 21000 — where the 2F-85 attaches cleanly and a
+0.04 m box on the same cell palletises fine under suction, so it is the Schunk
+asset's articulation (its mimic `Jaw_Drive` followers, not zeroed the way the
+2F's are), not the box or the cell. Fixing that attach is the next step toward a
+jaw that palletises end to end; the prismatic geometry is already the answer to
+the down-arc.
+
 Suction: force limits of 500 (Isaac's tutorial value) break the seal within
 2 mm of any motion. Use `1.0e6`. **Writing any `isaac:*` attribute on a closed
 gripper releases it**, so do not "test" limits mid-grip.
