@@ -308,13 +308,26 @@ def _infer_motion_config(vendor: str, model: str, supported: list[str]) -> str |
     asset = set(_tokens(vendor, model))
     if not asset:
         return None
+    # The asset's model as one string, for names that tokenise differently on
+    # the two sides: the config is `Fanuc_CRX10IAL` and the asset directory
+    # `Fanuc/crx10ia_l`, so {crx, 10, ial} against {crx, 10, ia, l} never
+    # matched and the one Fanuc with a configuration had no Cartesian control.
+    # Whole-string equality, not containment — "ur3" is a prefix of "ur30".
+    whole = "".join(_tokens(vendor, model))
+    model_only = "".join(_tokens(model))
 
     ranked: list[tuple[tuple[int, int, int], str]] = []
     for config in supported:
         wanted = _tokens(config)
-        if wanted and all(token in asset for token in wanted):
+        if not wanted:
+            continue
+        joined = "".join(wanted)
+        joined_model = "".join(t for t in wanted if t not in brand)
+        if all(token in asset for token in wanted):
             specific = sum(1 for token in wanted if token not in brand)
             ranked.append(((specific, len(wanted), len(config)), config))
+        elif joined == whole or (joined_model and joined_model == model_only):
+            ranked.append(((len(wanted), len(wanted), len(config)), config))
     if not ranked:
         return None
 

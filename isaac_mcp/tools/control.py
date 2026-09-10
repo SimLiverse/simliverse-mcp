@@ -88,6 +88,10 @@ def register_tools(mcp: FastMCP, get_connection: "Callable[[], IsaacConnection]"
           SafetyFence.build(centre=, size=, gate=, crossings=)
           spawn_pedestal(...) / spawn_operator(...) / vision.look(scale=)
           fence_from_sketch(text) / zones_from_sketch(text)
+          Cable.build(path, start=, end=, slack=, anchor_end=) / verify_cable
+          arm.attach_gripper("2f_85")      # finger jaw on a bare arm; Play, re-attach, arm.gripper
+          arm.can_reach(pos, quat) / arm.reach_ceiling(xy, quat, floor=)
+          demo.ur10_palletizing: build(**layout_for(robot)), palletise(cell)
 
         IF THE USER DREW A LAYOUT, BUILD WHAT THEY DREW. A message carrying a
         `[LAYOUT SKETCH ...]` block holds plan-view shapes in metres, taken off
@@ -130,6 +134,32 @@ def register_tools(mcp: FastMCP, get_connection: "Callable[[], IsaacConnection]"
         because every visual defect found in this cell was visible from one
         direction and invisible from the others. Pass `scale=` for a cell
         bigger than about a metre.
+
+        RUN A CYCLE THE WAY AN INTEGRATOR WOULD. Each of these was a session:
+          - Ask before you commit. `arm.can_reach(pos, DOWN)` solves without
+            moving; `arm.reach_ceiling(xy, DOWN, floor=z)` gives the highest
+            tool-down height over a point. The reach envelope has a CEILING
+            that falls with distance (KR210: 0.82 m at 1.77 m out, 0.66 m at
+            1.93 m). `build()` returns cell["reach"] with every slot's ceiling
+            and the unreachable ones named - read it before promising layers.
+          - Check every MotionResult. `pose_to(raise_on_fail=False)` returns
+            `reached=False, steps=0` WITHOUT MOVING when there is no solution.
+            Never open the gripper after a move you did not check; a cup that
+            opened after an unchecked traverse put the carton 0.55 m off.
+          - A pose has two wrist branches. `pose_to` keeps the one nearest
+            the current joints; if you write joint targets yourself, a
+            solution with a 3 rad wrist move is the other branch, and the
+            swing goes through whatever is on the pallet.
+          - Home high: lift first with the base joint held, then swing
+            (`go_home(cell)`). One joint-space move from over the pallet
+            sweeps the forearm through what was just placed.
+          - Verify the STACK at the end with `verify_pallet`, not each carton
+            as it lands. Four cartons within 21 mm on release; by the end one
+            had been pushed 0.45 m and one was on the floor. `palletise()`
+            reports `stack` and is only `complete` when the pallet is intact.
+          - Gains are per robot (`DRIVE_GAINS`): the KR210 needs
+            max_force=1e6 where the UR family holds at 1e4. Only 21 arms have
+            an RMPflow config for `pose_to`; check describe()["motion_config"].
 
         Args:
             code: Python source to execute in the simulator process.

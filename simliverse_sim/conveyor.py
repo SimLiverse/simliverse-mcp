@@ -132,6 +132,72 @@ DRESSING_DECK = 0.767
 #: rollers into ellipses.
 DRESSING_SECTION_LENGTH = 2.0
 
+#: The straight sections in the library, measured live (Isaac Sim 6.0.1):
+#: length along travel and where the carrying surface sits above the prop's
+#: origin. All 47 `ConveyorBelt_A*` props share a 0.90 m belt in a 1.15 m
+#: frame; the low tier carries on rollers at 0.769 m and the tall tier on a
+#: belt at 1.781 m. Curves (A01-A03, 90 deg, centreline radius ~1.55 m),
+#: L-shapes, merges, tees, sorters and ~30 deg ramps between tiers are in
+#: the library too, and are not straight: `dress()` refuses them rather than
+#: tiling a curve in a line.
+SECTIONS: dict[str, dict[str, float]] = {
+    "conveyorbelt_a04": {"length": 2.0, "deck": 0.769},
+    "conveyorbelt_a05": {"length": 2.0, "deck": 0.767},
+    "conveyorbelt_a06": {"length": 2.0, "deck": 1.781},
+    "conveyorbelt_a07": {"length": 4.0, "deck": 0.769},
+    "conveyorbelt_a08": {"length": 2.72, "deck": 0.769},
+    "conveyorbelt_a09": {"length": 4.0, "deck": 1.781},
+}
+#: Props that carry on a curve, ramp or branch. Their tiling is not a line.
+NOT_STRAIGHT = {
+    "conveyorbelt_a01": "90 degree curve",
+    "conveyorbelt_a02": "90 degree curve",
+    "conveyorbelt_a03": "90 degree curve",
+    "conveyorbelt_a10": "L: curve and leg",
+    "conveyorbelt_a11": "L: curve and leg",
+    "conveyorbelt_a12": "L: curve and leg",
+    "conveyorbelt_a13": "L: curve and leg",
+    "conveyorbelt_a14": "L: curve and leg",
+    "conveyorbelt_a15": "L: curve and leg",
+    "conveyorbelt_a16": "L: curve and leg",
+    "conveyorbelt_a17": "L: curve and leg",
+    "conveyorbelt_a18": "L: curve and leg",
+    "conveyorbelt_a19": "45 degree merge",
+    "conveyorbelt_a20": "45 degree merge",
+    "conveyorbelt_a21": "45 degree merge",
+    "conveyorbelt_a22": "tee",
+    "conveyorbelt_a23": "tee",
+    "conveyorbelt_a24": "tee",
+    "conveyorbelt_a25": "ramp 1.78 to 2.55 m",
+    "conveyorbelt_a26": "ramp 1.74 to 4.09 m",
+    "conveyorbelt_a37": "ramp 0.74 to 1.78 m",
+    "conveyorbelt_a38": "ramp 1.78 to 2.55 m",
+    "conveyorbelt_a42": "ramp 0.70 to 1.78 m",
+    "conveyorbelt_a45": "cross with sorter",
+    "conveyorbelt_a46": "cross with sorter",
+    "conveyorbelt_a47": "tee with sorter",
+    "conveyorbelt_a48": "tee with sorter",
+    "conveyorbelt_a49": "sorter module",
+}
+
+
+def section_spec(prop: str) -> dict[str, float]:
+    """Length and deck height of a straight dressing section, by prop key.
+
+    Unknown straight-looking keys get A05's numbers, which is what every call
+    assumed before there was a table. A key known to be a curve, ramp or
+    branch is refused: tiling one of those in a straight line puts the second
+    section through the first and reads as a modelling error in a render.
+    """
+    key = str(prop).lower().strip()
+    if key in NOT_STRAIGHT:
+        raise ConveyorError(
+            "%s is a %s and cannot be tiled as straight dressing; use a straight section (%s) or build the "
+            "path it follows." % (prop, NOT_STRAIGHT[key], ", ".join(sorted(SECTIONS)))
+        )
+    return dict(SECTIONS.get(key, {"length": DRESSING_SECTION_LENGTH, "deck": DRESSING_DECK}))
+
+
 _WAKE_SPEED = 0.05
 _SANE_SPEED = (0.0, 5.0)
 
@@ -199,13 +265,18 @@ def _surface_velocity_api() -> Any:
     return api
 
 
-def drive_surface(prim_path: str, velocity: Any, *, enabled: bool = True) -> dict[str, Any]:
+def drive_surface(prim_path: str, velocity: Any, *, enabled: bool = True, local: bool = False) -> dict[str, Any]:
     """Give one collider a moving surface. The primitive the rest of this builds on.
 
     Applied to the *rigid body* prim, not the mesh under it — PhysX reads the
     attribute off the body and applies it to the shapes beneath. Pointing this
     at a mesh whose body is its parent applies cleanly and does nothing at all,
     which is why `Conveyor` resolves the body itself rather than trusting a path.
+
+    `local=True` expresses the velocity in the body's own frame. A flat belt
+    wants world space (its direction is a fact about the floor); an incline
+    wants local space, so the surface moves *along the slope* rather than
+    horizontally through it.
     """
     from pxr import Gf
 
@@ -229,14 +300,14 @@ def drive_surface(prim_path: str, velocity: Any, *, enabled: bool = True) -> dic
     applied = api.Apply(prim)
     applied.CreateSurfaceVelocityAttr().Set(Gf.Vec3f(*(float(v) for v in vector)))
     applied.CreateSurfaceVelocityEnabledAttr().Set(bool(enabled))
-    # Local space would make the vector rotate with the belt. A conveyor's
-    # direction of travel is a fact about the floor it is bolted to, so world
-    # space is right and being explicit stops it inheriting a default.
-    local = applied.GetPrim().GetAttribute("physxSurfaceVelocity:surfaceVelocityLocalSpace")
-    if local:
-        local.Set(False)
+    # World space by default: a flat conveyor's direction of travel is a fact
+    # about the floor it is bolted to. Being explicit stops it inheriting a
+    # default either way.
+    space = applied.GetPrim().GetAttribute("physxSurfaceVelocity:surfaceVelocityLocalSpace")
+    if space:
+        space.Set(bool(local))
 
-    return {"prim_path": prim_path, "velocity": vector.tolist(), "enabled": bool(enabled)}
+    return {"prim_path": prim_path, "velocity": vector.tolist(), "enabled": bool(enabled), "local": bool(local)}
 
 
 def _body_of(prim_path: str) -> str:
@@ -498,8 +569,8 @@ class Conveyor:
         self,
         prop: str = "conveyorbelt_a05",
         *,
-        deck: float = DRESSING_DECK,
-        section_length: float = DRESSING_SECTION_LENGTH,
+        deck: float | None = None,
+        section_length: float | None = None,
     ) -> dict[str, Any]:
         """Put a real conveyor over the slab, and hide the slab.
 
@@ -535,6 +606,12 @@ class Conveyor:
         cosmetic overhang and a better failure than a visibly bare slab.
         """
         from .props import spawn_prop
+
+        spec = section_spec(prop)
+        if deck is None:
+            deck = spec["deck"]
+        if section_length is None:
+            section_length = spec["length"]
 
         heading = self.direction
         yaw = float(np.degrees(np.arctan2(heading[1], heading[0])))

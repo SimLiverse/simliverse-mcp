@@ -49,6 +49,20 @@ SCENARIOS: list[tuple[str, dict[str, Any]]] = [
     ("2x3 pattern", {"rows": 2, "cols": 3}),
 ]
 
+#: The same cell on other arms, each laid out to its own reach by
+#: `layout_for`. Built lazily so importing this module needs no reach table.
+ROBOTS = ["ur10", "ur10e", "ur5e", "ur16e", "crx10ia_l", "kuka_kr210"]
+
+
+def robot_scenarios(robots: list[str] | None = None, *, box: float | None = None) -> list[tuple[str, dict[str, Any]]]:
+    from demo import ur10_palletizing as cell_mod
+
+    out = []
+    for robot in robots or ROBOTS:
+        spec = cell_mod.layout_for(robot, box=box or cell_mod.BOX)
+        out.append((robot, spec))
+    return out
+
 
 def sweep(
     scenarios: list[tuple[str, dict[str, Any]]] | None = None,
@@ -88,12 +102,17 @@ def sweep(
                 rows.append(row)
                 continue
             report_ = cell_mod.palletise(cell, count=cartons)
+            stack = report_.get("stack") or {}
             row.update(
                 {
                     "built": True,
                     "placed": int(report_.get("placed", 0)),
                     "of": int(report_.get("of", cartons)),
                     "complete": bool(report_.get("complete")),
+                    "intact": int(stack.get("placed", 0)),
+                    "unreachable": list((cell.get("reach") or {}).get("unreachable", [])),
+                    "clearance": cell.get("clearance"),
+                    "known_gap": cell_mod.KNOWN_GAPS.get(spec.get("robot") or ""),
                     "s_per_carton": report_.get("seconds_per_carton"),
                     "per_hour": report_.get("cartons_per_hour"),
                     "errors_mm": [
@@ -118,20 +137,26 @@ def sweep(
 
 def report(rows: list[dict[str, Any]]) -> str:
     """A table, with the baseline first so the rest can be read against it."""
-    lines = ["%-14s %-7s %-22s %-11s %s" % ("scenario", "placed", "errors mm", "s/carton", "note")]
-    lines.append("-" * 78)
+    lines = ["%-14s %-7s %-7s %-22s %-11s %s" % ("scenario", "placed", "intact", "errors mm", "s/carton", "note")]
+    lines.append("-" * 86)
     for row in rows:
         if not row.get("built"):
-            lines.append("%-14s %-7s %-22s %-11s %s" % (row["scenario"], "-", "-", "-", row["error"]))
+            lines.append("%-14s %-7s %-7s %-22s %-11s %s" % (row["scenario"], "-", "-", "-", "-", row["error"]))
             continue
+        note = "; ".join(row["why"]) or "ok"
+        if row.get("unreachable"):
+            note += "; unreachable slots %s" % row["unreachable"]
+        if row.get("known_gap"):
+            note = "KNOWN GAP: " + row["known_gap"]
         lines.append(
-            "%-14s %-7s %-22s %-11s %s"
+            "%-14s %-7s %-7s %-22s %-11s %s"
             % (
                 row["scenario"],
                 "%d/%d" % (row["placed"], row["of"]),
+                "%d/%d" % (row.get("intact", 0), row["of"]),
                 str(row["errors_mm"]),
                 row["s_per_carton"] if row["s_per_carton"] is not None else "-",
-                "; ".join(row["why"]) or "ok",
+                note,
             )
         )
     return "\n".join(lines)
