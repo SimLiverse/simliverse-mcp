@@ -51,6 +51,7 @@ def register_all_tools(mcp: FastMCP, get_connection: Callable[[], IsaacConnectio
         scene,
         sensors,
         simulation,
+        sketch,
     )
 
     for module in [
@@ -64,5 +65,6 @@ def register_all_tools(mcp: FastMCP, get_connection: Callable[[], IsaacConnectio
         simulation,
         graphs,
         control,
+        sketch,
     ]:
         module.register_tools(mcp, get_connection)

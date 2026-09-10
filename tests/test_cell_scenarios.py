@@ -141,3 +141,23 @@ def test_home_is_not_handed_to_an_arm_with_different_joints() -> None:
 def test_a_carton_with_no_size_is_refused_rather_than_derived_from() -> None:
     with pytest.raises(ValueError):
         cell_mod.cell_geometry(0.0)
+
+
+def test_the_generator_invents_a_hundred_distinct_cells() -> None:
+    """`generated_scenarios` is the generalisation harness: 100 combinations no
+    fixed scenario enumerates, deterministic under the seed, each a real cell
+    spec `build` accepts."""
+    import inspect
+
+    from demo import scenario_sweep as sw
+
+    cells = sw.generated_scenarios(100, seed=7)
+    assert len(cells) == 100
+    names = [n for n, _ in cells]
+    assert len(set(names)) == 100, "cells must be distinct"
+    assert [n for n, _ in sw.generated_scenarios(100, seed=7)] == names  # deterministic
+    accepted = set(inspect.signature(cell_mod.build).parameters)
+    for _, spec in cells:
+        extra = set(spec) - accepted
+        assert not extra, "generated a key build() has no parameter: %s" % sorted(extra)
+    assert len({spec["robot"] for _, spec in cells}) >= 4

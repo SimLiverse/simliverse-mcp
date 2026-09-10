@@ -49,6 +49,111 @@ SCENARIOS: list[tuple[str, dict[str, Any]]] = [
     ("2x3 pattern", {"rows": 2, "cols": 3}),
 ]
 
+#: The same cell on other arms, each laid out to its own reach by
+#: `layout_for`. Built lazily so importing this module needs no reach table.
+ROBOTS = ["ur10", "ur10e", "ur5e", "ur16e", "crx10ia_l", "kuka_kr210"]
+
+
+def robot_scenarios(robots: list[str] | None = None, *, box: float | None = None) -> list[tuple[str, dict[str, Any]]]:
+    from demo import ur10_palletizing as cell_mod
+
+    out = []
+    for robot in robots or ROBOTS:
+        spec = cell_mod.layout_for(robot, box=box or cell_mod.BOX)
+        out.append((robot, spec))
+    return out
+
+
+#: The axes a generated cell samples. Each is a real capability the harness is
+#: meant to handle; crossing them makes combinations no single scenario tested,
+#: which is the point - a cell that works only on the grid it was tuned for is
+#: not general. `crx10ia_l` is left out by default (its suction cup is a known
+#: gap, see demo.ur10_palletizing.KNOWN_GAPS); pass it in `robots` to include it.
+_AXES = {
+    "robot": [r for r in ROBOTS if r != "crx10ia_l"],
+    "box": [0.08, 0.10, 0.12, 0.15, 0.18, 0.20, 0.22],
+    "box_mass": [0.3, 0.5, 1.0, 1.5],
+    "rows": [1, 2, 3],
+    "cols": [1, 2, 3],
+    "layers": [1, 2],
+    "speed": [0.10, 0.15, 0.20, 0.30, 0.40],
+    "deck": [0.35, 0.45, 0.55],
+    "dressing": [None, "conveyorbelt_a05"],
+    "guides": [False, True],
+}
+
+
+def generated_scenarios(
+    count: int = 20, *, seed: int = 0, robots: list[str] | None = None
+) -> list[tuple[str, dict[str, Any]]]:
+    """Invent `count` distinct cells by crossing the capability axes, per arm.
+
+    Deterministic under `seed`, so a failure is reproducible and a fix can be
+    checked against the same set. Each cell is a robot's reach-aware layout with
+    a sampled carton, pattern, stack height, belt speed, deck height, dressing
+    and guarding folded in - combinations the fixed scenarios never enumerate,
+    which is what tests generalisation rather than memorisation. A cell whose
+    numbers are impossible (a small arm reaching a tall stack) is still emitted;
+    the sweep reports it as an impossible cell, not a defect.
+    """
+    import random as _random
+
+    from demo import ur10_palletizing as cell_mod
+
+    rng = _random.Random(seed)
+    pool = robots or _AXES["robot"]
+    out: list[tuple[str, dict[str, Any]]] = []
+    seen: set[tuple] = set()
+    tries = 0
+    while len(out) < count and tries < count * 60:
+        tries += 1
+        robot = rng.choice(pool)
+        box = rng.choice(_AXES["box"])
+        pick = {
+            k: rng.choice(_AXES[k])
+            for k in ("box_mass", "rows", "cols", "layers", "speed", "deck", "dressing", "guides")
+        }
+        spec = cell_mod.layout_for(robot, box=box)
+        layout_deck = float(spec["deck"])
+        spec.update(pick)
+        # Never RAISE the belt above the deck the arm's own layout chose: a short
+        # ur5e/ur16e whose belt was sampled up to 0.55 had no IK solution at the
+        # pick ("arm did not move"). A lower sampled deck is a fair variation; a
+        # higher one is out of the arm's reach, so clamp to the layout deck.
+        spec["deck"] = min(float(pick["deck"]), layout_deck)
+        # Cap the pattern to what the deck holds and the arm can reach with this
+        # carton, so a generated cell is challenging-but-placeable, not the
+        # mid-place failure a UR10e hit on a 22 cm carton at 2x3. A cell that
+        # wanted more is still real, just at the arm's own pattern limit.
+        if spec.get("pallet") in ("tote", "half"):
+            spec["rows"], spec["cols"] = min(spec["rows"], 2), min(spec["cols"], 2)
+        mr, mc = cell_mod.max_pattern(robot, box, spec["pallet_y"])
+        spec["rows"], spec["cols"] = min(spec["rows"], mr), min(spec["cols"], mc)
+        # Distinct by the CAPPED spec: two picks that collapse to the same cell
+        # are the same cell, and a seed should not count it twice.
+        key = (
+            robot,
+            box,
+            *(spec[k] for k in ("box_mass", "rows", "cols", "layers", "speed", "deck", "dressing", "guides")),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        name = "%s b%.2f m%.1f %dx%dx%d v%.2f d%.2f%s%s" % (
+            robot,
+            box,
+            spec["box_mass"],
+            spec["rows"],
+            spec["cols"],
+            spec["layers"],
+            spec["speed"],
+            spec["deck"],
+            " dressed" if spec["dressing"] else "",
+            " guided" if spec["guides"] else "",
+        )
+        out.append((name, spec))
+    return out
+
 
 def sweep(
     scenarios: list[tuple[str, dict[str, Any]]] | None = None,
@@ -88,12 +193,17 @@ def sweep(
                 rows.append(row)
                 continue
             report_ = cell_mod.palletise(cell, count=cartons)
+            stack = report_.get("stack") or {}
             row.update(
                 {
                     "built": True,
                     "placed": int(report_.get("placed", 0)),
                     "of": int(report_.get("of", cartons)),
                     "complete": bool(report_.get("complete")),
+                    "intact": int(stack.get("placed", 0)),
+                    "unreachable": list((cell.get("reach") or {}).get("unreachable", [])),
+                    "clearance": cell.get("clearance"),
+                    "known_gap": cell_mod.KNOWN_GAPS.get(spec.get("robot") or ""),
                     "s_per_carton": report_.get("seconds_per_carton"),
                     "per_hour": report_.get("cartons_per_hour"),
                     "errors_mm": [
@@ -118,20 +228,26 @@ def sweep(
 
 def report(rows: list[dict[str, Any]]) -> str:
     """A table, with the baseline first so the rest can be read against it."""
-    lines = ["%-14s %-7s %-22s %-11s %s" % ("scenario", "placed", "errors mm", "s/carton", "note")]
-    lines.append("-" * 78)
+    lines = ["%-14s %-7s %-7s %-22s %-11s %s" % ("scenario", "placed", "intact", "errors mm", "s/carton", "note")]
+    lines.append("-" * 86)
     for row in rows:
         if not row.get("built"):
-            lines.append("%-14s %-7s %-22s %-11s %s" % (row["scenario"], "-", "-", "-", row["error"]))
+            lines.append("%-14s %-7s %-7s %-22s %-11s %s" % (row["scenario"], "-", "-", "-", "-", row["error"]))
             continue
+        note = "; ".join(row["why"]) or "ok"
+        if row.get("unreachable"):
+            note += "; unreachable slots %s" % row["unreachable"]
+        if row.get("known_gap"):
+            note = "KNOWN GAP: " + row["known_gap"]
         lines.append(
-            "%-14s %-7s %-22s %-11s %s"
+            "%-14s %-7s %-7s %-22s %-11s %s"
             % (
                 row["scenario"],
                 "%d/%d" % (row["placed"], row["of"]),
+                "%d/%d" % (row.get("intact", 0), row["of"]),
                 str(row["errors_mm"]),
                 row["s_per_carton"] if row["s_per_carton"] is not None else "-",
-                "; ".join(row["why"]) or "ok",
+                note,
             )
         )
     return "\n".join(lines)

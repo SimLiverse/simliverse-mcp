@@ -85,24 +85,45 @@ def register_tools(mcp: FastMCP, get_connection: "Callable[[], IsaacConnection]"
           verify_grasp(robot, obj) / verify_throw(obj, result) -> Report
           list_props(q) / find_prop(q) / spawn_prop(q, position=)
           Conveyor.build(...) / belt.dress("conveyorbelt_a05") / belt.start()
+          Conveyor.build(..., pitch=30.7, dressing="conveyorbelt_a42")  # incline
+          CurvedConveyor.build_curve(centre=, radius=, turn=, dressing="conveyorbelt_a01")
+          Robot.spawn("carter").drive_to([x, y]) / verify_navigation(rover, goal, start_position=)
+          Robot.spawn("quadcopter").fly_to([x, y, z]) / .hover(steps=)  # rigid body, no re-attach
           SafetyFence.build(centre=, size=, gate=, crossings=)
           spawn_pedestal(...) / spawn_operator(...) / vision.look(scale=)
           fence_from_sketch(text) / zones_from_sketch(text)
+          Cable.build(path, start=, end=, slack=, anchor_end=) / verify_cable
+          arm.attach_gripper("2f_85")      # finger jaw on a bare arm; Play, re-attach, arm.gripper
+          arm.can_reach(pos, quat) / arm.reach_ceiling(xy, quat, floor=)
+          demo.ur10_palletizing: build(**layout_for(robot)), palletise(cell)
 
         IF THE USER DREW A LAYOUT, BUILD WHAT THEY DREW. A message carrying a
         `[LAYOUT SKETCH ...]` block holds plan-view shapes in metres, taken off
         a grid by hand. Those are the requested layout, not an approximation to
         re-derive: pass the block to `fence_from_sketch(text)` and it returns
-        the guarding, or to `zones_from_sketch(text)` for the pallet spots and
-        travel directions. Isaac is Z-up so the numbers transfer one-to-one; do
-        not rescale or re-project them. A rectangle is the cell, an arrow that
+        the guarding, to `zones_from_sketch(text)` for the pallet spots and
+        travel directions, or to `route_from_sketch(text)` for a mobile robot's
+        drawn route. Isaac is Z-up so the numbers transfer one-to-one; do not
+        rescale or re-project them. A rectangle is the cell, an arrow that
         crosses it is a conveyor entering and becomes an opening, a circle is
-        where something goes. A circle labelled "operator"/"worker"/"person"
+        where something goes, and a `path "route" (x,y) -> (x,y) -> ...` polyline
+        is a route to DRIVE - `demo.warehouse_amr.drive_route(sketch=text)` sends
+        an AMR along it, the first point the dock, the bends the waypoints round
+        the racks (because `drive_to` is turn-then-go, not a planner). A circle
+        labelled "operator"/"worker"/"person"
         picks which side the GATE opens on, nearest that circle — leave `gate`
         unset for this to fire; passing `gate=` explicitly always wins. The
         result reports `chosen_by` for the footprint and `gate.chosen_by` for
         the gate — say so if either reads "unlabelled" or "no operator was
         drawn", because then nobody told you and it guessed.
+
+        IF THE USER ASKS TO CHANGE THE DRAWING, CHANGE THE DRAWING. "Add a
+        pallet at (1, 2)", "move the operator north", "draw the AMR's route":
+        call the `edit_sketch` tool with the sketch block and the edits, hand
+        the returned block back so the dashboard redraws it, THEN build from
+        the new sketch. The sketch is the source of truth; editing only the 3D
+        scene leaves the drawing stale and the next build starts from the
+        wrong picture.
 
         BUILD CELLS OUT OF REAL ASSETS. The library indexes 175 props,
         including 47 conveyor sections and 23 people. A cell authored from
@@ -130,6 +151,36 @@ def register_tools(mcp: FastMCP, get_connection: "Callable[[], IsaacConnection]"
         because every visual defect found in this cell was visible from one
         direction and invisible from the others. Pass `scale=` for a cell
         bigger than about a metre.
+
+        RUN A CYCLE THE WAY AN INTEGRATOR WOULD. Each of these was a session:
+          - Ask before you commit. `arm.can_reach(pos, DOWN)` solves without
+            moving; `arm.reach_ceiling(xy, DOWN, floor=z)` gives the highest
+            tool-down height over a point. The reach envelope has a CEILING
+            that falls with distance (KR210: 0.82 m at 1.77 m out, 0.66 m at
+            1.93 m). `build()` returns cell["reach"] with every slot's ceiling
+            and the unreachable ones named - read it before promising layers.
+          - Check every MotionResult. `pose_to(raise_on_fail=False)` returns
+            `reached=False, steps=0` WITHOUT MOVING when there is no solution.
+            Never open the gripper after a move you did not check; a cup that
+            opened after an unchecked traverse put the carton 0.55 m off.
+          - A pose has two wrist branches. `pose_to` keeps the one nearest
+            the current joints; if you write joint targets yourself, a
+            solution with a 3 rad wrist move is the other branch, and the
+            swing goes through whatever is on the pallet.
+          - Home high: lift first with the base joint held, then swing
+            (`go_home(cell)`). One joint-space move from over the pallet
+            sweeps the forearm through what was just placed.
+          - Verify the STACK at the end with `verify_pallet`, not each carton
+            as it lands. Four cartons within 21 mm on release; by the end one
+            had been pushed 0.45 m and one was on the floor. `palletise()`
+            reports `stack` and is only `complete` when the pallet is intact -
+            and intact means SQUARE too: a cup does nothing to a box's yaw, so a
+            carton that drifted askew on the belt lands askew (a UR16e stacked
+            one 11 deg off). The place measures the pick yaw and rotates the
+            wrist to land it square; `stack` reports each box's `skew`.
+          - Gains are per robot (`DRIVE_GAINS`): the KR210 needs
+            max_force=1e6 where the UR family holds at 1e4. Only 21 arms have
+            an RMPflow config for `pose_to`; check describe()["motion_config"].
 
         Args:
             code: Python source to execute in the simulator process.

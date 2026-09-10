@@ -47,17 +47,49 @@ _NUM = r"(-?\d+(?:\.\d+)?)"
 _RECT = re.compile(
     r'rect\s+"(?P<label>[^"]*)"\s+centre\s+\(' + _NUM + r",\s*" + _NUM + r"\)\s+" + _NUM + r"\s*x\s*" + _NUM + r"\s*m"
 )
+#: The dashboard emits `arrow "x" (a, b) -> (c, d)`; a person, or the agent
+#: writing a sketch by hand, types `arrow "x" from (a, b) to (c, d)`. Both are
+#: read. The second form used to be dropped without a word, so the belt never
+#: got its opening in the fence and nothing said why.
 _ARROW = re.compile(
-    r'arrow\s+"(?P<label>[^"]*)"\s+\(' + _NUM + r",\s*" + _NUM + r"\)\s*->\s*\(" + _NUM + r",\s*" + _NUM + r"\)"
+    r'arrow\s+"(?P<label>[^"]*)"\s+(?:from\s+)?\('
+    + _NUM
+    + r",\s*"
+    + _NUM
+    + r"\)\s*(?:->|to)\s*\("
+    + _NUM
+    + r",\s*"
+    + _NUM
+    + r"\)"
 )
+#: A line that starts like a shape is one somebody meant to draw. If none of
+#: the shape patterns read it, it is reported rather than skipped: the prose
+#: header is the reason unknown lines are ignored, and the header never starts
+#: a line with one of these words.
+_SHAPE_LINE = re.compile(r"^\s*(rect|arrow|circle|path)\b", re.IGNORECASE)
 _CIRCLE = re.compile(
     r'circle\s+"(?P<label>[^"]*)"\s+centre\s+\(' + _NUM + r",\s*" + _NUM + r"\)\s+radius\s+" + _NUM + r"\s*m"
 )
+#: A drawn route: two or more points chained with arrows. An `arrow` is one
+#: segment (a conveyor's direction); a `path` is a whole polyline for a mobile
+#: robot to follow, which an arrow cannot express without turning every bend
+#: into a separate shape the parser could not tell belonged together.
+_PATH = re.compile(
+    r'path\s+"(?P<label>[^"]*)"\s+(?P<points>\(\s*' + _NUM + r"\s*,\s*" + _NUM + r"\s*\)(?:\s*->\s*\(\s*"
+    + _NUM
+    + r"\s*,\s*"
+    + _NUM
+    + r"\s*\))+)"
+)
+_POINT = re.compile(r"\(\s*" + _NUM + r"\s*,\s*" + _NUM + r"\s*\)")
 
 #: Words a person uses for the thing they want fenced. Checked before falling
 #: back to "the biggest rectangle", because the biggest rectangle is only the
 #: cell until someone draws a bigger floor around it.
 FENCE_WORDS = ("fence", "cell", "guard", "enclosure", "perimeter", "cage", "safety")
+
+#: Words that mark a drawn route, and a circle that marks where the robot starts.
+ROUTE_WORDS = ("route", "path", "amr", "agv", "rover", "robot", "drive", "aisle")
 
 #: Words for a thing that has to get through the fence line.
 FEED_WORDS = ("conveyor", "belt", "infeed", "outfeed", "feed", "line")
@@ -84,7 +116,13 @@ def parse_sketch(text: str) -> dict[str, list[dict[str, Any]]]:
         raise SketchError("The sketch is empty, so there is nothing to build.")
 
     rects, arrows, circles = [], [], []
+    read_from: set[int] = set()  # offsets of the lines a shape pattern matched
+
+    def _mark(match: re.Match) -> None:
+        read_from.add(text.rfind("\n", 0, match.start()) + 1)
+
     for match in _RECT.finditer(text):
+        _mark(match)
         cx, cy, w, h = (float(match.group(i)) for i in range(2, 6))
         rects.append(
             {
@@ -95,6 +133,7 @@ def parse_sketch(text: str) -> dict[str, list[dict[str, Any]]]:
             }
         )
     for match in _ARROW.finditer(text):
+        _mark(match)
         ax, ay, bx, by = (float(match.group(i)) for i in range(2, 6))
         arrows.append(
             {
@@ -105,10 +144,270 @@ def parse_sketch(text: str) -> dict[str, list[dict[str, Any]]]:
             }
         )
     for match in _CIRCLE.finditer(text):
+        _mark(match)
         cx, cy, r = (float(match.group(i)) for i in range(2, 5))
         circles.append({"label": match.group("label"), "centre": (cx, cy), "radius": r})
 
-    return {"rects": rects, "arrows": arrows, "circles": circles}
+    paths = []
+    for match in _PATH.finditer(text):
+        _mark(match)
+        points = [(float(a), float(b)) for a, b in _POINT.findall(match.group("points"))]
+        paths.append({"label": match.group("label"), "points": points})
+
+    # Shape-looking lines nothing read. Reported, not skipped: a dropped
+    # `arrow` is a belt with no opening in the fence and a re-emitted sketch
+    # missing a line the user drew.
+    unparsed: list[str] = []
+    offset = 0
+    for line in text.splitlines(keepends=True):
+        if offset not in read_from and _SHAPE_LINE.match(line):
+            unparsed.append(line.strip())
+        offset += len(line)
+
+    return {"rects": rects, "arrows": arrows, "circles": circles, "paths": paths, "unparsed": unparsed}
+
+
+def route_from_sketch(text: str, *, robot: str = "carter") -> dict[str, Any]:
+    """A drawn path a mobile robot should follow, as drive waypoints.
+
+    A `path "route" (0,-2) -> (2,-2) -> (2,1) -> (5,1)` line is a polyline the
+    canvas drew by hand; its first point is where the robot starts, the last is
+    the goal, and the bends in between are the waypoints that keep it clear of
+    the shelving - which is the whole reason to draw a route rather than a
+    straight line, since `drive_to` is a turn-then-go controller, not a planner
+    that finds its own way around obstacles. A single labelled `arrow` counts
+    as a two-point route. A circle labelled for the robot (or "start") overrides
+    where it begins, so the drawn dock and the drawn route need not share a point.
+
+    Returned rather than driven, the way `fence_from_sketch` returns guarding:
+    the numbers transfer one-to-one (Isaac is Z-up), and driving them is the
+    caller's move - `demo.warehouse_amr.drive_route` does it.
+    """
+    shapes = parse_sketch(text)
+    paths = shapes.get("paths", [])
+    if not paths:
+        # Fall back to a labelled arrow: a single straight leg is still a route.
+        arrows = _labelled(shapes["arrows"], ROUTE_WORDS) or shapes["arrows"]
+        if arrows:
+            arrow = arrows[0]
+            paths = [{"label": arrow["label"], "points": [arrow["from"], arrow["to"]]}]
+    if not paths:
+        raise SketchError(
+            "The sketch has no route to drive. Draw it as a path, e.g. "
+            'path "route" (0.0,-2.0) -> (2.0,-2.0) -> (2.0,1.0), or a single '
+            "labelled arrow for a straight run."
+            + (
+                " These lines look like shapes but could not be read: %r." % (shapes["unparsed"],)
+                if shapes["unparsed"]
+                else ""
+            )
+        )
+
+    named = _labelled(paths, ROUTE_WORDS)
+    chosen = named[0] if named else max(paths, key=lambda p: len(p["points"]))
+    pts = [list(p) for p in chosen["points"]]
+
+    start_circle = _labelled(shapes["circles"], ROUTE_WORDS + ("start", str(robot).lower()))
+    start = list(start_circle[0]["centre"]) if start_circle else pts[0]
+    return {
+        "robot": robot,
+        "chosen_by": "label" if named else "the longest path drawn",
+        "start": start,
+        "waypoints": pts[1:-1],
+        "goal": pts[-1],
+        "points": pts,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Writing a sketch back. The dashboard draws and emits; when a person then asks
+# the agent to "add a pallet at (1, 2)" or "move the operator north", the
+# drawing must change too, or the sketch stops being the truth and the 3D scene
+# quietly diverges from it. So the agent edits the SKETCH and re-emits it in
+# the dashboard's own format (`dashboard/src/lib/sketch.ts` describeSketch),
+# byte-compatible, so the dashboard can redraw it and this parser can re-read
+# it. Nothing here touches the 3D scene: the sketch is the source of truth and
+# the scene is rebuilt from it, which is the whole point.
+# ---------------------------------------------------------------------------
+
+#: The dashboard's header, verbatim. It exists so the agent never has to infer
+#: the frame or the units, and re-emitting it keeps a round-tripped sketch
+#: indistinguishable from a freshly drawn one.
+SKETCH_HEADER = (
+    "[LAYOUT SKETCH - plan view of the floor, all values in metres.\n"
+    " The simulator is Z-up, so this is the XY plane: +X is right, +Y is away\n"
+    " from the viewer, and (0, 0) is the marked origin on the canvas.\n"
+    " These coordinates are the user's own measurements, taken off a metre grid.\n"
+    " Treat them as the requested layout, not as an approximation to re-derive.]"
+)
+
+
+def _r2(n: float) -> str:
+    """Two decimals, and never `-0.00`, which reads as a bug (the dashboard's r2)."""
+    v = round(float(n) * 100.0) / 100.0
+    if v == 0.0:
+        v = 0.0
+    return "%.2f" % v
+
+
+def _heading(a: Any, b: Any) -> str:
+    """Degrees CCW from +X, tagged with an axis when within 5 deg of one (the
+    dashboard's headingOf), so a belt that runs along +Y says so."""
+    deg = float(np.degrees(np.arctan2(b[1] - a[1], b[0] - a[0])))
+    norm = (deg % 360.0 + 360.0) % 360.0
+    for angle, name in ((0.0, "+X"), (90.0, "+Y"), (180.0, "-X"), (270.0, "-Y"), (360.0, "+X")):
+        if abs(norm - angle) <= 5.0:
+            return "%s deg (%s)" % (_r2(norm), name)
+    return "%s deg" % _r2(norm)
+
+
+def _quote(label: Any) -> str:
+    return '"%s"' % ((str(label or "").strip() or "unlabelled").replace('"', "'"))
+
+
+def render_sketch(shapes: dict[str, list[dict[str, Any]]]) -> str:
+    """Emit shapes as the dashboard's text block, decorations and all.
+
+    The inverse of `parse_sketch`, and byte-compatible with what the dashboard
+    itself emits, so an edited sketch round-trips through both. Returns the
+    header alone for an empty sketch rather than nothing, so a caller can tell
+    "cleared" from "never sent".
+    """
+    lines: list[str] = []
+    for r in shapes.get("rects", []):
+        cx, cy = (float(v) for v in r["centre"])
+        w, h = (float(v) for v in r["size"])
+        lines.append(
+            "rect   %s centre (%s, %s) %s x %s m (x %s..%s, y %s..%s)"
+            % (
+                _quote(r.get("label")),
+                _r2(cx),
+                _r2(cy),
+                _r2(w),
+                _r2(h),
+                _r2(cx - w / 2),
+                _r2(cx + w / 2),
+                _r2(cy - h / 2),
+                _r2(cy + h / 2),
+            )
+        )
+    for a in shapes.get("arrows", []):
+        fa, ta = a["from"], a["to"]
+        length = float(np.hypot(ta[0] - fa[0], ta[1] - fa[1]))
+        lines.append(
+            "arrow  %s (%s, %s) -> (%s, %s) length %s m heading %s"
+            % (_quote(a.get("label")), _r2(fa[0]), _r2(fa[1]), _r2(ta[0]), _r2(ta[1]), _r2(length), _heading(fa, ta))
+        )
+    for c in shapes.get("circles", []):
+        cx, cy = (float(v) for v in c["centre"])
+        lines.append(
+            "circle %s centre (%s, %s) radius %s m" % (_quote(c.get("label")), _r2(cx), _r2(cy), _r2(c["radius"]))
+        )
+    for p in shapes.get("paths", []):
+        pts = " -> ".join("(%s, %s)" % (_r2(x), _r2(y)) for x, y in p["points"])
+        lines.append("path   %s %s" % (_quote(p.get("label")), pts))
+    return SKETCH_HEADER + ("\n\n" + "\n".join(lines) if lines else "")
+
+
+def _find(shapes: dict[str, list[dict[str, Any]]], label: str) -> tuple[str, dict[str, Any]] | None:
+    want = str(label).strip().lower()
+    for kind in ("rects", "arrows", "circles", "paths"):
+        for s in shapes.get(kind, []):
+            if str(s.get("label") or "").strip().lower() == want:
+                return kind, s
+    return None
+
+
+def edit_sketch(text: str, ops: list[dict[str, Any]]) -> str:
+    """Apply edits to a sketch and return the re-emitted block.
+
+    `ops` is a list of dicts, applied in order:
+
+    * `{"op": "add", "kind": "circle", "label": "pallet", "centre": [1, 2], "radius": 0.6}`
+    * `{"op": "add", "kind": "rect",   "label": "shelf",  "centre": [0, 0], "size": [1.2, 0.6]}`
+    * `{"op": "add", "kind": "arrow",  "label": "infeed", "from": [4, 0], "to": [-1, 0]}`
+    * `{"op": "add", "kind": "path",   "label": "route",  "points": [[0,0],[2,0],[2,1]]}`
+    * `{"op": "move",    "label": "operator", "centre": [0, 3]}`  - a rect/circle is
+      re-centred; an arrow/path is translated so its midpoint lands there
+    * `{"op": "resize",  "label": "cell", "size": [8, 6]}` or `"radius": 0.8`
+    * `{"op": "remove",  "label": "shelf"}`
+    * `{"op": "relabel", "label": "box", "to": "pallet"}`
+
+    Edits by label, because that is how a person refers to what they drew. A
+    label that is not in the sketch raises rather than silently adding a second
+    thing with that name, which is how a "move the pallet" turns into two
+    pallets. An empty `text` starts a fresh sketch.
+    """
+    empty: dict[str, list[Any]] = {"rects": [], "arrows": [], "circles": [], "paths": [], "unparsed": []}
+    shapes = parse_sketch(text) if text and text.strip() else empty
+    if shapes["unparsed"]:
+        # Re-emitting would drop these lines, and an edit that loses part of
+        # the drawing is worse than one that is refused with the line named.
+        raise SketchError(
+            "These lines look like shapes but could not be read, and re-emitting the sketch "
+            "would drop them: %r. Fix the line first - an arrow is "
+            'arrow "label" (x, y) -> (x, y), a rect is rect "label" centre (x, y) W x H m, '
+            'a circle is circle "label" centre (x, y) radius R m, a path is '
+            'path "label" (x, y) -> (x, y) -> ...' % (shapes["unparsed"],)
+        )
+    for op in ops:
+        what = str(op.get("op", "")).lower()
+        if what == "add":
+            kind = str(op.get("kind", "")).lower()
+            label = op.get("label", "")
+            if kind == "rect":
+                w, h = (float(v) for v in op["size"])
+                centre = tuple(float(v) for v in op["centre"])
+                shapes["rects"].append({"label": label, "centre": centre, "size": (w, h), "area": w * h})
+            elif kind == "circle":
+                centre = tuple(float(v) for v in op["centre"])
+                shapes["circles"].append({"label": label, "centre": centre, "radius": float(op["radius"])})
+            elif kind == "arrow":
+                fa = tuple(float(v) for v in op["from"])
+                ta = tuple(float(v) for v in op["to"])
+                length = float(np.hypot(ta[0] - fa[0], ta[1] - fa[1]))
+                shapes["arrows"].append({"label": label, "from": fa, "to": ta, "length": length})
+            elif kind == "path":
+                points = [tuple(float(v) for v in pt) for pt in op["points"]]
+                shapes["paths"].append({"label": label, "points": points})
+            else:
+                raise SketchError("add: kind must be rect, circle, arrow or path, not %r" % (kind,))
+            continue
+
+        label = op.get("label")
+        found = _find(shapes, label) if label is not None else None
+        if found is None:
+            raise SketchError("%s: nothing in the sketch is labelled %r" % (what, label))
+        kind, shape = found
+
+        if what == "remove":
+            shapes[kind].remove(shape)
+        elif what == "relabel":
+            shape["label"] = op["to"]
+        elif what == "move":
+            target = np.asarray(op["centre"], dtype=float)
+            if kind in ("rects", "circles"):
+                shape["centre"] = (float(target[0]), float(target[1]))
+            elif kind == "arrows":
+                mid = (np.asarray(shape["from"]) + np.asarray(shape["to"])) / 2.0
+                delta = target - mid
+                shape["from"] = tuple(float(v) for v in np.asarray(shape["from"]) + delta)
+                shape["to"] = tuple(float(v) for v in np.asarray(shape["to"]) + delta)
+            else:
+                pts = np.asarray(shape["points"], dtype=float)
+                delta = target - pts.mean(axis=0)
+                shape["points"] = [tuple(float(v) for v in pt) for pt in pts + delta]
+        elif what == "resize":
+            if kind == "rects" and "size" in op:
+                w, h = (float(v) for v in op["size"])
+                shape["size"], shape["area"] = (w, h), w * h
+            elif kind == "circles" and "radius" in op:
+                shape["radius"] = float(op["radius"])
+            else:
+                raise SketchError("resize: a rect takes `size`, a circle takes `radius`; %r is a %s" % (label, kind[:-1]))
+        else:
+            raise SketchError("unknown op %r; use add, move, resize, remove or relabel" % (what,))
+    return render_sketch(shapes)
 
 
 def _labelled(shapes: list[dict[str, Any]], words: tuple[str, ...]):
@@ -316,6 +615,9 @@ def fence_from_sketch(
         "ignored": {
             "rects": [r["label"] for r in shapes["rects"] if r is not footprint and r["label"] != footprint["label"]],
             "circles": [c["label"] for c in shapes["circles"] if c is not operator_spot],
+            # Lines that start like a shape and read as nothing. Worth saying:
+            # an infeed arrow nobody read is a belt with no gap in the fence.
+            "unparsed": list(shapes["unparsed"]),
         },
         "describe": fence.describe(),
     }
@@ -345,4 +647,5 @@ def zones_from_sketch(text: str) -> dict[str, Any]:
             {"label": a["label"], "from": list(a["from"]), "to": list(a["to"]), "length": round(a["length"], 3)}
             for a in shapes["arrows"]
         ],
+        "unparsed": list(shapes["unparsed"]),
     }

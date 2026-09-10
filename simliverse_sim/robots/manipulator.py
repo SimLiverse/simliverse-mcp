@@ -193,6 +193,125 @@ def _match_motion_config(supported: Any, joints: str, asset: str, leaf: str) -> 
     return None
 
 
+def down_quaternion(approach_axis: str, yaw_degrees: float = 0.0) -> list:
+    """(w, x, y, z) that sends the tool's `approach_axis` to world -Z, yawed.
+
+    `approach_axis` is a signed tool axis name: "Z", "-Y", "X"... The tool is
+    first turned so that axis points at the floor, then yawed about world Z.
+    For "Z" this is `qz(yaw) * qx(pi)` and for "X" `qz(yaw) * qy(pi/2)`, the
+    two cases that used to be written out by hand.
+    """
+    import math
+
+    name = str(approach_axis).upper().strip()
+    sign = -1.0 if name.startswith("-") else 1.0
+    letter = name.lstrip("+-")
+    if letter not in ("X", "Y", "Z"):
+        raise ValueError("approach_axis must be a signed X, Y or Z, not %r" % (approach_axis,))
+    axis = np.zeros(3)
+    axis["XYZ".index(letter)] = sign
+    target = np.array([0.0, 0.0, -1.0])
+
+    cosine = float(np.dot(axis, target))
+    if cosine > 1.0 - 1e-9:
+        align = np.array([1.0, 0.0, 0.0, 0.0])
+    elif cosine < -1.0 + 1e-9:
+        # Tool +Z: half a turn about X, the convention every down pose used.
+        align = np.array([0.0, 1.0, 0.0, 0.0])
+    else:
+        cross = np.cross(axis, target)
+        s = math.sqrt((1.0 + cosine) * 2.0)
+        align = np.array([s / 2.0, cross[0] / s, cross[1] / s, cross[2] / s])
+
+    half = math.radians(float(yaw_degrees)) / 2.0
+    yaw = np.array([math.cos(half), 0.0, 0.0, math.sin(half)])
+    w1, x1, y1, z1 = yaw
+    w2, x2, y2, z2 = align
+    out = [
+        w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
+        w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+        w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
+        w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
+    ]
+    return [float(v) for v in out]
+
+
+def _qmul(a: Any, b: Any) -> list:
+    """Hamilton product of two (w, x, y, z) quaternions: apply `b`, then `a`."""
+    w1, x1, y1, z1 = (float(v) for v in a)
+    w2, x2, y2, z2 = (float(v) for v in b)
+    return [
+        w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
+        w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+        w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
+        w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
+    ]
+
+
+#: Quaternions turning a tool's +Z onto each signed flange axis, (w, x, y, z).
+#: Shared by the suction cup and by finger grippers: every gripper asset in
+#: the library points its fingers along its own +Z, and the flange's tool axis
+#: is whichever one `_approach_axis` measures.
+Z_ONTO = {
+    "X": (0.70710678, 0.0, 0.70710678, 0.0),
+    "-X": (0.70710678, 0.0, -0.70710678, 0.0),
+    "Y": (0.70710678, -0.70710678, 0.0, 0.0),
+    "-Y": (0.70710678, 0.70710678, 0.0, 0.0),
+    "Z": (1.0, 0.0, 0.0, 0.0),
+    "-Z": (0.0, 1.0, 0.0, 0.0),
+}
+
+
+def gripper_mount(approach_axis: str, standoff: float, yaw_degrees: float = 0.0) -> tuple[list, list]:
+    """Where a gripper's base sits on the flange, in the flange's own frame.
+
+    Returns `(position, orientation)`: `standoff` metres out along the flange
+    axis, turned so the gripper's +Z (its fingers) point the same way, then
+    yawed about that axis. Pure, so the arithmetic is testable without a
+    stage; `attach_gripper` measures `standoff` off the flange link's own
+    bound the way the suction cup does.
+    """
+    import math
+
+    axis = str(approach_axis).upper().strip()
+    if axis not in Z_ONTO:
+        raise ValueError(f"approach_axis must be one of {sorted(Z_ONTO)}, not {approach_axis!r}")
+    direction = np.zeros(3)
+    direction["XYZ".index(axis[-1])] = -1.0 if axis.startswith("-") else 1.0
+    half = math.radians(float(yaw_degrees)) / 2.0
+    spin = [math.cos(half), 0.0, 0.0, math.sin(half)]
+    orientation = _qmul(Z_ONTO[axis], spin)
+    return [float(v) for v in direction * float(standoff)], [float(v) for v in orientation]
+
+
+def gripper_root_body(joints: Any) -> str | None:
+    """The gripper link everything else hangs off: a body0 that is never a body1.
+
+    `joints` are `(body0, body1)` pairs. A Robotiq 2F-85's `base_link` is body0
+    of both knuckle joints and body1 of nothing; the Schunk EGK's is the
+    housing its `Jaw_Drive` runs from. That is the link the flange joint takes.
+    """
+    parents = [b0 for b0, b1 in joints if b0 and b1]
+    children = {b1 for b0, b1 in joints if b0 and b1}
+    roots = [b0 for b0 in dict.fromkeys(parents) if b0 not in children]
+    return roots[0] if roots else None
+
+
+def fitted_gripper_indices(joint_names: Any, grouped: Any, fitted_names: Any) -> list[int]:
+    """Joint indices for the gripper: the token match plus the fitted asset's own.
+
+    The joint-name tokens find `finger_joint`, `right_outer_knuckle_joint` and
+    `Jaw_Drive` on their own. They do not find a Hand-E's `Slider_1` and
+    `Slider_2`, which name nothing, so the joints a fitted gripper brought are
+    recorded when it is fitted and read back here.
+    """
+    names = [str(n) for n in joint_names]
+    wanted = {str(n) for n in (fitted_names or ())}
+    out = set(int(i) for i in (grouped or ()))
+    out.update(i for i, name in enumerate(names) if name in wanted or name.rsplit("/", 1)[-1] in wanted)
+    return sorted(out)
+
+
 class Gripper:
     """Finger joints that open and close together.
 
@@ -217,6 +336,7 @@ class Gripper:
         self.joint_indices = joint_indices
         self._open_value: float | None = None
         self._closed_value: float | None = None
+        self._tip_offset: float | None = None
 
     def __repr__(self) -> str:
         return f"<Gripper {len(self.joint_indices)} joints: {self.joint_names}>"
@@ -252,14 +372,38 @@ class Gripper:
         return self.primary_index is not None
 
     def _pad_links(self) -> list[str]:
-        """The two opposing pads, which is what "how open is it" means."""
-        pads = [
+        """The two OPPOSING pads, which is what "how open is it" means.
+
+        Opposing is the whole point and the first version missed it: filtering a
+        2F-85's links for "finger" and taking the first two returned
+        `left_outer_finger` and `left_inner_finger` - both on the left. The gap
+        between two same-side links does not track the jaw opening, so
+        `_ends_by_measurement` read the closing direction backwards and the
+        metric span came out as nonsense. So prefer the inner contact pads and
+        take one from each side.
+        """
+        # A fitted gripper is a sibling of the arm, not under it, so its links
+        # are not in `robot.links()`; the arm knows where it put them.
+        extra = getattr(self._robot, "_fitted_gripper_links", None)
+        candidates = list(self._robot.links()) + (list(extra()) if callable(extra) else [])
+
+        def leaf(path: str) -> str:
+            return path.rsplit("/", 1)[-1].lower()
+
+        fingers = [
             path
-            for path in self._robot.links()
-            if "knuckle" not in path.lower()
-            and any(token in path.rsplit("/", 1)[-1].lower() for token in ("finger", "pad", "jaw", "tip"))
+            for path in candidates
+            if "knuckle" not in leaf(path)
+            and any(token in leaf(path) for token in ("finger", "pad", "jaw", "tip"))
         ]
-        return pads[:2]
+        # The inner fingers carry the pads on a Robotiq/OnRobot jaw; fall back to
+        # every finger when the asset does not name them "inner".
+        inner = [p for p in fingers if "inner" in leaf(p)] or fingers
+        left = [p for p in inner if "left" in leaf(p) or leaf(p).startswith(("l_", "left"))]
+        right = [p for p in inner if "right" in leaf(p) or leaf(p).startswith(("r_", "right"))]
+        if left and right:
+            return [left[0], right[0]]
+        return inner[:2]
 
     def _pad_gap(self, pads: list[str]) -> float:
         from pxr import UsdGeom
@@ -364,6 +508,53 @@ class Gripper:
     @property
     def open_width(self) -> float:
         return self._limits()[0]
+
+    def pad_center(self) -> "np.ndarray | None":
+        """World position of the point midway between the two pads, or None.
+
+        This is where a grasped object's centre ends up: a jaw grips a box by
+        its sides, so the box centre sits between the pads rather than below a
+        tip. `None` when the two pads cannot be found, in which case there is
+        nothing to measure against and the caller must fall back.
+        """
+        from pxr import UsdGeom
+
+        pads = self._pad_links()
+        if len(pads) < 2:
+            return None
+        stage = get_stage()
+        points = []
+        for path in pads:
+            matrix = UsdGeom.Xformable(stage.GetPrimAtPath(path)).ComputeLocalToWorldTransform(0)
+            points.append(np.array([float(v) for v in matrix.ExtractTranslation()]))
+        return np.mean(points, axis=0)
+
+    @property
+    def tip_offset(self) -> float:
+        """Distance from the flange tool origin down to the pad plane.
+
+        A suction cup's `tip_offset` is how far the cup tip sits past the mount
+        frame; a jaw's is how far the pads sit past it. Naming them the same is
+        what lets pick-and-place command either end effector without branching:
+        the tool goes to a datum a `tip_offset` above where the grip happens.
+
+        Measured from the pads and cached. A jaw whose pads cannot be found
+        falls back to 0.155 m -- the 2F-85's measured pad drop -- and says so,
+        because guessing zero would drive the flange onto the box.
+        """
+        if self._tip_offset is None:
+            center = self.pad_center()
+            if center is None:
+                logger.warning(
+                    "%s: could not find two pads to measure the grip offset; "
+                    "assuming 0.155 m (a 2F-85). If this jaw is longer or "
+                    "shorter, picks will aim high or low by the difference.",
+                    self._robot.prim_path,
+                )
+                self._tip_offset = 0.155
+            else:
+                self._tip_offset = float(np.linalg.norm(np.asarray(self._robot.ee_position) - center))
+        return self._tip_offset
 
     def _assert_can_grip(self) -> None:
         """Refuse to command fingers whose drives cannot exert force.
@@ -1110,6 +1301,9 @@ class Manipulator(Robot):
     """A robot arm with an end effector."""
 
     morphology = Morphology.MANIPULATOR
+    #: A joint move this large between two solutions of one pose is a branch
+    #: change, not a route: the wrist flip measured on the KR210 was 3.1 rad.
+    SWING = 1.5
 
     def __init__(
         self,
@@ -1153,7 +1347,245 @@ class Manipulator(Robot):
         self._solver_index_map: Any = None
         self._pose_ramp = 0
         self._pose_phase = 0
-        self.gripper = Gripper(self, self.groups.gripper)
+        self.gripper = Gripper(self, self._gripper_indices())
+
+    #: Where a fitted finger gripper is recorded on the arm's prim, as JSON.
+    GRIPPER_STAMP = "simliverse:gripper"
+
+    def _fitted_gripper(self) -> dict[str, Any] | None:
+        """What `attach_gripper` recorded on this arm, if anything."""
+        import json as _json
+
+        try:
+            attr = get_stage().GetPrimAtPath(self.prim_path).GetAttribute(self.GRIPPER_STAMP)
+            value = attr.Get() if attr and attr.IsValid() else None
+            return _json.loads(value) if value else None
+        except Exception:  # noqa: BLE001 - absence is the normal case
+            return None
+
+    def _gripper_indices(self) -> list[int]:
+        fitted = self._fitted_gripper() or {}
+        return fitted_gripper_indices(self.joint_names, self.groups.gripper, fitted.get("joints"))
+
+    def _fitted_gripper_links(self) -> list[str]:
+        """Rigid links of the fitted gripper, which sits beside the arm."""
+        from pxr import Usd, UsdPhysics
+
+        fitted = self._fitted_gripper()
+        if not fitted:
+            return []
+        root = get_stage().GetPrimAtPath(str(fitted.get("prim_path", "")))
+        if not root or not root.IsValid():
+            return []
+        return [str(p.GetPath()) for p in Usd.PrimRange(root) if p.HasAPI(UsdPhysics.RigidBodyAPI)]
+
+    def rebind_gripper(self) -> "Gripper":
+        """A fresh finger-gripper handle, after Play has rebuilt the articulation."""
+        self.gripper = Gripper(self, self._gripper_indices())
+        return self.gripper
+
+    def attach_gripper(
+        self,
+        asset: str = "2f_85",
+        *,
+        prim_path: str | None = None,
+        mount_link: str | None = None,
+        approach_axis: str | None = None,
+        offset: float | None = None,
+        yaw: float = 0.0,
+        mask_collisions: bool = True,
+    ) -> dict[str, Any]:
+        """Bolt a shipped finger gripper onto this arm's flange.
+
+        `asset` is a robot-library key (`2f_85`, `2f_140`, `hand_e`, `egk_25`,
+        `egu_50`, `ezu_35` - `list_robots()` discovers them under
+        `/Isaac/Robots/Robotiq` and `/Isaac/Robots/Schunk`) or a USD path.
+        The gripper is referenced **beside** the arm as `<arm>Gripper`, placed
+        with its base on the flange, its own articulation root dropped, and
+        joined to the flange by a fixed joint that is *not* excluded from the
+        articulation - which is how Isaac's Robot Assembler composes a robot
+        and what makes the finger joints part of this arm's articulation.
+        Collisions between the arm and the gripper are masked, and the
+        gripper's joint states are zeroed, both because the Assembler does
+        and says why: the constraint the new fixed joint adds violates
+        otherwise, and stale joint states explode on Play.
+
+        The fingers point along the flange's tool axis - measured off the
+        flange like the suction cup's (a UR's is Z, a KR210's X, a Fanuc
+        CRX's -Y) - from a standoff measured off the flange link's own bound,
+        so the gripper starts at the flange face rather than inside the
+        wrist. `yaw` turns the gripper about that axis.
+
+        Authoring changes the articulation, so the timeline is stopped here
+        and the returned dict is a description, not a handle: Play, then
+        `Robot.attach(...)` (or `rebind_gripper()`) and `arm.gripper` is the
+        fitted `Gripper` - `open()`, `close()`, `grasp(obj)`. Joints the
+        asset names unhelpfully (a Hand-E's `Slider_1`/`Slider_2`) are
+        recorded on the arm's prim so the handle finds them anyway.
+
+        Measured off the assets: the 2F-85 is one driven `finger_joint`
+        (0-47 deg) with PhysX mimic followers, 0.21 kg; the Schunk EGK/EGU/EZU
+        are one driven prismatic `Jaw_Drive` (26.5 / 51 / 35 mm) with mimic
+        followers; the Hand-E's two sliders ship with **no drives**, so
+        `close()` will refuse until `repair_drives()` is the user's decision.
+
+        Measured live, a 2F-85 on a UR10e: 12 DOF after Play, drive health
+        clean, `close()` stopped at 0.73 rad on a 4 cm block with both inner
+        fingers in its contact list, and a 0.20 m lift carried it 0.196 m.
+        The 2F-85's pads close about 0.155 m below the flange face.
+        """
+        import json as _json
+
+        from pxr import Gf, PhysxSchema, Sdf, Usd, UsdGeom, UsdPhysics
+
+        from .._compat import add_reference, assets_root
+        from .library import _check_reachable, resolve
+
+        scene = self.scene
+        stage = get_stage()
+        if scene.is_playing():
+            logger.info("Stopping the timeline to fit %s on %s; the articulation changes.", asset, self.prim_path)
+            scene.stop()
+
+        if "/" in asset or asset.lower().endswith((".usd", ".usda", ".usdc")):
+            url, key = asset, asset.rsplit("/", 1)[-1]
+        else:
+            entry = resolve(asset)
+            url, key = assets_root() + entry.asset_path, entry.key
+        _check_reachable(url)
+
+        mount = mount_link or self._tool_link()
+        axis = str(approach_axis or self._approach_axis(mount)).upper()
+        if axis not in Z_ONTO:
+            raise ValueError(f"approach_axis must be one of {sorted(Z_ONTO)}, not {axis!r}")
+        direction = np.zeros(3)
+        direction["XYZ".index(axis[-1])] = -1.0 if axis.startswith("-") else 1.0
+        standoff = float(offset) if offset is not None else float(SuctionGripper._link_reach(scene, mount, direction))
+        position, orientation = gripper_mount(axis, standoff, yaw)
+
+        gpath = prim_path or f"{self.prim_path}Gripper"
+        if stage.GetPrimAtPath(gpath):
+            stage.RemovePrim(gpath)
+        add_reference(url, gpath)
+        gprim = stage.GetPrimAtPath(gpath)
+        if not gprim or not gprim.IsValid():
+            raise MotionError(f"{url} referenced at {gpath} produced no prim; the asset did not load.")
+
+        # What the asset is made of, by reading it rather than assuming.
+        joints: list[tuple[str, str]] = []
+        joint_prims: list[Any] = []
+        roots: list[Any] = []
+        for prim in Usd.PrimRange(gprim):
+            if prim.HasAPI(UsdPhysics.ArticulationRootAPI):
+                roots.append(prim)
+            if prim.IsA(UsdPhysics.Joint):
+                j = UsdPhysics.Joint(prim)
+                b0 = [str(t) for t in j.GetBody0Rel().GetTargets()]
+                b1 = [str(t) for t in j.GetBody1Rel().GetTargets()]
+                joints.append((b0[0] if b0 else "", b1[0] if b1 else ""))
+                joint_prims.append(prim)
+        base = gripper_root_body(joints)
+        if base is None:
+            bodies = [str(p.GetPath()) for p in Usd.PrimRange(gprim) if p.HasAPI(UsdPhysics.RigidBodyAPI)]
+            if not bodies:
+                raise MotionError(f"{key} at {gpath} has no rigid bodies; there is nothing to bolt to the flange.")
+            base = bodies[0]
+
+        # Place it: the gripper's base link exactly where the flange joint
+        # frame is, whatever transform the asset gives that link internally.
+        mount_world = UsdGeom.Xformable(stage.GetPrimAtPath(mount)).ComputeLocalToWorldTransform(0)
+        w, x, y, z = orientation
+        local = Gf.Matrix4d(Gf.Matrix3d(Gf.Rotation(Gf.Quatd(w, Gf.Vec3d(x, y, z)))), Gf.Vec3d(*position))
+        goal = local * mount_world
+        base_rel = UsdGeom.Xformable(stage.GetPrimAtPath(base)).ComputeLocalToWorldTransform(0)
+        placement = base_rel.GetInverse() * goal
+        xform = UsdGeom.Xformable(gprim)
+        xform.ClearXformOpOrder()
+        xform.AddTransformOp().Set(placement)
+
+        # One articulation, not two: drop the gripper's root and any joint that
+        # tied it to the world, exactly as the Assembler does.
+        for root in roots:
+            if root.IsA(UsdPhysics.Joint):
+                root.SetActive(False)
+            else:
+                root.RemoveAPI(UsdPhysics.ArticulationRootAPI)
+        for prim, (b0, b1) in zip(joint_prims, joints):
+            if not b0 or not b1:
+                prim.SetActive(False)
+            elif prim.HasAPI(PhysxSchema.JointStateAPI, "angular") or prim.HasAPI(PhysxSchema.JointStateAPI, "linear"):
+                for kind in ("angular", "linear"):
+                    state = PhysxSchema.JointStateAPI.Get(prim, kind)
+                    if state:
+                        state.CreatePositionAttr().Set(0.0)
+                        state.CreateVelocityAttr().Set(0.0)
+
+        joint = UsdPhysics.FixedJoint.Define(stage, f"{gpath}/MountJoint")
+        joint.CreateBody0Rel().SetTargets([mount])
+        joint.CreateBody1Rel().SetTargets([base])
+        joint.CreateLocalPos0Attr().Set(Gf.Vec3f(*position))
+        joint.CreateLocalRot0Attr().Set(Gf.Quatf(w, x, y, z))
+        joint.CreateLocalPos1Attr().Set(Gf.Vec3f(0.0, 0.0, 0.0))
+        joint.CreateLocalRot1Attr().Set(Gf.Quatf(1.0, 0.0, 0.0, 0.0))
+        joint.CreateExcludeFromArticulationAttr().Set(False)
+
+        if mask_collisions:
+            arm_root = next(
+                (
+                    p
+                    for p in Usd.PrimRange(stage.GetPrimAtPath(self.prim_path))
+                    if p.HasAPI(UsdPhysics.ArticulationRootAPI)
+                ),
+                stage.GetPrimAtPath(self.prim_path),
+            )
+            UsdPhysics.FilteredPairsAPI.Apply(arm_root).CreateFilteredPairsRel().AddTarget(Sdf.Path(gpath))
+
+        driven = [
+            p.GetName()
+            for p in joint_prims
+            if (UsdPhysics.DriveAPI.Get(p, "angular") or UsdPhysics.DriveAPI.Get(p, "linear"))
+            and (p.IsA(UsdPhysics.RevoluteJoint) or p.IsA(UsdPhysics.PrismaticJoint))
+        ]
+        record = {
+            "asset": key,
+            "url": url,
+            "prim_path": gpath,
+            "mount_link": mount,
+            "base_link": base,
+            "approach_axis": axis,
+            "standoff": round(standoff, 4),
+            "yaw": float(yaw),
+            "joints": [
+                p.GetName() for p in joint_prims if p.IsA(UsdPhysics.RevoluteJoint) or p.IsA(UsdPhysics.PrismaticJoint)
+            ],
+            "driven": driven,
+            "mass": round(
+                sum(
+                    float(UsdPhysics.MassAPI(p).GetMassAttr().Get() or 0.0)
+                    for p in Usd.PrimRange(gprim)
+                    if p.HasAPI(UsdPhysics.MassAPI)
+                ),
+                4,
+            ),
+        }
+        stage.GetPrimAtPath(self.prim_path).CreateAttribute(self.GRIPPER_STAMP, Sdf.ValueTypeNames.String).Set(
+            _json.dumps(record)
+        )
+        if not driven:
+            record["warning"] = (
+                "%s declares no drives on %s; close() will refuse until repair_drives() is called, which "
+                "changes the robot being simulated and is the user's decision." % (key, record["joints"])
+            )
+        logger.info(
+            "Fitted %s on %s along %s at %.4f m standoff; %d joints (%d driven).",
+            key,
+            mount,
+            axis,
+            standoff,
+            len(record["joints"]),
+            len(driven),
+        )
+        return record
 
     def attach_suction_gripper(self, parent_prim_path: str | None = None, **kwargs: Any) -> "SuctionGripper":
         """Fit a suction gripper to this arm and use it as the end effector.
@@ -1417,7 +1849,57 @@ class Manipulator(Robot):
                     return link
         if not links:
             raise MotionError(f"{self.prim_path} reports no links, so there is nothing to mount a gripper on.")
-        return links[-1]
+        # The end of the kinematic chain, not the last prim on the stage. Those
+        # agree on most assets and not on the UR16e, whose `base_link` is
+        # authored last: the cup was bolted to the base, the arm reached every
+        # pose to 0.1 mm, and the cup never met a carton.
+        leaf = self._chain_leaf(links)
+        return leaf or links[-1]
+
+    def _chain_leaf(self, links: list[str]) -> str | None:
+        """The deepest link reached by following joints from the root."""
+        chain = self.chain_links(links)
+        return chain[-1] if chain else None
+
+    def chain_links(self, links: list[str] | None = None) -> list[str]:
+        """The arm's links in kinematic order, root first, longest chain.
+
+        Stage order is authoring order and means nothing: a UR16e lists its
+        `base_link` last. Following joint body0 -> body1 from the root gives
+        the order a robot actually has, which is what "the first two links"
+        (the base and the shoulder housing) or "the last link" (the flange)
+        refer to.
+        """
+        from pxr import Usd, UsdPhysics
+
+        links = [str(link) for link in (links if links is not None else self.links())]
+        stage = get_stage()
+        root = stage.GetPrimAtPath(self.prim_path)
+        known = set(links)
+        parent_of: dict[str, str] = {}
+        for prim in Usd.PrimRange(root):
+            if not prim.IsA(UsdPhysics.Joint):
+                continue
+            joint = UsdPhysics.Joint(prim)
+            body0 = [str(t) for t in joint.GetBody0Rel().GetTargets()]
+            body1 = [str(t) for t in joint.GetBody1Rel().GetTargets()]
+            if body0 and body1 and body0[0] in known and body1[0] in known and body1[0] != body0[0]:
+                parent_of.setdefault(body1[0], body0[0])
+        if not parent_of:
+            return []
+        parents = set(parent_of.values())
+        leaves = [child for child in parent_of if child not in parents]
+
+        def lineage(link: str) -> list[str]:
+            out, seen = [link], {link}
+            while link in parent_of and parent_of[link] not in seen:
+                link = parent_of[link]
+                seen.add(link)
+                out.append(link)
+            return out[::-1]
+
+        best = max((lineage(leaf) for leaf in leaves), key=len, default=[])
+        return best
 
     def _approach_axis(self, tool_link: str) -> str:
         """Which of `tool_link`'s own axes points away from the arm.
@@ -1480,7 +1962,7 @@ class Manipulator(Robot):
 
     @property
     def arm_joint_indices(self) -> list[int]:
-        finger = set(self.groups.gripper)
+        finger = set(self._gripper_indices())
         return [i for i in range(self.dof) if i not in finger]
 
     # ── Motion policy ─────────────────────────────────────────────────────────
@@ -1827,6 +2309,61 @@ class Manipulator(Robot):
         self._solver_index_map = [names.index(n) for n in solver_names]
         return self._solver_index_map
 
+    def can_reach(self, position: Any, orientation: Any = None) -> bool:
+        """Whether a solution exists for this tool pose. Solves only; moves nothing.
+
+        Ask this before planning a cycle rather than after a move fails.
+        Measured on a KR210 on a 0.35 m pedestal: with the tool pointing down,
+        a slot 1.93 m out could be reached at 0.63 m but not at 0.76 m, and a
+        palletising cycle that traversed at a fixed 0.76 m stayed over the belt,
+        descended part-way, and let go 0.55 m from the slot. The solver had said
+        no; nothing had asked it in advance.
+
+        The answer depends on the orientation as much as the point - far and
+        high is fine with the tool horizontal and out of reach with it down.
+        """
+        self._ensure_motion_policy()
+        self._require_solvable()
+        self._sync_base_pose()
+        target = as_vec3(position, name="position")
+        rotation = as_quat(orientation) if orientation is not None else None
+        _, solved = self._ik.compute_inverse_kinematics(
+            np.asarray(target, dtype=float),
+            np.asarray(rotation, dtype=float) if rotation is not None else None,
+        )
+        return bool(solved)
+
+    def reach_ceiling(
+        self,
+        xy: Any,
+        orientation: Any,
+        *,
+        floor: float,
+        limit: float = 2.0,
+        resolution: float = 0.005,
+    ) -> float | None:
+        """Highest z above `xy` the tool can hold `orientation` at, or None.
+
+        None means `floor` itself is out of reach - the point is out of the
+        workspace at that orientation, and no height will help. Bisects between
+        `floor` and `limit`, so a reachable `floor` under an unreachable
+        `limit` is what it assumes; a workspace with a hole in it is not
+        something this will find.
+        """
+        x, y = float(xy[0]), float(xy[1])
+        low, high = float(floor), float(limit)
+        if not self.can_reach([x, y, low], orientation):
+            return None
+        if self.can_reach([x, y, high], orientation):
+            return high
+        while high - low > resolution:
+            mid = (low + high) / 2.0
+            if self.can_reach([x, y, mid], orientation):
+                low = mid
+            else:
+                high = mid
+        return low
+
     def command_pose(
         self,
         position: Any,
@@ -1857,8 +2394,11 @@ class Manipulator(Robot):
         28 m. Warm-started, consecutive solutions differ by about 0.07 rad for a
         10 cm step, and the arm simply travels.
         """
-        self._require_solvable()
+        # Build the solver before asking whether there is one. The other way
+        # round, `pose_to` on a freshly attached arm raised "no inverse-
+        # kinematics solver" unless some earlier call had happened to build it.
         self._ensure_motion_policy()
+        self._require_solvable()
         self._sync_base_pose()
         target = as_vec3(position, name="position")
         rotation = as_quat(orientation) if orientation is not None else None
@@ -1879,17 +2419,28 @@ class Manipulator(Robot):
                 )
             return False
 
-        self._pose_solution = np.asarray(action.joint_positions, dtype=float)
-        self._pose_command = self._pose_solution.copy()
-        self._pose_goal = np.asarray(target, dtype=float)
-        self._pose_orientation = rotation
-
         # Solving the final pose first is the reachability check: a ramp that
         # walks most of the way and then fails is worse than not starting.
         self._pose_from = self.ee_position.copy()
         self._pose_from_quat = self.ee_orientation
         current = np.asarray(self.joint_positions, dtype=float)
         self._pose_seed = np.asarray([current[i] for i in self._solver_indices()], dtype=float)
+
+        solver = self._ik.get_kinematics_solver()
+        frame = self._end_effector_frame
+        goal = np.asarray(target, dtype=float)
+        quat = np.asarray(rotation, dtype=float) if rotation is not None else None
+
+        def solve(seed: np.ndarray) -> tuple[np.ndarray, bool]:
+            out, ok = solver.compute_inverse_kinematics(frame, goal, quat, warm_start=seed)
+            return np.asarray(out, dtype=float), bool(ok)
+
+        self._pose_solution = self._nearest_branch(
+            solve, np.asarray(action.joint_positions, dtype=float), self._pose_seed
+        )
+        self._pose_command = self._pose_solution.copy()
+        self._pose_goal = goal
+        self._pose_orientation = rotation
         self._pose_ramp = max(0, int(ramp))
         self._pose_phase = 0
         if self._pose_ramp:
@@ -1897,6 +2448,58 @@ class Manipulator(Robot):
         else:
             self._apply_pose_command()
         return True
+
+    @staticmethod
+    def _nearest_branch(solve: Any, solution: np.ndarray, current: np.ndarray) -> np.ndarray:
+        """Of the IK branches the solver will admit, the one nearest the arm.
+
+        A six-axis wrist reaches most poses two ways - a4 and a6 turned by pi
+        with a5 negated - and Lula returns whichever its seed falls nearest.
+        Seeded from a pick configuration whose a4 sits between the two, that is
+        a coin toss. Measured on a KR210 carrying a carton to the same slot four
+        times: three cycles solved `[.., 0.05, 2.17, 0.03]`, the fourth
+        `[.., 3.08, -2.18, 3.10]`, and the 4.3 rad wrist swing on the way there
+        put the tool through two cartons already on the pallet and threw one
+        1.28 m. The base has the same ambiguity at +/-pi.
+
+        `solve(seed)` must return `(joints, ok)`. The choice is by the largest
+        single joint move from `current`, which is what a swing is - and the
+        solver's own answer is kept unless an alternative saves more than
+        `SWING` of it. A UR10 whose every traverse was fine at 4/4 came back
+        0.58 m short once the nearest-by-a-little candidate was allowed to
+        win: the ramp waypoints walk toward the solver's branch and the final
+        command then snapped to the other one.
+        """
+        n = int(solution.size)
+        if n < 6 or int(current.size) != n:
+            return solution
+        own = float(np.max(np.abs(solution - current)))
+        if own < Manipulator.SWING:
+            return solution
+        seeds = []
+        for flip in (np.pi, -np.pi):
+            seed = solution.copy()
+            seed[n - 3] += flip
+            seed[n - 2] = -seed[n - 2]
+            seed[n - 1] += flip
+            seeds.append(seed)
+        for flip in (np.pi, -np.pi):
+            seed = current.copy()
+            seed[0] += flip
+            seeds.append(seed)
+        seeds.append(current.copy())
+        candidates = [solution]
+        for seed in seeds:
+            try:
+                out, ok = solve(seed)
+            except Exception:  # noqa: BLE001 - a seed the solver rejects is not an answer
+                continue
+            if ok and out.size == n:
+                candidates.append(np.asarray(out, dtype=float))
+        best = min(candidates, key=lambda c: float(np.max(np.abs(c - current))))
+        if own - float(np.max(np.abs(best - current))) < Manipulator.SWING:
+            return solution
+        return best
 
     def advance_pose(self) -> bool:
         """Issue the next increment of a ramped move. True once the target is out.
@@ -2170,15 +2773,12 @@ class Manipulator(Robot):
         * Approach along **X**: `qz(yaw) * qy(pi/2)` sends tool X to world -Z,
           which is what puts a KR210's flange plate face-down with the tool
           hanging off it, rather than the plate on edge.
+        * Any other signed axis the same way. A Fanuc CRX's tool axis is -Y,
+          and until this was general it fell through to the Z case: the cup
+          was mounted right, the arm arrived to 0.2 mm, and the cup pointed
+          at the wall.
         """
-        import math
-
-        half = math.radians(float(yaw_degrees)) / 2.0
-        axis = self.approach_axis.upper().lstrip("-")
-        if axis == "X":
-            root = math.sqrt(0.5)
-            return [root * math.cos(half), -root * math.sin(half), root * math.cos(half), root * math.sin(half)]
-        return [0.0, math.cos(half), math.sin(half), 0.0]
+        return down_quaternion(self.approach_axis, yaw_degrees)
 
     def downward_orientation(self, target: Any) -> list:
         """A tool-down orientation whose yaw faces the reach, as (w, x, y, z).

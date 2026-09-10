@@ -132,6 +132,106 @@ DRESSING_DECK = 0.767
 #: rollers into ellipses.
 DRESSING_SECTION_LENGTH = 2.0
 
+#: The straight sections in the library, measured live (Isaac Sim 6.0.1):
+#: length along travel and where the carrying surface sits above the prop's
+#: origin. All 47 `ConveyorBelt_A*` props share a 0.90 m belt in a 1.15 m
+#: frame; the low tier carries on rollers at 0.769 m and the tall tier on a
+#: belt at 1.781 m. Curves (A01-A03, 90 deg, centreline radius ~1.55 m),
+#: L-shapes, merges, tees, sorters and ~30 deg ramps between tiers are in
+#: the library too, and are not straight: `dress()` refuses them rather than
+#: tiling a curve in a line.
+SECTIONS: dict[str, dict[str, float]] = {
+    "conveyorbelt_a04": {"length": 2.0, "deck": 0.769},
+    "conveyorbelt_a05": {"length": 2.0, "deck": 0.767},
+    "conveyorbelt_a06": {"length": 2.0, "deck": 1.781},
+    "conveyorbelt_a07": {"length": 4.0, "deck": 0.769},
+    "conveyorbelt_a08": {"length": 2.72, "deck": 0.769},
+    "conveyorbelt_a09": {"length": 4.0, "deck": 1.781},
+}
+#: The ramp props, measured live (Isaac Sim 6.0.1): where the carrying surface
+#: sits at each end, the horizontal run of the rise, and the implied pitch. A
+#: ramp dresses a `build(pitch=...)` belt whose pitch matches, dropped so its
+#: low deck lands on the slab's low end - it carries its own rise, so it is
+#: placed flat, not tilted. Two flat approaches book-end the ramp, so the belt
+#: it dresses should be a touch longer than the ramp's run.
+RAMPS: dict[str, dict[str, float]] = {
+    # A42: roller ramp, rollers 0.704 -> 1.76 over a 1.78 m run.
+    "conveyorbelt_a42": {"low_deck": 0.704, "high_deck": 1.76, "run": 1.78, "pitch": 30.7, "length": 2.795},
+    # A37: belt ramp, belt 0.738 -> 1.761 over a 1.745 m run.
+    "conveyorbelt_a37": {"low_deck": 0.737, "high_deck": 1.781, "run": 1.745, "pitch": 30.4, "length": 3.907},
+}
+
+
+def ramp_spec(prop: str) -> dict[str, float] | None:
+    """Measured geometry of a ramp prop, or None if `prop` is not a ramp."""
+    spec = RAMPS.get(str(prop).lower().strip())
+    return dict(spec) if spec else None
+
+
+#: Props that carry on a curve, ramp or branch. Their tiling is not a line.
+NOT_STRAIGHT = {
+    "conveyorbelt_a01": "90 degree curve",
+    "conveyorbelt_a02": "90 degree curve",
+    "conveyorbelt_a03": "90 degree curve",
+    "conveyorbelt_a10": "L: curve and leg",
+    "conveyorbelt_a11": "L: curve and leg",
+    "conveyorbelt_a12": "L: curve and leg",
+    "conveyorbelt_a13": "L: curve and leg",
+    "conveyorbelt_a14": "L: curve and leg",
+    "conveyorbelt_a15": "L: curve and leg",
+    "conveyorbelt_a16": "L: curve and leg",
+    "conveyorbelt_a17": "L: curve and leg",
+    "conveyorbelt_a18": "L: curve and leg",
+    "conveyorbelt_a19": "45 degree merge",
+    "conveyorbelt_a20": "45 degree merge",
+    "conveyorbelt_a21": "45 degree merge",
+    "conveyorbelt_a22": "tee",
+    "conveyorbelt_a23": "tee",
+    "conveyorbelt_a24": "tee",
+    "conveyorbelt_a25": "ramp 1.78 to 2.55 m",
+    "conveyorbelt_a26": "ramp 1.74 to 4.09 m",
+    "conveyorbelt_a37": "ramp 0.74 to 1.78 m",
+    "conveyorbelt_a38": "ramp 1.78 to 2.55 m",
+    "conveyorbelt_a42": "ramp 0.70 to 1.78 m",
+    "conveyorbelt_a45": "cross with sorter",
+    "conveyorbelt_a46": "cross with sorter",
+    "conveyorbelt_a47": "tee with sorter",
+    "conveyorbelt_a48": "tee with sorter",
+    "conveyorbelt_a49": "sorter module",
+}
+
+
+def _tilt_quat(yaw_deg: float, pitch_rad: float) -> list[float]:
+    """Quaternion [w,x,y,z] = Rz(yaw) . Ry(-pitch).
+
+    The pitch is about the across-axis (the yawed Y), so a slab's local +X
+    ends up pointing up the slope whatever the heading.
+    """
+    import math
+
+    hy, hp = math.radians(yaw_deg) / 2.0, -float(pitch_rad) / 2.0
+    w1, z1 = math.cos(hy), math.sin(hy)
+    w2, y2 = math.cos(hp), math.sin(hp)
+    return [w1 * w2, -z1 * y2, w1 * y2, z1 * w2]
+
+
+def section_spec(prop: str) -> dict[str, float]:
+    """Length and deck height of a straight dressing section, by prop key.
+
+    Unknown straight-looking keys get A05's numbers, which is what every call
+    assumed before there was a table. A key known to be a curve, ramp or
+    branch is refused: tiling one of those in a straight line puts the second
+    section through the first and reads as a modelling error in a render.
+    """
+    key = str(prop).lower().strip()
+    if key in NOT_STRAIGHT:
+        raise ConveyorError(
+            "%s is a %s and cannot be tiled as straight dressing; use a straight section (%s) or build the "
+            "path it follows." % (prop, NOT_STRAIGHT[key], ", ".join(sorted(SECTIONS)))
+        )
+    return dict(SECTIONS.get(key, {"length": DRESSING_SECTION_LENGTH, "deck": DRESSING_DECK}))
+
+
 _WAKE_SPEED = 0.05
 _SANE_SPEED = (0.0, 5.0)
 
@@ -199,13 +299,18 @@ def _surface_velocity_api() -> Any:
     return api
 
 
-def drive_surface(prim_path: str, velocity: Any, *, enabled: bool = True) -> dict[str, Any]:
+def drive_surface(prim_path: str, velocity: Any, *, enabled: bool = True, local: bool = False) -> dict[str, Any]:
     """Give one collider a moving surface. The primitive the rest of this builds on.
 
     Applied to the *rigid body* prim, not the mesh under it — PhysX reads the
     attribute off the body and applies it to the shapes beneath. Pointing this
     at a mesh whose body is its parent applies cleanly and does nothing at all,
     which is why `Conveyor` resolves the body itself rather than trusting a path.
+
+    `local=True` expresses the velocity in the body's own frame. A flat belt
+    wants world space (its direction is a fact about the floor); an incline
+    wants local space, so the surface moves *along the slope* rather than
+    horizontally through it.
     """
     from pxr import Gf
 
@@ -229,14 +334,14 @@ def drive_surface(prim_path: str, velocity: Any, *, enabled: bool = True) -> dic
     applied = api.Apply(prim)
     applied.CreateSurfaceVelocityAttr().Set(Gf.Vec3f(*(float(v) for v in vector)))
     applied.CreateSurfaceVelocityEnabledAttr().Set(bool(enabled))
-    # Local space would make the vector rotate with the belt. A conveyor's
-    # direction of travel is a fact about the floor it is bolted to, so world
-    # space is right and being explicit stops it inheriting a default.
-    local = applied.GetPrim().GetAttribute("physxSurfaceVelocity:surfaceVelocityLocalSpace")
-    if local:
-        local.Set(False)
+    # World space by default: a flat conveyor's direction of travel is a fact
+    # about the floor it is bolted to. Being explicit stops it inheriting a
+    # default either way.
+    space = applied.GetPrim().GetAttribute("physxSurfaceVelocity:surfaceVelocityLocalSpace")
+    if space:
+        space.Set(bool(local))
 
-    return {"prim_path": prim_path, "velocity": vector.tolist(), "enabled": bool(enabled)}
+    return {"prim_path": prim_path, "velocity": vector.tolist(), "enabled": bool(enabled), "local": bool(local)}
 
 
 def _body_of(prim_path: str) -> str:
@@ -323,6 +428,7 @@ class Conveyor:
         width: float | None = None,
         gate_path: str | None = None,
         centre: Any = None,
+        pitch: float = 0.0,
         scene: Any = None,
     ) -> None:
         from .scene import Scene as _Scene
@@ -330,12 +436,20 @@ class Conveyor:
         self.scene = scene or _Scene.get()
         self.belt_path = belt_path
         self.body_path = _body_of(belt_path)
-        self.direction = _unit(direction)
+        # `direction` is the HORIZONTAL heading, kept 2-D on purpose: every
+        # queue calculation projects onto it, and an incline that tilted this
+        # vector would silently shorten every along-belt distance by cos(pitch).
+        # The slope lives in `pitch` alone.
+        self.direction = _unit([direction[0], direction[1], 0.0] if len(np.atleast_1d(direction)) > 2 else direction)
         self.speed = float(speed)
         self.top_z = float(top_z)
         self.length = length
         self.width = width
         self.gate_path = gate_path
+        #: Belt inclination in radians; 0 is flat and every path below is the
+        #: flat path unchanged. Positive raises the far (gate) end so boxes
+        #: ride UP to the stop.
+        self.pitch = float(pitch)
         self._boxes: list[Any] = []
         self._driven = False
         # Centre of the belt deck and the across-travel axis. Set here so every
@@ -347,10 +461,51 @@ class Conveyor:
         self.asset: dict[str, Any] | None = None
 
     def __repr__(self) -> str:
+        slope = "" if not self.pitch else f" pitch={np.degrees(self.pitch):.0f}deg"
         return (
-            f"<Conveyor {self.belt_path} speed={self.speed:.2f}m/s "
+            f"<Conveyor {self.belt_path} speed={self.speed:.2f}m/s{slope} "
             f"boxes={len(self._boxes)} gate={'yes' if self.gate_path else 'no'}>"
         )
+
+    def half_run(self) -> float:
+        """Half the belt's HORIZONTAL extent along the heading.
+
+        `length` is the slab's own dimension, measured up the slope. Every
+        along-heading distance in this class is horizontal (it projects onto
+        `direction`, which is horizontal), so a tilted belt reaches only
+        `length/2 * cos(pitch)` in the ground plane. Conflating the two put a
+        loaded carton past the slab's horizontal end at 30 degrees, where it
+        fell straight to the floor; at 15 degrees cos(pitch) hid it. Flat, this
+        is exactly `length/2`.
+        """
+        return float((self.length or 0.0) / 2.0) * float(np.cos(self.pitch))
+
+    def heading3(self) -> np.ndarray:
+        """The 3-D unit vector a carton travels along, up the slope.
+
+        Flat, this is `direction`; pitched, it lifts by `pitch`. Used for the
+        surface drive and the along-belt height, never for the queue geometry,
+        which stays horizontal.
+        """
+        h = self.direction * float(np.cos(self.pitch))
+        return np.array([h[0], h[1], float(np.sin(self.pitch))])
+
+    def deck_z(self, point: Any) -> float:
+        """Height of the belt surface under a horizontal point `point`.
+
+        `top_z` is the deck at the belt's centre; on a slope the surface rises
+        by `tan(pitch)` for every metre travelled along the heading from there.
+        Flat, this is `top_z` everywhere.
+        """
+        if not self.pitch:
+            return float(self.top_z)
+        p = np.asarray(point, dtype=float)[:2]
+        along = float(np.dot(p - self._origin[:2], self.direction[:2]))
+        return float(self.top_z) + along * float(np.tan(self.pitch))
+
+    def _tilt(self, yaw: float) -> list[float]:
+        """Quaternion [w,x,y,z] for a slab yawed then pitched nose-up."""
+        return _tilt_quat(yaw, self.pitch)
 
     # ── Construction ─────────────────────────────────────────────────────────
 
@@ -372,10 +527,19 @@ class Conveyor:
         guide_height: float = 0.10,
         dressing: str | None = None,
         dressing_deck: float = DRESSING_DECK,
+        pitch: float = 0.0,
         color: Any = (0.15, 0.16, 0.18),
         scene: Any = None,
     ) -> "Conveyor":
         """A belt of known dimensions, running along `direction`, with a stop.
+
+        `pitch` (degrees) tilts the belt so the far, gate end is higher and
+        cartons ride UP to the stop, driven by a surface velocity along the
+        slope rather than horizontally through it. Measured on the live sim, a
+        1 kg carton climbed 10-25 degrees and settled against the stop; the
+        deck friction must exceed tan(pitch) or it slides back (a warning
+        fires when it does not). `position[2]` remains the deck at the belt's
+        *centre*, so a pitched belt pivots about its middle.
 
         `position` is the centre of the belt *top*, so the deck sits at
         `position[2]` and you can put it at a robot's working height without
@@ -394,25 +558,37 @@ class Conveyor:
         from .scene import Scene as _Scene
 
         scene = scene or _Scene.get()
-        heading = _unit(direction)
+        heading = _unit([direction[0], direction[1], 0.0] if len(np.atleast_1d(direction)) > 2 else direction)
         centre = as_vec3(position, name="position").astype(float)
         deck = 0.06  # slab thickness; the belt is a deck, not a block
+        pitch_rad = float(np.radians(pitch))
 
         if length <= 0 or width <= 0:
             raise ConveyorError(f"length={length} width={width}: a belt needs positive extents.")
+        if pitch_rad and friction <= float(np.tan(pitch_rad)):
+            logger.warning(
+                "A %.0f-degree belt needs deck friction above tan(pitch)=%.2f to carry a carton up; "
+                "friction=%.2f will let it slide back.",
+                pitch,
+                float(np.tan(pitch_rad)),
+                friction,
+            )
 
         # `spawn_rigid` scales a Cube whose default size is 2.0, so a half-extent
         # is what goes in. Getting this wrong by the factor of two is the single
         # most common way a scene comes out at half the size it was specified at.
         across = np.array([-heading[1], heading[0], 0.0])
         yaw = float(np.degrees(np.arctan2(heading[1], heading[0])))
+        # A flat belt keeps the exact orientation it always had (a Z-only euler);
+        # a pitched one gets a quaternion tilting it nose-up along the heading.
+        slab_orient = _tilt_quat(yaw, pitch_rad) if pitch_rad else [0.0, 0.0, yaw]
 
         scene.spawn_rigid(
             prim_path,
             shape="cube",
             scale=[length / 2.0, width / 2.0, deck / 2.0],
             position=[centre[0], centre[1], centre[2] - deck / 2.0],
-            orientation=[0.0, 0.0, yaw],
+            orientation=slab_orient,
             mass=0.0,
             friction=friction,
             restitution=0.0,
@@ -434,7 +610,7 @@ class Conveyor:
                         centre[1] + sign * offset[1],
                         centre[2] + guide_height / 2.0,
                     ],
-                    orientation=[0.0, 0.0, yaw],
+                    orientation=slab_orient,
                     mass=0.0,
                     friction=0.2,  # rails guide; they must not also brake
                     restitution=0.0,
@@ -454,6 +630,7 @@ class Conveyor:
                 yaw=yaw,
                 height=gate_height,
                 thickness=gate_thickness,
+                pitch=pitch_rad,
             )
 
         belt = cls(
@@ -464,6 +641,7 @@ class Conveyor:
             length=float(length),
             width=float(width),
             gate_path=gate_path,
+            pitch=pitch_rad,
             scene=scene,
         )
         belt._origin = centre.copy()
@@ -498,8 +676,8 @@ class Conveyor:
         self,
         prop: str = "conveyorbelt_a05",
         *,
-        deck: float = DRESSING_DECK,
-        section_length: float = DRESSING_SECTION_LENGTH,
+        deck: float | None = None,
+        section_length: float | None = None,
     ) -> dict[str, Any]:
         """Put a real conveyor over the slab, and hide the slab.
 
@@ -535,6 +713,20 @@ class Conveyor:
         cosmetic overhang and a better failure than a visibly bare slab.
         """
         from .props import spawn_prop
+
+        # A ramp prop is a real inclined conveyor and dresses a pitched belt:
+        # placed flat (it carries its own rise), dropped so its low deck lands
+        # on the slab's low end. Refused on a flat belt, where its slope would
+        # float off the deck.
+        ramp = ramp_spec(prop)
+        if ramp is not None:
+            return self._dress_ramp(prop, ramp)
+
+        spec = section_spec(prop)
+        if deck is None:
+            deck = spec["deck"]
+        if section_length is None:
+            section_length = spec["length"]
 
         heading = self.direction
         yaw = float(np.degrees(np.arctan2(heading[1], heading[0])))
@@ -581,6 +773,53 @@ class Conveyor:
                 )
 
         return {"prim_paths": paths, "prop": key, "sections": count, "deck": float(deck), "width": real_width}
+
+    def _dress_ramp(self, prop: str, ramp: dict[str, float]) -> dict[str, Any]:
+        """Put a real ramp prop over a pitched slab, and hide the slab.
+
+        The prop is a genuine inclined conveyor - it carries its own rise, so
+        it is placed flat and dropped so its low deck sits on the low end of
+        the slab. Its pitch is fixed by the model (A42 ~30.7 deg), so this
+        warns rather than lies if the slab was built to a different angle.
+        """
+        from .props import spawn_prop
+
+        if not self.pitch:
+            raise ConveyorError(
+                "%s is a ramp and only dresses a pitched belt; build(pitch=%.0f) first." % (prop, ramp["pitch"])
+            )
+        built = float(np.degrees(self.pitch))
+        if abs(built - float(ramp["pitch"])) > 2.0:
+            logger.warning(
+                "%s is a %.0f-degree ramp but the belt is pitched %.0f degrees; the rollers will not line up "
+                "with the carton path. build(pitch=%.1f) to match.",
+                prop,
+                ramp["pitch"],
+                built,
+                ramp["pitch"],
+            )
+        heading = self.direction
+        yaw = float(np.degrees(np.arctan2(heading[1], heading[0])))
+        low_xy = self._origin[:2] - heading[:2] * self.half_run()
+        path = f"{self.belt_path}_Dressing"
+        entry = spawn_prop(
+            prop,
+            prim_path=path,
+            position=[float(low_xy[0]), float(low_xy[1]), self.deck_z(low_xy) - float(ramp["low_deck"])],
+            orientation=[0.0, 0.0, yaw],
+            scene=self.scene,
+        )
+        _strip_physics(self.scene, path)
+        self._hide(self.belt_path)
+        self.dressing = [path]
+        return {
+            "prim_paths": [path],
+            "prop": entry.get("key", prop),
+            "sections": 1,
+            "deck": float(ramp["low_deck"]),
+            "pitch": float(ramp["pitch"]),
+            "width": (float(entry["extent"][1]) if entry.get("extent") else None),
+        }
 
     def _hide(self, prim_path: str) -> bool:
         """Make a prim invisible without touching its collider.
@@ -802,7 +1041,14 @@ class Conveyor:
         the surface velocity alone and they sit motionless on a running belt
         forever, which reads in a trace as "no carton ever arrived".
         """
-        result = drive_surface(self.body_path, self.direction * self.speed, enabled=True)
+        # Flat: the drive is a world-space horizontal velocity, exactly as
+        # before. Pitched: it is a LOCAL-space velocity along the slab's own
+        # +X, so it runs up the slope instead of horizontally through it -
+        # anything else drives the carton into the deck.
+        if self.pitch:
+            result = drive_surface(self.body_path, [self.speed, 0.0, 0.0], enabled=True, local=True)
+        else:
+            result = drive_surface(self.body_path, self.direction * self.speed, enabled=True)
         self._driven = True
         self.wake_load()
         return result
@@ -815,7 +1061,9 @@ class Conveyor:
         how many bodies were nudged, so a caller can tell "nothing to wake"
         apart from "waking silently failed".
         """
-        nudge = self.direction * min(self.speed, _WAKE_SPEED)
+        # Up the slope, not along the floor: on a pitched belt a horizontal
+        # nudge drives the carton into the deck instead of waking it forward.
+        nudge = self.heading3() * min(self.speed, _WAKE_SPEED)
         woken = 0
         for box in self.boxes:
             try:
@@ -869,8 +1117,11 @@ class Conveyor:
         gap = float(spacing) if spacing is not None else float(size[0]) * 1.6
         origin = self._origin
         # Lay them out from the far (gate) end backwards, so box 0 is the one
-        # that arrives first and the queue does not depend on `count`.
-        far = (self.length or 0.0) / 2.0 - start_offset
+        # that arrives first and the queue does not depend on `count`. Distances
+        # here are HORIZONTAL along the heading, so the far end is the slab's
+        # horizontal half-run, not its slope half-length (they differ on an
+        # incline, and a carton placed at the slope distance lands past the end).
+        far = self.half_run() - start_offset
 
         made = []
         for index in range(int(count)):
@@ -888,14 +1139,23 @@ class Conveyor:
             # on nothing and the arm lifts away empty with every pose reading
             # correct. A carton is also rarely a cube, which `UsdGeom.Cube`
             # cannot express at all without a non-uniform scale.
+            # On a slope the surface under this xy is higher (or lower) than
+            # the centre deck, and the box sits on the surface there. The box
+            # is tilted to lie flat on the deck so it does not land on an edge
+            # and tumble; the normal-offset keeps its lower face on the slope.
+            surface_z = self.deck_z(centre)
+            normal_lift = float(size[2] / 2.0) / max(float(np.cos(self.pitch)), 1e-6)
             body = self.scene.spawn_box(
                 f"/World/{prefix}{index}",
                 size=[size[0], size[1], size[2]],
                 position=[
                     float(centre[0]),
                     float(centre[1]),
-                    float(self.top_z + size[2] / 2.0 + 0.002),
+                    float(surface_z + normal_lift + 0.002),
                 ],
+                orientation=None
+                if not self.pitch
+                else _tilt_quat(np.degrees(np.arctan2(self.direction[1], self.direction[0])), self.pitch),
                 mass=float(mass),
                 friction=float(friction),
                 restitution=0.0,
@@ -981,6 +1241,7 @@ class Conveyor:
             width=merged["width"],
             gate_path=merged["gate_path"],
             centre=merged["centre"],
+            pitch=float(stamp.get("pitch") or 0.0),
             scene=scene,
         )
         size = stamp.get("box_size")
@@ -1015,8 +1276,11 @@ class Conveyor:
         if not self._boxes:
             return None
         origin = self._origin
-        far = (self.length or 0.0) / 2.0
-        expected = float(self.box_size[0]) / 2.0 if self.box_size is not None else 0.0
+        # Horizontal, to match the projected `along` below - see `half_run`.
+        far = self.half_run() if self.length else 0.0
+        # The rest gap is half a box up the slope; its horizontal shadow is
+        # that times cos(pitch), which is what `along` measures.
+        expected = float(self.box_size[0]) / 2.0 * float(np.cos(self.pitch)) if self.box_size is not None else 0.0
         if within is None:
             # Scaled to the box, not a fixed distance. A flat 0.12 m accepted a
             # 15 cm box while it was still 6.5 cm short of the stop and creeping:
@@ -1065,9 +1329,12 @@ class Conveyor:
             if half_width and across > half_width + half_box:
                 continue
             # And resting on the deck rather than under or far above it. One box
-            # height of slack covers a carton sitting on top of another.
+            # height of slack covers a carton sitting on top of another. On a
+            # slope the deck under this xy is higher than the centre, so the
+            # rest height is measured there - otherwise every climbed carton
+            # reads as "far above the deck" and is rejected.
             if self.top_z is not None and self.box_size is not None:
-                rest_z = float(self.top_z) + float(self.box_size[2]) / 2.0
+                rest_z = self.deck_z(position) + float(self.box_size[2]) / 2.0
                 if abs(float(position[2]) - rest_z) > float(self.box_size[2]):
                     continue
             if best_error is None or error < best_error:
@@ -1100,6 +1367,7 @@ class Conveyor:
             "top_z": self.top_z,
             "length": self.length,
             "width": self.width,
+            "pitch": round(float(self.pitch), 6),
             "box_size": None if self.box_size is None else self.box_size.round(4).tolist(),
             "boxes": [b.prim_path for b in self._boxes],
             "mechanism": "PhysxSurfaceVelocityAPI",
@@ -1175,10 +1443,355 @@ class Conveyor:
             gate_path=described.get("gate_path"),
             scene=scene,
         )
+        if described.get("pitch"):
+            belt.pitch = float(described["pitch"])
         size = described.get("box_size")
         if size is not None:
             belt.box_size = np.asarray(size, dtype=float)
         return belt
+
+
+#: The 90-degree curve props, measured live (Isaac Sim 6.0.1). Two-tier: the
+#: rollers carry at ~0.74, an upper belt at ~1.78. The arc's centreline radius
+#: is ~1.55 m, the footprint 2.07 x 2.10 m. A curve dresses a `build_curve`
+#: whose radius matches. A01/A02/A03 differ only in tier.
+CURVES: dict[str, dict[str, float]] = {
+    "conveyorbelt_a01": {"deck": 0.74, "radius": 1.55, "footprint": 2.07},
+}
+
+
+def curve_spec(prop: str) -> dict[str, float] | None:
+    return dict(CURVES[str(prop).lower().strip()]) if str(prop).lower().strip() in CURVES else None
+
+
+class CurvedConveyor:
+    """A driven 90-degree (or any-angle) bend, built from chord slabs.
+
+    PhysX has no way to give one curved surface a velocity that follows the
+    arc, so a curve is a fan of short flat slabs, each tangent to the arc and
+    each driven along its own local +X. A carton crossing from one to the next
+    is handed a velocity that has turned a few degrees, and rides the bend.
+    Measured live: a 1 kg carton followed a 1.0-1.5 m radius arc through the
+    quadrant, staying on the deck, and pressed up against a stop at the end.
+
+    This is a separate class from `Conveyor` on purpose. A straight belt has
+    one direction and one origin, and every queue calculation projects onto
+    them; an arc has neither, and threading `if curve:` through all of that
+    would make the straight path - the one that ships in every cell - harder
+    to read for a variant most cells never use.
+    """
+
+    def __init__(
+        self,
+        prim_path: str,
+        *,
+        centre: Any,
+        radius: float,
+        a0: float,
+        a1: float,
+        width: float,
+        speed: float,
+        deck_z: float,
+        segments: list[dict[str, Any]],
+        gate_path: str | None,
+        scene: Any,
+    ) -> None:
+        self.prim_path = prim_path
+        self.centre = np.asarray(centre, dtype=float)
+        self.radius = float(radius)
+        self.a0 = float(a0)
+        self.a1 = float(a1)
+        self.width = float(width)
+        self.speed = float(speed)
+        self.deck_z = float(deck_z)
+        self.segments = segments  # each: {path, angle, tangent(unit xy), yaw}
+        self.gate_path = gate_path
+        self.scene = scene
+        self._boxes: list[Any] = []
+        self.box_size: np.ndarray | None = None
+        self.dressing: list[str] = []
+
+    def __repr__(self) -> str:
+        turn = np.degrees(self.a1 - self.a0)
+        return f"<CurvedConveyor {self.prim_path} R={self.radius:.2f} turn={turn:.0f}deg segs={len(self.segments)}>"
+
+    @classmethod
+    def build_curve(
+        cls,
+        prim_path: str = "/World/Curve",
+        *,
+        centre: Any,
+        radius: float = 1.55,
+        start_angle: float = -90.0,
+        turn: float = 90.0,
+        width: float = 0.5,
+        speed: float = 0.4,
+        deck_z: float = 0.5,
+        segments: int = 8,
+        friction: float = 0.9,
+        gate: bool = True,
+        gate_height: float = 0.25,
+        dressing: str | None = None,
+        color: Any = (0.15, 0.16, 0.18),
+        scene: Any = None,
+    ) -> "CurvedConveyor":
+        """A curved belt around `centre`, from `start_angle` sweeping `turn` degrees.
+
+        Angles are measured at `centre`, in the ground plane, degrees CCW from
+        +X. The entry is at `start_angle` and the exit (and stop) at
+        `start_angle + turn`. `radius` is the centreline; the default 1.55 m
+        matches the shipped A01 curve prop, so `dressing="conveyorbelt_a01"`
+        lands over the physics.
+        """
+        from .scene import Scene as _Scene
+
+        scene = scene or _Scene.get()
+        c = np.asarray(centre, dtype=float)[:2]
+        if c.shape[0] < 2:
+            raise ConveyorError("centre needs an x and a y, got %r" % (centre,))
+        a0, a1 = np.radians(start_angle), np.radians(start_angle + turn)
+        step = (a1 - a0) / int(segments)
+        chord = 2.0 * radius * np.sin(abs(step) / 2.0)
+        deck = 0.06
+        seg_list: list[dict[str, Any]] = []
+        for i in range(int(segments)):
+            amid = a0 + (i + 0.5) * step
+            pos = c + radius * np.array([np.cos(amid), np.sin(amid)])
+            # Direction of travel around the arc (increasing angle).
+            tang = np.array([-np.sin(amid), np.cos(amid)]) * np.sign(step)
+            yaw = float(np.degrees(np.arctan2(tang[1], tang[0])))
+            path = f"{prim_path}/seg_{i:02d}"
+            scene.spawn_rigid(
+                path,
+                shape="cube",
+                # A little longer than the chord so neighbours overlap and a
+                # carton never drops into the gap between two slabs.
+                scale=[chord / 2.0 * 1.15, width / 2.0, deck / 2.0],
+                position=[float(pos[0]), float(pos[1]), deck_z - deck / 2.0],
+                orientation=[0.0, 0.0, yaw],
+                mass=0.0,
+                friction=friction,
+                restitution=0.0,
+                static=True,
+                color=color,
+            )
+            _force_kinematic(path)
+            seg_list.append({"path": path, "angle": float(amid), "tangent": tang, "yaw": yaw})
+
+        gate_path = None
+        if gate:
+            end = c + radius * np.array([np.cos(a1), np.sin(a1)])
+            etang = np.array([-np.sin(a1), np.cos(a1)]) * np.sign(step)
+            gate_path = f"{prim_path}Gate"
+            scene.spawn_rigid(
+                gate_path,
+                shape="cube",
+                scale=[0.02, width / 2.0, gate_height / 2.0],
+                position=[float(end[0] + etang[0] * 0.06), float(end[1] + etang[1] * 0.06), deck_z + gate_height / 2.0],
+                orientation=[0.0, 0.0, float(np.degrees(np.arctan2(etang[1], etang[0])))],
+                mass=0.0,
+                friction=0.4,
+                restitution=0.0,
+                static=True,
+                color=(0.55, 0.13, 0.13),
+            )
+
+        belt = cls(
+            prim_path,
+            centre=c,
+            radius=radius,
+            a0=a0,
+            a1=a1,
+            width=width,
+            speed=speed,
+            deck_z=deck_z,
+            segments=seg_list,
+            gate_path=gate_path,
+            scene=scene,
+        )
+        if dressing:
+            belt.dress(dressing)
+        belt.start()
+        return belt
+
+    def start(self) -> int:
+        """Drive every segment along its own tangent, local space. Idempotent."""
+        for seg in self.segments:
+            drive_surface(_body_of(seg["path"]), [self.speed, 0.0, 0.0], enabled=True, local=True)
+        self.wake_load()
+        return len(self.segments)
+
+    def halt(self) -> None:
+        for seg in self.segments:
+            drive_surface(_body_of(seg["path"]), [0.0, 0.0, 0.0], enabled=False)
+
+    def wake_load(self) -> int:
+        woken = 0
+        for box in self._boxes:
+            seg = self._nearest_segment(box.position)
+            try:
+                box.set_velocity(linear=[seg["tangent"][0] * _WAKE_SPEED, seg["tangent"][1] * _WAKE_SPEED, 0.0])
+                woken += 1
+            except Exception:
+                logger.debug("could not wake %s", box.prim_path, exc_info=True)
+        return woken
+
+    def _angle_of(self, point: Any) -> float:
+        p = np.asarray(point, dtype=float)[:2] - self.centre
+        return float(np.arctan2(p[1], p[0]))
+
+    def _nearest_segment(self, point: Any) -> dict[str, Any]:
+        a = self._angle_of(point)
+        return min(self.segments, key=lambda s: abs(((s["angle"] - a + np.pi) % (2 * np.pi)) - np.pi))
+
+    def load(
+        self,
+        count: int = 3,
+        *,
+        box: Any = (0.15, 0.15, 0.15),
+        mass: float = 1.0,
+        spacing_deg: float = 12.0,
+        start_offset_deg: float = 6.0,
+        friction: float = 0.9,
+        prefix: str = "Box",
+        color: Any = (0.72, 0.55, 0.33),
+    ) -> list[Any]:
+        """Queue `count` cartons along the arc from the entry end.
+
+        Spacing is angular here, not linear - the natural coordinate on a
+        circle - so the queue keeps its shape whatever the radius.
+        """
+        size = as_vec3(box, name="box").astype(float)
+        sign = np.sign(self.a1 - self.a0)
+        made = []
+        for i in range(int(count)):
+            a = self.a0 + sign * np.radians(start_offset_deg + i * spacing_deg)
+            pos = self.centre + self.radius * np.array([np.cos(a), np.sin(a)])
+            body = self.scene.spawn_box(
+                f"/World/{prefix}{i}",
+                size=[size[0], size[1], size[2]],
+                position=[float(pos[0]), float(pos[1]), self.deck_z + size[2] / 2.0 + 0.003],
+                mass=float(mass),
+                friction=float(friction),
+                restitution=0.0,
+                color=color,
+            )
+            made.append(body)
+        self._boxes = made
+        self.box_size = size
+        return made
+
+    @property
+    def boxes(self) -> list[Any]:
+        return list(self._boxes)
+
+    def track(self, objects: Any) -> list[Any]:
+        self._boxes = list(objects)
+        return self._boxes
+
+    def box_at_gate(self, *, max_speed: float = 0.03, within_deg: float = 8.0) -> Any | None:
+        """The carton settled against the stop at the arc's exit, or None.
+
+        Nearest the exit angle, on the deck, and stopped. The angular window
+        is the curve's version of the straight belt's `within`.
+        """
+        if not self._boxes:
+            return None
+        best, best_err = None, None
+        for body in self._boxes:
+            try:
+                pos = np.asarray(body.position, dtype=float)
+                speed = float(body.speed)
+            except Exception:  # noqa: BLE001
+                continue
+            if speed > max_speed:
+                continue
+            # On the arc: radius within a box, height within a box.
+            r = float(np.linalg.norm(pos[:2] - self.centre))
+            if abs(r - self.radius) > max(0.2, float(self.box_size[1]) if self.box_size is not None else 0.2):
+                continue
+            if self.box_size is not None and abs(float(pos[2]) - (self.deck_z + float(self.box_size[2]) / 2.0)) > float(
+                self.box_size[2]
+            ):
+                continue
+            err = abs(((self._angle_of(pos) - self.a1 + np.pi) % (2 * np.pi)) - np.pi)
+            if err > np.radians(within_deg):
+                continue
+            if best_err is None or err < best_err:
+                best, best_err = body, err
+        return best
+
+    def arrived(self, **kwargs: Any) -> bool:
+        return self.box_at_gate(**kwargs) is not None
+
+    def dress(self, prop: str = "conveyorbelt_a01") -> dict[str, Any]:
+        """Put a real curve prop over the chord slabs, and hide them.
+
+        The prop is a fixed-radius quadrant, so it lands cleanly only when the
+        arc's radius matches (A01 is ~1.55 m); this warns otherwise. The prop
+        is placed at the arc centre and rotated so its own quadrant sweeps from
+        the entry angle.
+        """
+        from .props import spawn_prop
+
+        spec = curve_spec(prop)
+        if spec is None:
+            raise ConveyorError("%s is not a known curve prop (%s)." % (prop, ", ".join(sorted(CURVES))))
+        if abs(self.radius - float(spec["radius"])) > 0.3:
+            logger.warning(
+                "%s is a %.2f m-radius curve but this arc is %.2f m; the rollers will not line up.",
+                prop,
+                spec["radius"],
+                self.radius,
+            )
+        # A01's own quadrant is authored from its local frame; place it at the
+        # centre and yaw it so its entry lines up with a0. Measured offset of
+        # the prop's local quadrant start is 0 (its arc runs local -Y to +X),
+        # so a yaw of a0 + 90 deg aligns it; refined live.
+        path = f"{self.prim_path}_Dressing"
+        yaw = float(np.degrees(self.a0)) + 90.0
+        spawn_prop(
+            prop,
+            prim_path=path,
+            position=[float(self.centre[0]), float(self.centre[1]), self.deck_z - float(spec["deck"])],
+            orientation=[0.0, 0.0, yaw],
+            scene=self.scene,
+        )
+        _strip_physics(self.scene, path)
+        for seg in self.segments:
+            self._hide(seg["path"])
+        self.dressing = [path]
+        return {"prim_paths": [path], "prop": prop, "radius": self.radius, "deck": float(spec["deck"])}
+
+    def _hide(self, prim_path: str) -> bool:
+        try:
+            from pxr import UsdGeom
+
+            prim = get_stage().GetPrimAtPath(prim_path)
+            if prim and prim.IsValid():
+                UsdGeom.Imageable(prim).MakeInvisible()
+                return True
+        except Exception:  # noqa: BLE001
+            logger.debug("could not hide %s", prim_path, exc_info=True)
+        return False
+
+    def describe(self) -> dict[str, Any]:
+        return {
+            "prim_path": self.prim_path,
+            "kind": "curve",
+            "centre": self.centre.round(4).tolist(),
+            "radius": round(self.radius, 4),
+            "start_angle": round(float(np.degrees(self.a0)), 2),
+            "turn": round(float(np.degrees(self.a1 - self.a0)), 2),
+            "width": self.width,
+            "speed": self.speed,
+            "deck_z": self.deck_z,
+            "segments": len(self.segments),
+            "gate_path": self.gate_path,
+            "box_size": None if self.box_size is None else self.box_size.round(4).tolist(),
+            "boxes": [b.prim_path for b in self._boxes],
+            "mechanism": "PhysxSurfaceVelocityAPI (per-chord tangent)",
+        }
 
 
 #: What the belt surface is called inside the shipped conveyor assets. Both
@@ -1235,6 +1848,7 @@ def _build_gate(
     yaw: float,
     height: float = 0.25,
     thickness: float = 0.04,
+    pitch: float = 0.0,
 ) -> str:
     """The stop at the end of a belt, spanning its full width.
 
@@ -1245,16 +1859,23 @@ def _build_gate(
     on `ConveyorBelt_A09`: three boxes travelled the length of the belt and
     dropped 0.88 m onto the floor, which looks like a physics bug and is only a
     missing piece of the cell.
+
+    On a pitched belt the far end is higher, so the stop rises with it and
+    tilts to stay square to the deck; otherwise a carton climbing the slope
+    would meet a wall leaning away from it.
     """
     centre = np.asarray(centre, dtype=float)
     heading = np.asarray(heading, dtype=float)
-    far = centre[:2] + heading[:2] * (length / 2.0 + thickness / 2.0)
+    # `length` is up the slope; the stop's horizontal offset is its run.
+    run = (length / 2.0 + thickness / 2.0) * float(np.cos(pitch))
+    far_xy = centre[:2] + heading[:2] * run
+    rise = float(np.tan(pitch)) * run
     scene.spawn_rigid(
         gate_path,
         shape="cube",
         scale=[thickness / 2.0, width / 2.0, height / 2.0],
-        position=[float(far[0]), float(far[1]), float(centre[2] + height / 2.0)],
-        orientation=[0.0, 0.0, float(yaw)],
+        position=[float(far_xy[0]), float(far_xy[1]), float(centre[2]) + rise + height / 2.0],
+        orientation=_tilt_quat(yaw, pitch) if pitch else [0.0, 0.0, float(yaw)],
         mass=0.0,
         friction=0.4,
         restitution=0.0,
