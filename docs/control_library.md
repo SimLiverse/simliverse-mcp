@@ -394,6 +394,16 @@ because the Assembler documents what goes wrong without it. The fitted joints
 are recorded on the arm's prim (`simliverse:gripper`), which is how a Hand-E's
 `Slider_1` — a name no token matches — still ends up in `arm.gripper`.
 
+Measured live, a 2F-85 on a UR10e (Isaac Sim 6.0.1): the articulation came
+back as 12 DOF (6 + 6), `drive_health()` clean, the descent reached to 0.4 mm,
+`close()` stopped at 0.73 rad against a 4 cm block with both inner fingers in
+its contact list and `is_grasping` true, a 0.20 m lift carried it up 0.196 m,
+and `open()` put it back on the table. Two numbers to plan with: the 2F-85's
+pads close **about 0.155 m below the flange face**, so a grasp pose puts the
+flange that far above the object's centre; and `finger_joint` read 2.20 rad
+right after `open()` (its limit is 0.82) before closing normally — read the
+grasp off `is_grasping` and the contact list, not off that joint.
+
 Suction: force limits of 500 (Isaac's tutorial value) break the seal within
 2 mm of any motion. Use `1.0e6`. **Writing any `isaac:*` attribute on a closed
 gripper releases it**, so do not "test" limits mid-grip.
