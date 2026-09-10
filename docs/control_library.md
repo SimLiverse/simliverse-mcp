@@ -187,9 +187,19 @@ belt = Conveyor.build(
   does not, and 0.9 is comfortable to ~25 deg. `position[2]` stays the deck at
   the belt centre, so a pitched belt pivots about its middle; the stop, the
   guides and the loaded cartons all tilt and rise with it, and `box_at_gate`
-  measures the rest height at each carton's own point on the slope. Only
-  `Conveyor.build` inclines; a `from_prop` ramp asset (A25/A37/...) is a
-  separate, un-driven path.
+  measures the rest height at each carton's own point on the slope. **Also
+  fix the slope-vs-run trap:** `length` is up the slope, but along-heading
+  distances are horizontal, so `load` and `box_at_gate` use `half_run()`
+  (`length/2 * cos(pitch)`) — at 30 deg a carton placed at the slope distance
+  lands past the belt's end and falls (15 deg hid it).
+- **Dress an incline with a real ramp prop, not a grey slab:**
+  `build(pitch=30.7, dressing="conveyorbelt_a42")` puts the shipped roller
+  ramp (blue frame, grey rollers) over the driven slab. The ramp props are
+  fixed ~30 deg flat-ramp-flat models (`RAMPS`: A42 rollers 0.70->1.76, A37
+  belt 0.74->1.78), placed flat and dropped so the low deck lands on the
+  slab's low end; `dress()` warns if the belt's pitch does not match the
+  prop's. A steep ramp is a feeder — it lifts a carton fast, so `box_at_gate`
+  at the very top is unreliable; put a flat section at the top for a pick.
 - **Cartons accumulate against the stop**, so the next one is touching the one
   being picked. Keep `max_grip_distance` well under the carton size or the cup
   seals on the neighbour.

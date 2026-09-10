@@ -8,14 +8,18 @@ in a line.
 
 from __future__ import annotations
 
+import math
+
 import pytest
 
 from simliverse_sim.conveyor import (
     DRESSING_DECK,
     DRESSING_SECTION_LENGTH,
     NOT_STRAIGHT,
+    RAMPS,
     SECTIONS,
     ConveyorError,
+    ramp_spec,
     section_spec,
 )
 
@@ -49,3 +53,26 @@ def test_an_unknown_key_falls_back_to_a05_rather_than_failing():
 
 def test_the_tables_do_not_overlap():
     assert not set(SECTIONS) & set(NOT_STRAIGHT)
+
+
+@pytest.mark.parametrize("prop", ["conveyorbelt_a42", "conveyorbelt_a37"])
+def test_ramp_props_carry_their_measured_pitch_and_decks(prop):
+    spec = ramp_spec(prop)
+    assert spec is not None
+    assert 30.0 <= spec["pitch"] <= 31.0
+    # tan(pitch) is rise/run, from the two decks and the run.
+    assert (spec["high_deck"] - spec["low_deck"]) / spec["run"] == pytest.approx(
+        math.tan(math.radians(spec["pitch"])), abs=0.02
+    )
+
+
+def test_a_straight_prop_is_not_a_ramp():
+    assert ramp_spec("conveyorbelt_a05") is None
+
+
+def test_a_ramp_is_a_known_curved_or_non_straight_prop():
+    # Ramps live in NOT_STRAIGHT too, so section_spec still refuses to tile them.
+    for prop in RAMPS:
+        assert prop in NOT_STRAIGHT
+        with pytest.raises(ConveyorError):
+            section_spec(prop)

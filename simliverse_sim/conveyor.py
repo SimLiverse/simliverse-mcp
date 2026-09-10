@@ -148,6 +148,26 @@ SECTIONS: dict[str, dict[str, float]] = {
     "conveyorbelt_a08": {"length": 2.72, "deck": 0.769},
     "conveyorbelt_a09": {"length": 4.0, "deck": 1.781},
 }
+#: The ramp props, measured live (Isaac Sim 6.0.1): where the carrying surface
+#: sits at each end, the horizontal run of the rise, and the implied pitch. A
+#: ramp dresses a `build(pitch=...)` belt whose pitch matches, dropped so its
+#: low deck lands on the slab's low end - it carries its own rise, so it is
+#: placed flat, not tilted. Two flat approaches book-end the ramp, so the belt
+#: it dresses should be a touch longer than the ramp's run.
+RAMPS: dict[str, dict[str, float]] = {
+    # A42: roller ramp, rollers 0.704 -> 1.76 over a 1.78 m run.
+    "conveyorbelt_a42": {"low_deck": 0.704, "high_deck": 1.76, "run": 1.78, "pitch": 30.7, "length": 2.795},
+    # A37: belt ramp, belt 0.738 -> 1.761 over a 1.745 m run.
+    "conveyorbelt_a37": {"low_deck": 0.737, "high_deck": 1.781, "run": 1.745, "pitch": 30.4, "length": 3.907},
+}
+
+
+def ramp_spec(prop: str) -> dict[str, float] | None:
+    """Measured geometry of a ramp prop, or None if `prop` is not a ramp."""
+    spec = RAMPS.get(str(prop).lower().strip())
+    return dict(spec) if spec else None
+
+
 #: Props that carry on a curve, ramp or branch. Their tiling is not a line.
 NOT_STRAIGHT = {
     "conveyorbelt_a01": "90 degree curve",
@@ -447,6 +467,19 @@ class Conveyor:
             f"boxes={len(self._boxes)} gate={'yes' if self.gate_path else 'no'}>"
         )
 
+    def half_run(self) -> float:
+        """Half the belt's HORIZONTAL extent along the heading.
+
+        `length` is the slab's own dimension, measured up the slope. Every
+        along-heading distance in this class is horizontal (it projects onto
+        `direction`, which is horizontal), so a tilted belt reaches only
+        `length/2 * cos(pitch)` in the ground plane. Conflating the two put a
+        loaded carton past the slab's horizontal end at 30 degrees, where it
+        fell straight to the floor; at 15 degrees cos(pitch) hid it. Flat, this
+        is exactly `length/2`.
+        """
+        return float((self.length or 0.0) / 2.0) * float(np.cos(self.pitch))
+
     def heading3(self) -> np.ndarray:
         """The 3-D unit vector a carton travels along, up the slope.
 
@@ -681,6 +714,14 @@ class Conveyor:
         """
         from .props import spawn_prop
 
+        # A ramp prop is a real inclined conveyor and dresses a pitched belt:
+        # placed flat (it carries its own rise), dropped so its low deck lands
+        # on the slab's low end. Refused on a flat belt, where its slope would
+        # float off the deck.
+        ramp = ramp_spec(prop)
+        if ramp is not None:
+            return self._dress_ramp(prop, ramp)
+
         spec = section_spec(prop)
         if deck is None:
             deck = spec["deck"]
@@ -732,6 +773,53 @@ class Conveyor:
                 )
 
         return {"prim_paths": paths, "prop": key, "sections": count, "deck": float(deck), "width": real_width}
+
+    def _dress_ramp(self, prop: str, ramp: dict[str, float]) -> dict[str, Any]:
+        """Put a real ramp prop over a pitched slab, and hide the slab.
+
+        The prop is a genuine inclined conveyor - it carries its own rise, so
+        it is placed flat and dropped so its low deck sits on the low end of
+        the slab. Its pitch is fixed by the model (A42 ~30.7 deg), so this
+        warns rather than lies if the slab was built to a different angle.
+        """
+        from .props import spawn_prop
+
+        if not self.pitch:
+            raise ConveyorError(
+                "%s is a ramp and only dresses a pitched belt; build(pitch=%.0f) first." % (prop, ramp["pitch"])
+            )
+        built = float(np.degrees(self.pitch))
+        if abs(built - float(ramp["pitch"])) > 2.0:
+            logger.warning(
+                "%s is a %.0f-degree ramp but the belt is pitched %.0f degrees; the rollers will not line up "
+                "with the carton path. build(pitch=%.1f) to match.",
+                prop,
+                ramp["pitch"],
+                built,
+                ramp["pitch"],
+            )
+        heading = self.direction
+        yaw = float(np.degrees(np.arctan2(heading[1], heading[0])))
+        low_xy = self._origin[:2] - heading[:2] * self.half_run()
+        path = f"{self.belt_path}_Dressing"
+        entry = spawn_prop(
+            prop,
+            prim_path=path,
+            position=[float(low_xy[0]), float(low_xy[1]), self.deck_z(low_xy) - float(ramp["low_deck"])],
+            orientation=[0.0, 0.0, yaw],
+            scene=self.scene,
+        )
+        _strip_physics(self.scene, path)
+        self._hide(self.belt_path)
+        self.dressing = [path]
+        return {
+            "prim_paths": [path],
+            "prop": entry.get("key", prop),
+            "sections": 1,
+            "deck": float(ramp["low_deck"]),
+            "pitch": float(ramp["pitch"]),
+            "width": (float(entry["extent"][1]) if entry.get("extent") else None),
+        }
 
     def _hide(self, prim_path: str) -> bool:
         """Make a prim invisible without touching its collider.
@@ -1029,8 +1117,11 @@ class Conveyor:
         gap = float(spacing) if spacing is not None else float(size[0]) * 1.6
         origin = self._origin
         # Lay them out from the far (gate) end backwards, so box 0 is the one
-        # that arrives first and the queue does not depend on `count`.
-        far = (self.length or 0.0) / 2.0 - start_offset
+        # that arrives first and the queue does not depend on `count`. Distances
+        # here are HORIZONTAL along the heading, so the far end is the slab's
+        # horizontal half-run, not its slope half-length (they differ on an
+        # incline, and a carton placed at the slope distance lands past the end).
+        far = self.half_run() - start_offset
 
         made = []
         for index in range(int(count)):
@@ -1185,8 +1276,11 @@ class Conveyor:
         if not self._boxes:
             return None
         origin = self._origin
-        far = (self.length or 0.0) / 2.0
-        expected = float(self.box_size[0]) / 2.0 if self.box_size is not None else 0.0
+        # Horizontal, to match the projected `along` below - see `half_run`.
+        far = self.half_run() if self.length else 0.0
+        # The rest gap is half a box up the slope; its horizontal shadow is
+        # that times cos(pitch), which is what `along` measures.
+        expected = float(self.box_size[0]) / 2.0 * float(np.cos(self.pitch)) if self.box_size is not None else 0.0
         if within is None:
             # Scaled to the box, not a fixed distance. A flat 0.12 m accepted a
             # 15 cm box while it was still 6.5 cm short of the stop and creeping:
@@ -1429,8 +1523,10 @@ def _build_gate(
     """
     centre = np.asarray(centre, dtype=float)
     heading = np.asarray(heading, dtype=float)
-    far_xy = centre[:2] + heading[:2] * (length / 2.0 + thickness / 2.0)
-    rise = float(np.tan(pitch)) * (length / 2.0 + thickness / 2.0)
+    # `length` is up the slope; the stop's horizontal offset is its run.
+    run = (length / 2.0 + thickness / 2.0) * float(np.cos(pitch))
+    far_xy = centre[:2] + heading[:2] * run
+    rise = float(np.tan(pitch)) * run
     scene.spawn_rigid(
         gate_path,
         shape="cube",

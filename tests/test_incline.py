@@ -78,3 +78,15 @@ def test_the_stop_sits_above_the_pitched_far_end():
     pitch, length = math.radians(20), 2.0
     rise = math.tan(pitch) * (length / 2.0 + 0.02)
     assert rise == pytest.approx(0.371, abs=0.01)
+
+
+def test_half_run_is_horizontal_not_slope():
+    """The bug the A42 ramp exposed: a slope half-length used as a horizontal
+    reach put a carton past the belt's end at 30 degrees, and it fell."""
+    b = _belt(0.0)
+    b.length = 2.7
+    assert b.half_run() == pytest.approx(1.35)
+    b30 = _belt(30.0)
+    b30.length = 2.7
+    assert b30.half_run() == pytest.approx(1.35 * math.cos(math.radians(30)))
+    assert b30.half_run() < 1.35
