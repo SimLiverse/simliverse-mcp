@@ -160,7 +160,11 @@ def register_tools(mcp: FastMCP, get_connection: "Callable[[], IsaacConnection]"
           - Verify the STACK at the end with `verify_pallet`, not each carton
             as it lands. Four cartons within 21 mm on release; by the end one
             had been pushed 0.45 m and one was on the floor. `palletise()`
-            reports `stack` and is only `complete` when the pallet is intact.
+            reports `stack` and is only `complete` when the pallet is intact -
+            and intact means SQUARE too: a cup does nothing to a box's yaw, so a
+            carton that drifted askew on the belt lands askew (a UR16e stacked
+            one 11 deg off). The place measures the pick yaw and rotates the
+            wrist to land it square; `stack` reports each box's `skew`.
           - Gains are per robot (`DRIVE_GAINS`): the KR210 needs
             max_force=1e6 where the UR family holds at 1e4. Only 21 arms have
             an RMPflow config for `pose_to`; check describe()["motion_config"].

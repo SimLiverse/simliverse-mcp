@@ -789,6 +789,28 @@ def _box_w(cell: dict) -> float:
     return float(cell.get("box_w", _box_of(cell)))
 
 
+def _box_yaw(box) -> float:
+    """The carton's rotation about world z, in degrees."""
+    from simliverse_sim.palletizing import _yaw_degrees
+
+    return float(_yaw_degrees(box.orientation))
+
+
+def _square_delta(pick_yaw: float, slot: dict) -> float:
+    """The wrist yaw (degrees) that lands a box gripped at `pick_yaw` square on
+    the slot.
+
+    A cup grips a carton's top face and does nothing to its rotation, so the
+    box keeps whatever yaw it drifted to on the belt and carries it onto the
+    stack - a 0.22 m carton on a UR16e landed 11 deg off square while its
+    position was dead on. The box is held rigidly, so rotating the wrist by the
+    box's offset before releasing rotates the box back square. A carton is
+    90-deg symmetric, so the correction wraps into +/-45 deg and is small.
+    """
+    want = float(slot.get("yaw") or 0.0)
+    return (want - float(pick_yaw) + 45.0) % 90.0 - 45.0
+
+
 # A move counts if the tool got within this of where it was sent. Tighter than
 # the 4 cm a placement is judged by, looser than pose_to's 5 mm hold criterion,
 # which a settled arm can miss by a millimetre and still have arrived.
@@ -1304,11 +1326,17 @@ def pick_waiting_box(cell: dict) -> dict:
     # Tool against the *box*, not against the target it was sent to - the latter
     # is trivially zero and reported 0.0 through every corner grab.
     offcentre = float(np.linalg.norm(flange[:2] - end[:2]))
+    # The box's yaw now, held rigidly on the tool, so the place can rotate the
+    # wrist to land it square. Measured with the wrist at yaw 0 (the pick pose),
+    # which is the reference the place correction is relative to.
+    yaw = _box_yaw(box)
+    cell["pick_box_yaw"] = yaw
     return {
         "picked": ee.holding(),
         "box": box.prim_path,
         "rise": round(float(end[2] - start[2]), 4),
         "off_centre": round(offcentre, 4),
+        "yaw": round(yaw, 2),
         "from": start.round(4).tolist(),
         "to": end.round(4).tolist(),
         "gripped": ee.held(),
@@ -1323,12 +1351,19 @@ def place_on_slot(cell: dict, slot: dict, *, box=None) -> dict:
     clearance below is measured from the pallet deck rather than assumed.
     """
     arm, ee = cell["arm"], _ee_of(cell)
-    down = _down_of(cell)
     scene = arm.scene
     if not ee.holding():
         return {"placed": False, "reason": "nothing held"}
     if box is None:
         box = cell["belt"].boxes[0]
+
+    # Land the carton SQUARE. A cup carries whatever yaw the box drifted to on
+    # the belt; the box is rigid on the tool, so rotating the wrist by that yaw
+    # before release turns it back onto the slot's angle. Falls back to a plain
+    # tool-down when nothing measured the pick yaw (an old cell, or a direct
+    # call), which is the previous behaviour.
+    delta = _square_delta(cell.get("pick_box_yaw", 0.0), slot)
+    down = arm.down_at_yaw(delta) if "pick_box_yaw" in cell else _down_of(cell)
 
     place = slot["place"]
     # Release height: `place` is where the carton's centre goes, so the tool

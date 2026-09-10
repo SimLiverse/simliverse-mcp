@@ -98,6 +98,18 @@ def test_a_native_gripper_targets_the_grasp_point_not_a_flange() -> None:
     assert not ee.fits(0.12)[0], "a 120 mm box does not"
 
 
+def test_placement_squares_a_box_gripped_askew() -> None:
+    """A cup carries whatever yaw a box drifted to on the belt; the place rotates
+    the wrist by that offset so the box lands on the slot's angle. A carton is
+    90-deg symmetric, so the correction wraps into +/-45 deg."""
+    # 11 deg off square -> rotate the wrist -11 deg to bring it back.
+    assert abs(demo._square_delta(11.0, {"yaw": 0.0}) - (-11.0)) < 1e-6
+    # 88 deg reads as 2 deg off, not 88 (the symmetry wrap).
+    assert abs(demo._square_delta(88.0, {"yaw": 0.0}) - 2.0) < 1e-6
+    # A slot that wants a non-zero angle is matched, not just zero.
+    assert abs(demo._square_delta(11.0, {"yaw": 45.0}) - 34.0) < 1e-6
+
+
 def test_old_cells_that_carry_only_a_cup_still_resolve_an_end_effector() -> None:
     """`_ee_of` must wrap a bare cup, so a cell built before this change runs."""
     cell = {"cup": _FakeCup()}
