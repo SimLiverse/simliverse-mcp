@@ -236,6 +236,82 @@ def down_quaternion(approach_axis: str, yaw_degrees: float = 0.0) -> list:
     return [float(v) for v in out]
 
 
+def _qmul(a: Any, b: Any) -> list:
+    """Hamilton product of two (w, x, y, z) quaternions: apply `b`, then `a`."""
+    w1, x1, y1, z1 = (float(v) for v in a)
+    w2, x2, y2, z2 = (float(v) for v in b)
+    return [
+        w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
+        w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+        w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
+        w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
+    ]
+
+
+#: Quaternions turning a tool's +Z onto each signed flange axis, (w, x, y, z).
+#: Shared by the suction cup and by finger grippers: every gripper asset in
+#: the library points its fingers along its own +Z, and the flange's tool axis
+#: is whichever one `_approach_axis` measures.
+Z_ONTO = {
+    "X": (0.70710678, 0.0, 0.70710678, 0.0),
+    "-X": (0.70710678, 0.0, -0.70710678, 0.0),
+    "Y": (0.70710678, -0.70710678, 0.0, 0.0),
+    "-Y": (0.70710678, 0.70710678, 0.0, 0.0),
+    "Z": (1.0, 0.0, 0.0, 0.0),
+    "-Z": (0.0, 1.0, 0.0, 0.0),
+}
+
+
+def gripper_mount(approach_axis: str, standoff: float, yaw_degrees: float = 0.0) -> tuple[list, list]:
+    """Where a gripper's base sits on the flange, in the flange's own frame.
+
+    Returns `(position, orientation)`: `standoff` metres out along the flange
+    axis, turned so the gripper's +Z (its fingers) point the same way, then
+    yawed about that axis. Pure, so the arithmetic is testable without a
+    stage; `attach_gripper` measures `standoff` off the flange link's own
+    bound the way the suction cup does.
+    """
+    import math
+
+    axis = str(approach_axis).upper().strip()
+    if axis not in Z_ONTO:
+        raise ValueError(f"approach_axis must be one of {sorted(Z_ONTO)}, not {approach_axis!r}")
+    direction = np.zeros(3)
+    direction["XYZ".index(axis[-1])] = -1.0 if axis.startswith("-") else 1.0
+    half = math.radians(float(yaw_degrees)) / 2.0
+    spin = [math.cos(half), 0.0, 0.0, math.sin(half)]
+    orientation = _qmul(Z_ONTO[axis], spin)
+    return [float(v) for v in direction * float(standoff)], [float(v) for v in orientation]
+
+
+def gripper_root_body(joints: Any) -> str | None:
+    """The gripper link everything else hangs off: a body0 that is never a body1.
+
+    `joints` are `(body0, body1)` pairs. A Robotiq 2F-85's `base_link` is body0
+    of both knuckle joints and body1 of nothing; the Schunk EGK's is the
+    housing its `Jaw_Drive` runs from. That is the link the flange joint takes.
+    """
+    parents = [b0 for b0, b1 in joints if b0 and b1]
+    children = {b1 for b0, b1 in joints if b0 and b1}
+    roots = [b0 for b0 in dict.fromkeys(parents) if b0 not in children]
+    return roots[0] if roots else None
+
+
+def fitted_gripper_indices(joint_names: Any, grouped: Any, fitted_names: Any) -> list[int]:
+    """Joint indices for the gripper: the token match plus the fitted asset's own.
+
+    The joint-name tokens find `finger_joint`, `right_outer_knuckle_joint` and
+    `Jaw_Drive` on their own. They do not find a Hand-E's `Slider_1` and
+    `Slider_2`, which name nothing, so the joints a fitted gripper brought are
+    recorded when it is fitted and read back here.
+    """
+    names = [str(n) for n in joint_names]
+    wanted = {str(n) for n in (fitted_names or ())}
+    out = set(int(i) for i in (grouped or ()))
+    out.update(i for i, name in enumerate(names) if name in wanted or name.rsplit("/", 1)[-1] in wanted)
+    return sorted(out)
+
+
 class Gripper:
     """Finger joints that open and close together.
 
@@ -296,9 +372,13 @@ class Gripper:
 
     def _pad_links(self) -> list[str]:
         """The two opposing pads, which is what "how open is it" means."""
+        # A fitted gripper is a sibling of the arm, not under it, so its links
+        # are not in `robot.links()`; the arm knows where it put them.
+        extra = getattr(self._robot, "_fitted_gripper_links", None)
+        candidates = list(self._robot.links()) + (list(extra()) if callable(extra) else [])
         pads = [
             path
-            for path in self._robot.links()
+            for path in candidates
             if "knuckle" not in path.lower()
             and any(token in path.rsplit("/", 1)[-1].lower() for token in ("finger", "pad", "jaw", "tip"))
         ]
@@ -1199,7 +1279,241 @@ class Manipulator(Robot):
         self._solver_index_map: Any = None
         self._pose_ramp = 0
         self._pose_phase = 0
-        self.gripper = Gripper(self, self.groups.gripper)
+        self.gripper = Gripper(self, self._gripper_indices())
+
+    #: Where a fitted finger gripper is recorded on the arm's prim, as JSON.
+    GRIPPER_STAMP = "simliverse:gripper"
+
+    def _fitted_gripper(self) -> dict[str, Any] | None:
+        """What `attach_gripper` recorded on this arm, if anything."""
+        import json as _json
+
+        try:
+            attr = get_stage().GetPrimAtPath(self.prim_path).GetAttribute(self.GRIPPER_STAMP)
+            value = attr.Get() if attr and attr.IsValid() else None
+            return _json.loads(value) if value else None
+        except Exception:  # noqa: BLE001 - absence is the normal case
+            return None
+
+    def _gripper_indices(self) -> list[int]:
+        fitted = self._fitted_gripper() or {}
+        return fitted_gripper_indices(self.joint_names, self.groups.gripper, fitted.get("joints"))
+
+    def _fitted_gripper_links(self) -> list[str]:
+        """Rigid links of the fitted gripper, which sits beside the arm."""
+        from pxr import Usd, UsdPhysics
+
+        fitted = self._fitted_gripper()
+        if not fitted:
+            return []
+        root = get_stage().GetPrimAtPath(str(fitted.get("prim_path", "")))
+        if not root or not root.IsValid():
+            return []
+        return [str(p.GetPath()) for p in Usd.PrimRange(root) if p.HasAPI(UsdPhysics.RigidBodyAPI)]
+
+    def rebind_gripper(self) -> "Gripper":
+        """A fresh finger-gripper handle, after Play has rebuilt the articulation."""
+        self.gripper = Gripper(self, self._gripper_indices())
+        return self.gripper
+
+    def attach_gripper(
+        self,
+        asset: str = "2f_85",
+        *,
+        prim_path: str | None = None,
+        mount_link: str | None = None,
+        approach_axis: str | None = None,
+        offset: float | None = None,
+        yaw: float = 0.0,
+        mask_collisions: bool = True,
+    ) -> dict[str, Any]:
+        """Bolt a shipped finger gripper onto this arm's flange.
+
+        `asset` is a robot-library key (`2f_85`, `2f_140`, `hand_e`, `egk_25`,
+        `egu_50`, `ezu_35` - `list_robots()` discovers them under
+        `/Isaac/Robots/Robotiq` and `/Isaac/Robots/Schunk`) or a USD path.
+        The gripper is referenced **beside** the arm as `<arm>Gripper`, placed
+        with its base on the flange, its own articulation root dropped, and
+        joined to the flange by a fixed joint that is *not* excluded from the
+        articulation - which is how Isaac's Robot Assembler composes a robot
+        and what makes the finger joints part of this arm's articulation.
+        Collisions between the arm and the gripper are masked, and the
+        gripper's joint states are zeroed, both because the Assembler does
+        and says why: the constraint the new fixed joint adds violates
+        otherwise, and stale joint states explode on Play.
+
+        The fingers point along the flange's tool axis - measured off the
+        flange like the suction cup's (a UR's is Z, a KR210's X, a Fanuc
+        CRX's -Y) - from a standoff measured off the flange link's own bound,
+        so the gripper starts at the flange face rather than inside the
+        wrist. `yaw` turns the gripper about that axis.
+
+        Authoring changes the articulation, so the timeline is stopped here
+        and the returned dict is a description, not a handle: Play, then
+        `Robot.attach(...)` (or `rebind_gripper()`) and `arm.gripper` is the
+        fitted `Gripper` - `open()`, `close()`, `grasp(obj)`. Joints the
+        asset names unhelpfully (a Hand-E's `Slider_1`/`Slider_2`) are
+        recorded on the arm's prim so the handle finds them anyway.
+
+        Measured off the assets, not simulated yet: the 2F-85 is one driven
+        `finger_joint` (0-47 deg) with PhysX mimic followers, 0.21 kg; the
+        Schunk EGK/EGU/EZU are one driven prismatic `Jaw_Drive` (26.5 / 51 /
+        35 mm) with mimic followers; the Hand-E's two sliders ship with **no
+        drives**, so `close()` will refuse until `repair_drives()` is the
+        user's decision.
+        """
+        import json as _json
+
+        from pxr import Gf, PhysxSchema, Sdf, Usd, UsdGeom, UsdPhysics
+
+        from .._compat import add_reference, assets_root
+        from .library import _check_reachable, resolve
+
+        scene = self.scene
+        stage = get_stage()
+        if scene.is_playing():
+            logger.info("Stopping the timeline to fit %s on %s; the articulation changes.", asset, self.prim_path)
+            scene.stop()
+
+        if "/" in asset or asset.lower().endswith((".usd", ".usda", ".usdc")):
+            url, key = asset, asset.rsplit("/", 1)[-1]
+        else:
+            entry = resolve(asset)
+            url, key = assets_root() + entry.asset_path, entry.key
+        _check_reachable(url)
+
+        mount = mount_link or self._tool_link()
+        axis = str(approach_axis or self._approach_axis(mount)).upper()
+        if axis not in Z_ONTO:
+            raise ValueError(f"approach_axis must be one of {sorted(Z_ONTO)}, not {axis!r}")
+        direction = np.zeros(3)
+        direction["XYZ".index(axis[-1])] = -1.0 if axis.startswith("-") else 1.0
+        standoff = float(offset) if offset is not None else float(SuctionGripper._link_reach(scene, mount, direction))
+        position, orientation = gripper_mount(axis, standoff, yaw)
+
+        gpath = prim_path or f"{self.prim_path}Gripper"
+        if stage.GetPrimAtPath(gpath):
+            stage.RemovePrim(gpath)
+        add_reference(url, gpath)
+        gprim = stage.GetPrimAtPath(gpath)
+        if not gprim or not gprim.IsValid():
+            raise MotionError(f"{url} referenced at {gpath} produced no prim; the asset did not load.")
+
+        # What the asset is made of, by reading it rather than assuming.
+        joints: list[tuple[str, str]] = []
+        joint_prims: list[Any] = []
+        roots: list[Any] = []
+        for prim in Usd.PrimRange(gprim):
+            if prim.HasAPI(UsdPhysics.ArticulationRootAPI):
+                roots.append(prim)
+            if prim.IsA(UsdPhysics.Joint):
+                j = UsdPhysics.Joint(prim)
+                b0 = [str(t) for t in j.GetBody0Rel().GetTargets()]
+                b1 = [str(t) for t in j.GetBody1Rel().GetTargets()]
+                joints.append((b0[0] if b0 else "", b1[0] if b1 else ""))
+                joint_prims.append(prim)
+        base = gripper_root_body(joints)
+        if base is None:
+            bodies = [str(p.GetPath()) for p in Usd.PrimRange(gprim) if p.HasAPI(UsdPhysics.RigidBodyAPI)]
+            if not bodies:
+                raise MotionError(f"{key} at {gpath} has no rigid bodies; there is nothing to bolt to the flange.")
+            base = bodies[0]
+
+        # Place it: the gripper's base link exactly where the flange joint
+        # frame is, whatever transform the asset gives that link internally.
+        mount_world = UsdGeom.Xformable(stage.GetPrimAtPath(mount)).ComputeLocalToWorldTransform(0)
+        w, x, y, z = orientation
+        local = Gf.Matrix4d(Gf.Matrix3d(Gf.Rotation(Gf.Quatd(w, Gf.Vec3d(x, y, z)))), Gf.Vec3d(*position))
+        goal = local * mount_world
+        base_rel = UsdGeom.Xformable(stage.GetPrimAtPath(base)).ComputeLocalToWorldTransform(0)
+        placement = base_rel.GetInverse() * goal
+        xform = UsdGeom.Xformable(gprim)
+        xform.ClearXformOpOrder()
+        xform.AddTransformOp().Set(placement)
+
+        # One articulation, not two: drop the gripper's root and any joint that
+        # tied it to the world, exactly as the Assembler does.
+        for root in roots:
+            if root.IsA(UsdPhysics.Joint):
+                root.SetActive(False)
+            else:
+                root.RemoveAPI(UsdPhysics.ArticulationRootAPI)
+        for prim, (b0, b1) in zip(joint_prims, joints):
+            if not b0 or not b1:
+                prim.SetActive(False)
+            elif prim.HasAPI(PhysxSchema.JointStateAPI, "angular") or prim.HasAPI(PhysxSchema.JointStateAPI, "linear"):
+                for kind in ("angular", "linear"):
+                    state = PhysxSchema.JointStateAPI.Get(prim, kind)
+                    if state:
+                        state.CreatePositionAttr().Set(0.0)
+                        state.CreateVelocityAttr().Set(0.0)
+
+        joint = UsdPhysics.FixedJoint.Define(stage, f"{gpath}/MountJoint")
+        joint.CreateBody0Rel().SetTargets([mount])
+        joint.CreateBody1Rel().SetTargets([base])
+        joint.CreateLocalPos0Attr().Set(Gf.Vec3f(*position))
+        joint.CreateLocalRot0Attr().Set(Gf.Quatf(w, x, y, z))
+        joint.CreateLocalPos1Attr().Set(Gf.Vec3f(0.0, 0.0, 0.0))
+        joint.CreateLocalRot1Attr().Set(Gf.Quatf(1.0, 0.0, 0.0, 0.0))
+        joint.CreateExcludeFromArticulationAttr().Set(False)
+
+        if mask_collisions:
+            arm_root = next(
+                (
+                    p
+                    for p in Usd.PrimRange(stage.GetPrimAtPath(self.prim_path))
+                    if p.HasAPI(UsdPhysics.ArticulationRootAPI)
+                ),
+                stage.GetPrimAtPath(self.prim_path),
+            )
+            UsdPhysics.FilteredPairsAPI.Apply(arm_root).CreateFilteredPairsRel().AddTarget(Sdf.Path(gpath))
+
+        driven = [
+            p.GetName()
+            for p in joint_prims
+            if (UsdPhysics.DriveAPI.Get(p, "angular") or UsdPhysics.DriveAPI.Get(p, "linear"))
+            and (p.IsA(UsdPhysics.RevoluteJoint) or p.IsA(UsdPhysics.PrismaticJoint))
+        ]
+        record = {
+            "asset": key,
+            "url": url,
+            "prim_path": gpath,
+            "mount_link": mount,
+            "base_link": base,
+            "approach_axis": axis,
+            "standoff": round(standoff, 4),
+            "yaw": float(yaw),
+            "joints": [
+                p.GetName() for p in joint_prims if p.IsA(UsdPhysics.RevoluteJoint) or p.IsA(UsdPhysics.PrismaticJoint)
+            ],
+            "driven": driven,
+            "mass": round(
+                sum(
+                    float(UsdPhysics.MassAPI(p).GetMassAttr().Get() or 0.0)
+                    for p in Usd.PrimRange(gprim)
+                    if p.HasAPI(UsdPhysics.MassAPI)
+                ),
+                4,
+            ),
+        }
+        stage.GetPrimAtPath(self.prim_path).CreateAttribute(self.GRIPPER_STAMP, Sdf.ValueTypeNames.String).Set(
+            _json.dumps(record)
+        )
+        if not driven:
+            record["warning"] = (
+                "%s declares no drives on %s; close() will refuse until repair_drives() is called, which "
+                "changes the robot being simulated and is the user's decision." % (key, record["joints"])
+            )
+        logger.info(
+            "Fitted %s on %s along %s at %.4f m standoff; %d joints (%d driven).",
+            key,
+            mount,
+            axis,
+            standoff,
+            len(record["joints"]),
+            len(driven),
+        )
+        return record
 
     def attach_suction_gripper(self, parent_prim_path: str | None = None, **kwargs: Any) -> "SuctionGripper":
         """Fit a suction gripper to this arm and use it as the end effector.
@@ -1576,7 +1890,7 @@ class Manipulator(Robot):
 
     @property
     def arm_joint_indices(self) -> list[int]:
-        finger = set(self.groups.gripper)
+        finger = set(self._gripper_indices())
         return [i for i in range(self.dof) if i not in finger]
 
     # ── Motion policy ─────────────────────────────────────────────────────────
