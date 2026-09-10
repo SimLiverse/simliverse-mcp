@@ -67,27 +67,34 @@ def robot_scenarios(robots: list[str] | None = None, *, box: float | None = None
 #: The axes a generated cell samples. Each is a real capability the harness is
 #: meant to handle; crossing them makes combinations no single scenario tested,
 #: which is the point - a cell that works only on the grid it was tuned for is
-#: not general.
+#: not general. `crx10ia_l` is left out by default (its suction cup is a known
+#: gap, see demo.ur10_palletizing.KNOWN_GAPS); pass it in `robots` to include it.
 _AXES = {
-    "robot": ROBOTS,
-    "box": [0.10, 0.15, 0.20],
-    "box_mass": [0.5, 1.0],
-    "rows": [2, 3],
-    "cols": [2, 3],
-    "speed": [0.15, 0.30],
+    "robot": [r for r in ROBOTS if r != "crx10ia_l"],
+    "box": [0.08, 0.10, 0.12, 0.15, 0.18, 0.20, 0.22],
+    "box_mass": [0.3, 0.5, 1.0, 1.5],
+    "rows": [1, 2, 3],
+    "cols": [1, 2, 3],
+    "layers": [1, 2],
+    "speed": [0.10, 0.15, 0.20, 0.30, 0.40],
+    "deck": [0.35, 0.45, 0.55],
+    "dressing": [None, "conveyorbelt_a05"],
+    "guides": [False, True],
 }
 
 
 def generated_scenarios(
     count: int = 20, *, seed: int = 0, robots: list[str] | None = None
 ) -> list[tuple[str, dict[str, Any]]]:
-    """Sample `count` cells from the capability axes, laid out per arm.
+    """Invent `count` distinct cells by crossing the capability axes, per arm.
 
     Deterministic under `seed`, so a failure is reproducible and a fix can be
     checked against the same set. Each cell is a robot's reach-aware layout with
-    the sampled box, mass, pattern and belt speed folded in - a combination the
-    fixed scenarios never enumerate, which is what tests generalisation rather
-    than memorisation.
+    a sampled carton, pattern, stack height, belt speed, deck height, dressing
+    and guarding folded in - combinations the fixed scenarios never enumerate,
+    which is what tests generalisation rather than memorisation. A cell whose
+    numbers are impossible (a small arm reaching a tall stack) is still emitted;
+    the sweep reports it as an impossible cell, not a defect.
     """
     import random as _random
 
@@ -98,23 +105,42 @@ def generated_scenarios(
     out: list[tuple[str, dict[str, Any]]] = []
     seen: set[tuple] = set()
     tries = 0
-    while len(out) < count and tries < count * 20:
+    while len(out) < count and tries < count * 40:
         tries += 1
         robot = rng.choice(pool)
         box = rng.choice(_AXES["box"])
         pick = {
-            "box_mass": rng.choice(_AXES["box_mass"]),
-            "rows": rng.choice(_AXES["rows"]),
-            "cols": rng.choice(_AXES["cols"]),
-            "speed": rng.choice(_AXES["speed"]),
+            k: rng.choice(_AXES[k])
+            for k in ("box_mass", "rows", "cols", "layers", "speed", "deck", "dressing", "guides")
         }
-        key = (robot, box, pick["box_mass"], pick["rows"], pick["cols"], pick["speed"])
+        key = (
+            robot,
+            box,
+            *(pick[k] for k in ("box_mass", "rows", "cols", "layers", "speed", "deck", "dressing", "guides")),
+        )
         if key in seen:
             continue
         seen.add(key)
         spec = cell_mod.layout_for(robot, box=box)
         spec.update(pick)
-        name = "%s b%.2f m%.1f %dx%d v%.2f" % (robot, box, pick["box_mass"], pick["rows"], pick["cols"], pick["speed"])
+        # A small arm cannot reach a full pallet's far column at two layers; the
+        # layout already chose a tote for it, and a 3x3 tote is over-packed - cap
+        # the pattern to what the deck holds so the cell is testable, not absurd.
+        if spec.get("pallet") in ("tote", "half"):
+            spec["rows"] = min(spec["rows"], 2)
+            spec["cols"] = min(spec["cols"], 2)
+        name = "%s b%.2f m%.1f %dx%dx%d v%.2f d%.2f%s%s" % (
+            robot,
+            box,
+            pick["box_mass"],
+            pick["rows"],
+            pick["cols"],
+            pick["layers"],
+            pick["speed"],
+            pick["deck"],
+            " dressed" if pick["dressing"] else "",
+            " guided" if pick["guides"] else "",
+        )
         out.append((name, spec))
     return out
 
