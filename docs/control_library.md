@@ -544,6 +544,23 @@ asset's articulation (its mimic `Jaw_Drive` followers, not zeroed the way the
 jaw that palletises end to end; the prismatic geometry is already the answer to
 the down-arc.
 
+**A finger jaw that DOES palletise end to end: a native parallel gripper.**
+`build(robot="franka", gripper="native")` uses the arm's OWN panda hand rather
+than bolting one on, and it picks, carries and places a parcel: measured, a
+0.05 m box lifted 0.20 m off the belt, rode the traverse to a tote and was
+placed. Three things a native jaw needs, each measured. Its IK frame is the
+grasp point BETWEEN the fingers, not a flange, so its `JAW_GEOMETRY` drop is 0 -
+`pose_to(box_centre)` already puts the fingers around the box (a bolted-on jaw's
+frame is the flange, so its drop is the real pad distance). It grips well but
+looser than a cup, so its placement tolerance is 0.08 m, not the cup's 0.04.
+And - the one that cost a debugging pass - a Franka's fingers ship at stiffness
+400 / maxForce **7 N**, which lifts a box straight up and then drops it the
+instant the arm swings sideways; `_firm_grip` raises the prismatic finger drive
+to 1e4 / 500 N (tune_drives only touches the arm's revolute joints) and the box
+then rides the traverse. The hover and the lift are also capped at
+`arm.reach_ceiling`, because a small arm (a Franka, 0.85 m) can reach a box but
+not a fixed 0.18 m above it, and a hard clearance fails a pick it could make.
+
 Suction: force limits of 500 (Isaac's tutorial value) break the seal within
 2 mm of any motion. Use `1.0e6`. **Writing any `isaac:*` attribute on a closed
 gripper releases it**, so do not "test" limits mid-grip.

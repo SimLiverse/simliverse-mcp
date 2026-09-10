@@ -84,6 +84,20 @@ def test_a_cup_never_gates_on_carton_width() -> None:
     assert fits, "a suction cup should take a 300 mm carton"
 
 
+def test_a_native_gripper_targets_the_grasp_point_not_a_flange() -> None:
+    """A Franka's IK frame is the point between its fingers, so `pose_to(centre)`
+    already puts the fingers around the box and the drop is 0 - the working
+    finger-jaw palletise. A bolted-on jaw's frame is the flange, drop is real."""
+    ee = demo._JawEE(arm=None, jaw=_FakeJaw(), key="native")
+    here = [0.0, 0.0, 0.50]
+    # The tool frame goes straight to the box centre: no flange offset.
+    assert abs(ee.approach_tool_z(here, 0.05) - 0.50) < 1e-9
+    assert abs(ee.hold_center_offset(0.05)) < 1e-9
+    fits, _ = ee.fits(0.05)
+    assert fits, "a 50 mm box fits a 75 mm native jaw"
+    assert not ee.fits(0.12)[0], "a 120 mm box does not"
+
+
 def test_old_cells_that_carry_only_a_cup_still_resolve_an_end_effector() -> None:
     """`_ee_of` must wrap a bare cup, so a cell built before this change runs."""
     cell = {"cup": _FakeCup()}

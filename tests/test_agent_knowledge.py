@@ -249,11 +249,16 @@ def test_the_guide_covers_palletising_with_a_finger_jaw() -> None:
     text = GUIDE.read_text(encoding="utf-8")
     for token in ('build(gripper="2f_85")', "JAW_GEOMETRY", "pad_center", "KNOWN GAP", "box_h"):
         assert token in text, "the guide never mentions %r" % token
+    # The working native-parallel-jaw path, and why it works.
+    for token in ('build(robot="franka", gripper="native")', "_firm_grip", "reach_ceiling"):
+        assert token in text, "the guide never mentions %r" % token
     # The API the note advertises exists.
-    for name in ("_JawEE", "_SuctionEE", "_box_w", "JAW_GEOMETRY"):
+    for name in ("_JawEE", "_SuctionEE", "_box_w", "JAW_GEOMETRY", "_firm_grip"):
         assert hasattr(demo, name), "the guide advertises %s" % name
     assert "gripper" in inspect.signature(demo.build).parameters
     assert "box_h" in inspect.signature(demo.build).parameters
+    # A native gripper's IK frame is the grasp point, so its drop is 0.
+    assert demo.JAW_GEOMETRY["native"]["drop"] == 0.0
 
 
 def test_the_guide_states_the_working_envelope_rather_than_implying_it() -> None:

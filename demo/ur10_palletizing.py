@@ -587,8 +587,16 @@ def build(
     # MEASURED axis down, so "auto" gives both a down-facing cup and a flange
     # that stands vertical over the carton - measured, wrist_3 Z is [0,0,-1]
     # with the axis (correct look), and [1,0,0] with "Z" (flange on its side).
-    is_suction = str(gripper).lower() in ("suction", "cup", "vacuum")
-    if is_suction:
+    is_native = str(gripper).lower() in ("native", "builtin", "onboard")
+    is_suction = (not is_native) and str(gripper).lower() in ("suction", "cup", "vacuum")
+    if is_native:
+        # The arm already wears a gripper (a Franka's panda hand). Attach
+        # nothing; the native jaw is `arm.gripper` after Play. This is the
+        # working parallel-jaw path: prismatic fingers, real inertia, no
+        # linkage down-arc, so a top-down pick lifts where a bolted-on 2F does
+        # not and a bolted-on Schunk explodes the articulation.
+        cup = None
+    elif is_suction:
         cup = arm.attach_suction_gripper(
             approach_axis="auto",
             max_grip_distance=(shape["max_grip_distance"] if grip_distance is None else float(grip_distance)),
@@ -632,7 +640,10 @@ def build(
         # joint names on the arm's prim, so this finds them even when the asset
         # names them unhelpfully.
         jaw = arm.rebind_gripper()
-        ee = _JawEE(arm, jaw, str(gripper))
+        # Firm the grip so it survives the traverse; shipped finger gains hold a
+        # vertical lift but drop the box the moment the arm swings sideways.
+        _firm_grip(arm)
+        ee = _JawEE(arm, jaw, "native" if is_native else str(gripper))
         cup = None
     if _is_ur(robot):
         # Arm joints only: a fitted finger jaw has grown the articulation past
@@ -965,6 +976,15 @@ class _SuctionEE:
 #: measurement, which is right when the pads are found and honest when they are
 #: not.
 JAW_GEOMETRY = {
+    # A robot that ships with its own parallel jaw (a Franka's panda hand). Its
+    # fingers are PRISMATIC - they close straight in, no linkage down-arc - so a
+    # top-down pick squeezes the box sides and lifts it, where a 2F linkage
+    # presses it into the deck. Measured on a Franka: opens ~0.08 m total, and a
+    # 0.045 m box lifted 0.187 m via `arm.grasp`, which drives the tool frame TO
+    # the box centre - so a native gripper's IK frame IS the grasp point between
+    # the fingers, and its drop is ~0. A bolted-on jaw's is not, because there
+    # the frame is the arm's flange and the pads hang a real distance below it.
+    "native": {"span": 0.075, "drop": 0.0},
     "2f_85": {"span": 0.085, "drop": 0.155},
     "2f_140": {"span": 0.140, "drop": 0.155},
     "hand_e": {"span": 0.050, "drop": 0.120},
@@ -1114,6 +1134,39 @@ def _ee_of(cell: dict):
     return _SuctionEE(cell["cup"])
 
 
+def _firm_grip(arm, *, stiffness: float = 1.0e4, damping: float = 1.0e2, max_force: float = 500.0) -> list:
+    """Firm up a finger jaw's grip so it holds a box through a lateral traverse.
+
+    `tune_drives` sets gains on the arm's REVOLUTE joints and leaves the gripper
+    alone, so a Franka's prismatic fingers keep their shipped stiffness 400 /
+    maxForce 7 N. Measured, that lifts a 0.2 kg box straight up and then drops
+    it the instant the arm swings sideways to the pallet: the fingers slid from
+    a 0.05 m grip to fully closed on nothing mid-traverse. At 1e4 / 500 N the
+    same box rides the traverse held. Changing gripper gains changes the robot,
+    the same caveat `tune_drives` carries, so it is a deliberate call the cell
+    makes and reports, not a default.
+    """
+    from pxr import Usd, UsdPhysics
+
+    gripper = getattr(arm, "gripper", None)
+    names = set(gripper.joint_names) if gripper is not None and gripper.exists else set()
+    if not names:
+        return []
+    stage = arm.scene.stage
+    root = stage.GetPrimAtPath(arm.prim_path).GetParent()  # fitted jaws are siblings of the arm
+    touched: list = []
+    for prim in Usd.PrimRange(root):
+        if prim.IsA(UsdPhysics.Joint) and prim.GetName() in names:
+            for kind in ("linear", "angular"):
+                drive = UsdPhysics.DriveAPI.Get(prim, kind)
+                if drive and drive.GetStiffnessAttr().HasAuthoredValue():
+                    drive.GetStiffnessAttr().Set(float(stiffness))
+                    drive.GetDampingAttr().Set(float(damping))
+                    drive.GetMaxForceAttr().Set(float(max_force))
+                    touched.append(prim.GetName())
+    return touched
+
+
 def _set_home(arm, home, *, settle_steps: int) -> None:
     """Drive the arm joints to `home`, leaving any fitted gripper alone.
 
@@ -1194,8 +1247,18 @@ def pick_waiting_box(cell: dict) -> dict:
     # its hover point at all while Lula IK drove the same arm to 0.3 mm; and on
     # a UR5e the servo stalled 65 mm out at the edge of reach. `pose_to` either
     # arrives or says so.
+    #
+    # Cap the hover at what the arm can actually reach tool-down over the box. A
+    # UR has reach to spare and hovers the full 0.18 m up; a small arm (a Franka,
+    # 0.85 m) can reach the box but not 0.18 m above it, and a fixed clearance
+    # then fails a pick the arm could make. The ceiling is the highest tool-down
+    # z the solver finds; back off a hair so the hover itself is inside it.
+    grip_z = ee.approach_tool_z(here, size)
+    ceiling = arm.reach_ceiling(here[:2], down, floor=grip_z, limit=grip_z + 0.18)
+    hover_z = grip_z + 0.18 if ceiling is None else min(grip_z + 0.18, float(ceiling) - 0.01)
+    hover_z = max(hover_z, grip_z + 0.06)  # a jaw still needs room to drop around the box
     hover = arm.pose_to(
-        [float(here[0]), float(here[1]), ee.approach_tool_z(here, size) + 0.18],
+        [float(here[0]), float(here[1]), hover_z],
         down,
         corrections=6,
         raise_on_fail=False,
@@ -1217,9 +1280,19 @@ def pick_waiting_box(cell: dict) -> dict:
     # default budget of four this raised mid-lift; with trailing refines it
     # shook the carton loose, and the box came back down to belt height, so the
     # pick reported `rise: -0.0000` and looked like a grasp that never happened.
+    #
+    # Cap the lift at what the arm can reach, like the hover. A UR clears the
+    # full 0.30 m; a small arm (a Franka) that gripped the box cannot then lift
+    # it 0.30 m - the target has no IK, `pose_to` does not move, the box never
+    # leaves the belt, and it drops on the traverse. Lift as high as the arm
+    # reaches, and at least enough to clear the gate.
     here = np.asarray(box.position, dtype=float)
+    lift_grip = ee.approach_tool_z(here, size)
+    lift_ceiling = arm.reach_ceiling(here[:2], down, floor=lift_grip, limit=lift_grip + 0.30)
+    lift_z = lift_grip + 0.30 if lift_ceiling is None else min(lift_grip + 0.30, float(lift_ceiling) - 0.01)
+    lift_z = max(lift_z, lift_grip + 0.10)
     arm.pose_to(
-        [float(here[0]), float(here[1]), ee.approach_tool_z(here, size) + 0.30],
+        [float(here[0]), float(here[1]), lift_z],
         down,
         corrections=8,
         raise_on_fail=False,
@@ -1305,8 +1378,14 @@ def place_on_slot(cell: dict, slot: dict, *, box=None) -> dict:
     final = np.asarray(box.position, dtype=float)
     rest = np.asarray(slot["rest"], dtype=float)
     error = float(np.linalg.norm(final - rest))
+    # A rigid cup holds the carton at a fixed offset and lands it to 0.2 mm; a
+    # friction jaw lets the box settle a little in the grip and between the pads
+    # on release, so its honest placement tolerance is looser. Not a licence to
+    # miss - a jaw that lands a box 0.08 m off is still in the wrong place - but
+    # holding it to the cup's 0.04 m would fail a placement the tool cannot make.
+    tol = 0.08 if str(cell.get("gripper", "suction")) != "suction" else 0.04
     return {
-        "placed": error <= 0.04 and float(box.speed) <= 0.02,
+        "placed": error <= tol and float(box.speed) <= 0.02,
         "slot": slot["index"],
         "box": box.prim_path,
         "error": round(error, 4),
