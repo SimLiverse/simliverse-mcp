@@ -212,6 +212,18 @@ end to end; each one was a failure first.
   solution, which looks nothing like "out of reach". An earlier outer figure
   of 1.90 m came from RMPflow servo failures and measured the policy, not the
   robot.
+- **The annulus has a ceiling, and it drops with distance.** With the tool
+  down, the KR210 on a 0.35 m pedestal can hold a slot 1.77 m out up to
+  z = 0.82 m and one 1.93 m out only up to z = 0.66 m. A traverse at a fixed
+  0.76 m had no IK solution over the far column; `pose_to(raise_on_fail=False)`
+  returned *without moving*, the descent went part-way, and the cup opened
+  0.55 m from the slot — reported as a placement error, which it was not. Ask
+  before committing: `arm.can_reach(pos, DOWN)` solves without moving, and
+  `arm.reach_ceiling(xy, DOWN, floor=release_z)` bisects the highest z the
+  tool can be held down at. `build()` now returns `cell["reach"]` with a
+  ceiling per slot and the unreachable ones named; a third layer on the far
+  column is a layout error, not a cycle that will fail later. Never open the
+  cup after a move whose `MotionResult.reached` is False — check every one.
 - **Route the last centimetres, do not servo them.** RMPflow trades
   orientation against position and settles ~0.165 rad off vertical at the edge
   of reach — enough to set a carton on a corner. The same descent through
@@ -237,6 +249,15 @@ end to end; each one was a failure first.
   nothing and retrying a seal against thin air until the run looked hung --
   nothing was out of reach. `route_to` solves the goal configuration and drives
   to it, base rotation included.
+- **A pose has two wrist solutions; `pose_to` now takes the near one.** a4
+  and a6 turned by pi with a5 negated reach the same tool pose, and Lula
+  returns whichever its seed falls nearest — from a pick configuration that is
+  a coin toss. Three cycles to one slot solved `[.., 0.05, 2.17, 0.03]`, the
+  fourth `[.., 3.08, -2.18, 3.10]`, and the 4.3 rad wrist swing on the way put
+  the carried carton through two already on the pallet and threw one 1.28 m.
+  `command_pose` re-solves from wrist- and base-flipped seeds and keeps the
+  solution with the smallest single-joint move. If you drive joints yourself,
+  compare the solution against the current configuration before applying it.
 - **Seed IK from the arm's current pose, not from a home pose.** Lula returns
   the solution nearest its seed. A HOME seed asks for the configuration nearest
   *home*, so the arm swings out toward home and back on every single move; the
@@ -258,18 +279,38 @@ end to end; each one was a failure first.
 
 ## 6. Robots
 
-| key | reach | note |
-|---|---|---|
-| `ur10` | 1.3 m | the measured cell |
-| `kuka_kr210` | ~2.7 m | 150 kg payload, cuMotion config `Kuka_KR210` |
+`list_robots()` discovers everything under `/Isaac/Robots/<Vendor>/<Model>`:
+nine UR models (`ur3`..`ur30`), about eighty Fanuc (`crx10ia_l`, `lrmate200id*`,
+`m20*`, `r2000ic_210f`...), `kuka_kr210`, Kawasaki `rs007l`..`rs080n`, Denso
+`cobottapro900/1300`, Techman `tm12`, Franka/FR3 and more. Having the asset is
+not the same as being able to drive it Cartesian: `pose_to` and `route_to` need
+an RMPflow/Lula config, and only 21 arms have one. Check
+`describe()["motion_config"]` before promising a cycle.
 
-`HOME` in the demos is six joint angles measured on a UR10. Do not hand it to
-another arm — it is either a shape error or, worse, a silent pose on a
-different kinematic chain.
+| key | reach | Cartesian (`pose_to`) | drive gains | note |
+|---|---|---|---|---|
+| `ur10` | 1.3 m | yes | 1e5 / 1e4 / 1e4 | the measured cell |
+| `ur3`, `ur3e`, `ur5`, `ur5e`, `ur10e`, `ur16e` | 0.5–0.9 m | yes | UR10 values, <3 mm | `ur20`/`ur30` have no config: joint control only |
+| `kuka_kr210` | ~2.7 m | yes | 1e5 / 1e4 / **1e6** | 150 kg payload; at 1e4 the first three joints barely move |
+| `crx10ia_l` (Fanuc) | 1.2 m | yes, but pass `rmp_config="Fanuc_CRX10IAL"` | UR10 values, 0.3 mm | the name matcher misses the `/` in `Fanuc/crx10ia_l` |
+| `r2000ic_210f`, `lrmate200id`, other Fanuc | — | **no** | — | `MotionError: No RMPflow configuration` |
+| Kawasaki, Denso, Techman, Franka, Flexiv | — | yes | untested | RMPflow configs ship for these |
+
+Gains are per robot (`demo.ur10_palletizing.DRIVE_GAINS`), not one global
+default. `HOME` in the demos is six joint angles measured on a UR10. Do not
+hand it to another arm — it is either a shape error or, worse, a silent pose
+on a different kinematic chain.
 
 Motion: prefer `plan_to(...)` + `follow(...)` (cuMotion, collision-aware) for
 long moves, `servo_to` for short refinements. Pass `robot_name=` to `plan_to`
-or cuMotion cannot find a configuration.
+or cuMotion cannot find a configuration — and cuMotion ships configurations
+for `franka` and `ur10` only, so on every other arm the long moves are
+`route_to`/`pose_to` (Lula IK, no collision awareness).
+
+Grippers: `arm.suction` (one cup, `holding`, `gripped_objects`) and `Gripper`
+(parallel jaw, auto-detected from an asset's own finger joints — Franka hand,
+`rs013n_onrobot_rg2`). There is no `attach_gripper` yet: a bare UR, KR210 or
+Fanuc has no jaw to close, only the suction cup you author.
 
 Suction: force limits of 500 (Isaac's tutorial value) break the seal within
 2 mm of any motion. Use `1.0e6`. **Writing any `isaac:*` attribute on a closed

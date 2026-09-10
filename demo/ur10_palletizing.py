@@ -116,6 +116,7 @@ from simliverse_sim import (
     Scene,
     pallet_slots,
     spawn_prop,
+    verify_pallet,
 )
 
 ARM = "/World/UR"
@@ -205,6 +206,21 @@ def cell_geometry(box: float) -> dict:
     }
 
 
+#: Drive gains by robot. One set does not fit every arm: at the UR10's 1e4
+#: force cap the KR210's first three joints barely moved, a home reset landed
+#: 0.1 m from home, and every cycle after the first raised MotionError. At 1e6
+#: the joints converge in about 60 steps and a cycle takes 36 s, not 91. The UR
+#: family and the Fanuc CRX hold to under 3 mm at the UR10 values.
+DRIVE_GAINS = {
+    "default": {"stiffness": 1.0e5, "damping": 1.0e4, "max_force": 1.0e4},
+    "kuka_kr210": {"stiffness": 1.0e5, "damping": 1.0e4, "max_force": 1.0e6},
+}
+
+
+def drive_gains(robot: str) -> dict:
+    return dict(DRIVE_GAINS.get(robot, DRIVE_GAINS["default"]))
+
+
 def build(
     scene: Scene | None = None,
     *,
@@ -267,7 +283,7 @@ def build(
         base_z = plinth["top"]
 
     arm = Robot.spawn(robot, position=[0.0, 0.0, base_z], prim_path=ARM)
-    gains = arm.tune_drives(stiffness=1.0e5, damping=1.0e4, max_force=1.0e4)
+    gains = arm.tune_drives(**drive_gains(robot))
 
     shape = cell_geometry(box)
     gate_height, width, spacing = (shape["gate_height"], shape["width"], shape["spacing"])
@@ -358,7 +374,7 @@ def build(
     # still jostling above the settled-speed threshold for a second or two.
     wait_for_box(belt)
 
-    return {
+    cell = {
         "arm": arm,
         "cup": cup,
         "belt": belt,
@@ -369,25 +385,31 @@ def build(
         "fouled": fouled,
         "pedestal": plinth,
         "base_z": base_z,
-        "spec": {
-            "boxes": boxes,
-            "box": box,
-            "box_mass": box_mass,
-            "deck": deck,
-            "stop_x": stop_x,
-            "offset_y": offset_y,
-            "speed": speed,
-            "pallet_y": pallet_y,
-            "rows": rows,
-            "cols": cols,
-            "layers": layers,
-            "robot": robot,
-            "guides": guides,
-            "grip_distance": grip_distance,
-            "pedestal": pedestal,
-            "dressing": dressing,
-        },
     }
+    # Say now which slots the arm cannot serve with the tool down, rather than
+    # one carton at a time. On a KR210 with the pallet 1.9 m out the far
+    # column's ceiling was 0.664 m; a third layer there is not a cycle that
+    # will fail, it is a cell that was laid out wrong.
+    cell["reach"] = slot_reach(cell)
+    cell["spec"] = {
+        "boxes": boxes,
+        "box": box,
+        "box_mass": box_mass,
+        "deck": deck,
+        "stop_x": stop_x,
+        "offset_y": offset_y,
+        "speed": speed,
+        "pallet_y": pallet_y,
+        "rows": rows,
+        "cols": cols,
+        "layers": layers,
+        "robot": robot,
+        "guides": guides,
+        "grip_distance": grip_distance,
+        "pedestal": pedestal,
+        "dressing": dressing,
+    }
+    return cell
 
 
 def light_the_cell(scene, *, dome: float = 1200.0, key: float = 3000.0) -> list[str]:
@@ -452,12 +474,89 @@ def _box_of(cell: dict) -> float:
     return float(cell.get("box_size", BOX))
 
 
+# A move counts if the tool got within this of where it was sent. Tighter than
+# the 4 cm a placement is judged by, looser than pose_to's 5 mm hold criterion,
+# which a settled arm can miss by a millimetre and still have arrived.
+ARRIVAL = 0.03
+
+
+def _arrived(moved) -> bool:
+    return bool(moved.reached) or float(moved.final_error) <= ARRIVAL
+
+
+def _describe(moved) -> str:
+    if moved.steps == 0:
+        return "no IK solution, arm did not move"
+    return "%.3f m short after %d steps" % (float(moved.final_error), int(moved.steps))
+
+
+#: How far under the reach ceiling a traverse runs. The ceiling is where the
+#: solver stops finding solutions; right at it the drives track badly.
+CEILING_MARGIN = 0.03
+
+
+def travel_height(arm, place, place_z: float, wanted: float) -> float | None:
+    """The traverse height for a slot: `wanted` if the arm can hold the tool
+    down there, otherwise the highest it can, or None if even the release
+    height is out of reach.
+
+    Measured on a KR210 on a 0.35 m pedestal with the pallet 1.9 m out: the
+    tool-down ceiling over the far column is 0.664 m and over the near column
+    0.818 m. A traverse fixed at 0.764 m reached the near slots and none of the
+    far ones.
+    """
+    top = arm.reach_ceiling(place[:2], DOWN, floor=place_z, limit=wanted)
+    if top is None:
+        return None
+    if top >= wanted:
+        return wanted
+    return max(place_z, top - CEILING_MARGIN)
+
+
+def slot_reach(cell: dict) -> dict:
+    """Which slots this cell's arm can serve, before a carton is committed.
+
+    Returns `{"reachable": [...], "unreachable": [...], "ceilings": {...}}`
+    so an unreachable pallet position is reported when the cell is built,
+    not discovered one carton at a time.
+    """
+    arm, cup = cell["arm"], cell["cup"]
+    size = _box_of(cell)
+    reachable, unreachable, ceilings = [], [], {}
+    for slot in cell["slots"]:
+        place = slot["place"]
+        place_z = float(place[2]) + size / 2.0 + cup.tip_offset
+        top = arm.reach_ceiling(place[:2], DOWN, floor=place_z, limit=place_z + 1.0)
+        ceilings[slot["index"]] = None if top is None else round(float(top), 3)
+        (unreachable if top is None else reachable).append(slot["index"])
+    return {"reachable": reachable, "unreachable": unreachable, "ceilings": ceilings}
+
+
 def _home_of(cell: dict) -> list[float]:
     """A parked pose with the right number of joints for this cell's arm."""
     spec = cell.get("spec") or {}
     if spec.get("robot", "ur10") == "ur10":
         return list(HOME)
     return [0.0] * int(cell["arm"].dof)
+
+
+def go_home(cell: dict, *, settle_steps: int = 90) -> None:
+    """Park the arm: lift first, then swing.
+
+    A single joint-space move from over the pallet to home rotates the base
+    while the shoulder and elbow are still folded down at release height, so
+    the forearm sweeps through whatever was just placed. Measured on a KR210,
+    four cartons placed to within 21 mm: at the end of the run one had been
+    pushed 0.45 m along the deck and another was on the floor, both shoved
+    away from the base. Holding the base joint for the first stage sends the
+    arm straight up; the swing happens with the tool high.
+    """
+    arm = cell["arm"]
+    home = list(_home_of(cell))
+    lift = list(home)
+    lift[0] = float(np.asarray(arm.joint_positions, dtype=float)[0])
+    arm.set_joint_positions(lift, settle_steps=settle_steps)
+    arm.set_joint_positions(home, settle_steps=settle_steps)
 
 
 def pick_waiting_box(cell: dict) -> dict:
@@ -478,7 +577,7 @@ def pick_waiting_box(cell: dict) -> dict:
     # the lift. Every pose below comes from a reading taken after the arm has
     # already stopped moving.
     size = _box_of(cell)
-    arm.set_joint_positions(_home_of(cell), settle_steps=90)
+    go_home(cell)
     arm.scene.settle(0.5)
 
     here = np.asarray(box.position, dtype=float)
@@ -619,15 +718,34 @@ def place_on_slot(cell: dict, slot: dict, *, box=None) -> dict:
     # sits half a box plus the cup above it.
     size = _box_of(cell)
     place_z = float(place[2]) + size / 2.0 + cup.tip_offset
-    travel_z = max(float(slot["approach"][2]), 0.55) + cup.tip_offset + size / 2.0
+    wanted = max(float(slot["approach"][2]), 0.55) + cup.tip_offset + size / 2.0
+    travel_z = travel_height(arm, place, place_z, wanted)
+    if travel_z is None:
+        return {
+            "placed": False,
+            "slot": slot["index"],
+            "reason": "slot out of reach with the tool down at %s; move the pallet closer or lower the stack"
+            % np.round([place[0], place[1], place_z], 3).tolist(),
+        }
 
-    arm.pose_to([float(place[0]), float(place[1]), travel_z], DOWN, corrections=8, raise_on_fail=False)
+    # Every move is checked before the cup opens. `pose_to` returns without
+    # moving when the solver finds no solution, and on the KR210 that happened
+    # on the traverse from over the belt: the arm stayed put, the descent then
+    # went partway, and the cup opened wherever it was - 0.55 m off the slot,
+    # reported as a placement error rather than the move failure it was.
+    moved = arm.pose_to([float(place[0]), float(place[1]), travel_z], DOWN, corrections=8, raise_on_fail=False)
     scene.settle(1.0)
     if not (cup.holding and cup.gripped_objects):
         return {"placed": False, "reason": "dropped during traverse"}
+    if not _arrived(moved):
+        return {"placed": False, "reason": "traverse not reached: %s" % _describe(moved)}
 
-    arm.pose_to([float(place[0]), float(place[1]), place_z], DOWN, corrections=8, raise_on_fail=False)
+    moved = arm.pose_to([float(place[0]), float(place[1]), place_z], DOWN, corrections=8, raise_on_fail=False)
     scene.settle(1.0)
+    if not _arrived(moved):
+        # Still holding: go back up rather than let go over the wrong spot.
+        arm.pose_to([float(place[0]), float(place[1]), travel_z], DOWN, corrections=4, raise_on_fail=False)
+        return {"placed": False, "reason": "descent not reached: %s" % _describe(moved)}
 
     cup.open(settle_steps=0)
     for _ in range(12):
@@ -635,7 +753,12 @@ def place_on_slot(cell: dict, slot: dict, *, box=None) -> dict:
         if not cup.holding:
             break
 
-    arm.pose_to([float(place[0]), float(place[1]), place_z + 0.25], DOWN, corrections=8, raise_on_fail=False)
+    # Retreat to a height the solver has already said yes to. `place_z + 0.25`
+    # sits above the far column's 0.661 m ceiling, so the retreat did nothing
+    # there and the joint-space home that followed started with the cup 3 mm
+    # over the carton — and swept it 0.34 m along the deck, turned 43 degrees.
+    retreat_z = min(place_z + 0.25, travel_z)
+    lifted = arm.pose_to([float(place[0]), float(place[1]), retreat_z], DOWN, corrections=8, raise_on_fail=False)
     scene.settle(1.2)
 
     final = np.asarray(box.position, dtype=float)
@@ -649,6 +772,7 @@ def place_on_slot(cell: dict, slot: dict, *, box=None) -> dict:
         "at": final.round(4).tolist(),
         "want": rest.round(4).tolist(),
         "speed": round(float(box.speed), 4),
+        "retreated": _arrived(lifted),
     }
 
 
@@ -665,11 +789,10 @@ def palletise(cell: dict, *, count: int | None = None) -> dict:
     """
     from isaacsim.core.simulation_manager import SimulationManager
 
-    arm, belt, slots = cell["arm"], cell["belt"], cell["slots"]
-    arm.scene
+    belt, slots = cell["belt"], cell["slots"]
     count = len(slots) if count is None else min(int(count), len(slots))
 
-    cycles, placed = [], 0
+    cycles, placed, stacked = [], 0, []
     run_started = float(SimulationManager.get_simulation_time())
 
     for index in range(count):
@@ -703,13 +826,22 @@ def palletise(cell: dict, *, count: int | None = None) -> dict:
         )
         if not ok:
             break
+        stacked.append((slots[index], waiting))
 
     total = float(SimulationManager.get_simulation_time()) - run_started
     times = [c["seconds"] for c in cycles if c.get("ok")]
+    # The stack at the end, not each carton as it landed. Four cartons each
+    # measured within 21 mm on release; by the end of the run one had been
+    # pushed 0.45 m and another was on the floor, and the per-cycle numbers
+    # said nothing. A run is complete when the pallet is, not when the last
+    # cycle was.
+    stack = verify_pallet([box for _, box in stacked], [slot for slot, _ in stacked]) if stacked else None
+    intact = stack["complete"] if stack else False
     return {
         "placed": placed,
         "of": count,
-        "complete": placed == count,
+        "complete": placed == count and intact,
+        "stack": stack,
         "seconds_total": round(total, 2),
         "seconds_per_carton": round(sum(times) / len(times), 2) if times else None,
         "cartons_per_hour": round(3600.0 / (sum(times) / len(times)), 1) if times else None,

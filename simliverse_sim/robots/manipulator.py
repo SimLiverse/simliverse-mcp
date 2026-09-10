@@ -1827,6 +1827,61 @@ class Manipulator(Robot):
         self._solver_index_map = [names.index(n) for n in solver_names]
         return self._solver_index_map
 
+    def can_reach(self, position: Any, orientation: Any = None) -> bool:
+        """Whether a solution exists for this tool pose. Solves only; moves nothing.
+
+        Ask this before planning a cycle rather than after a move fails.
+        Measured on a KR210 on a 0.35 m pedestal: with the tool pointing down,
+        a slot 1.93 m out could be reached at 0.63 m but not at 0.76 m, and a
+        palletising cycle that traversed at a fixed 0.76 m stayed over the belt,
+        descended part-way, and let go 0.55 m from the slot. The solver had said
+        no; nothing had asked it in advance.
+
+        The answer depends on the orientation as much as the point - far and
+        high is fine with the tool horizontal and out of reach with it down.
+        """
+        self._ensure_motion_policy()
+        self._require_solvable()
+        self._sync_base_pose()
+        target = as_vec3(position, name="position")
+        rotation = as_quat(orientation) if orientation is not None else None
+        _, solved = self._ik.compute_inverse_kinematics(
+            np.asarray(target, dtype=float),
+            np.asarray(rotation, dtype=float) if rotation is not None else None,
+        )
+        return bool(solved)
+
+    def reach_ceiling(
+        self,
+        xy: Any,
+        orientation: Any,
+        *,
+        floor: float,
+        limit: float = 2.0,
+        resolution: float = 0.005,
+    ) -> float | None:
+        """Highest z above `xy` the tool can hold `orientation` at, or None.
+
+        None means `floor` itself is out of reach - the point is out of the
+        workspace at that orientation, and no height will help. Bisects between
+        `floor` and `limit`, so a reachable `floor` under an unreachable
+        `limit` is what it assumes; a workspace with a hole in it is not
+        something this will find.
+        """
+        x, y = float(xy[0]), float(xy[1])
+        low, high = float(floor), float(limit)
+        if not self.can_reach([x, y, low], orientation):
+            return None
+        if self.can_reach([x, y, high], orientation):
+            return high
+        while high - low > resolution:
+            mid = (low + high) / 2.0
+            if self.can_reach([x, y, mid], orientation):
+                low = mid
+            else:
+                high = mid
+        return low
+
     def command_pose(
         self,
         position: Any,
@@ -1879,17 +1934,28 @@ class Manipulator(Robot):
                 )
             return False
 
-        self._pose_solution = np.asarray(action.joint_positions, dtype=float)
-        self._pose_command = self._pose_solution.copy()
-        self._pose_goal = np.asarray(target, dtype=float)
-        self._pose_orientation = rotation
-
         # Solving the final pose first is the reachability check: a ramp that
         # walks most of the way and then fails is worse than not starting.
         self._pose_from = self.ee_position.copy()
         self._pose_from_quat = self.ee_orientation
         current = np.asarray(self.joint_positions, dtype=float)
         self._pose_seed = np.asarray([current[i] for i in self._solver_indices()], dtype=float)
+
+        solver = self._ik.get_kinematics_solver()
+        frame = self._end_effector_frame
+        goal = np.asarray(target, dtype=float)
+        quat = np.asarray(rotation, dtype=float) if rotation is not None else None
+
+        def solve(seed: np.ndarray) -> tuple[np.ndarray, bool]:
+            out, ok = solver.compute_inverse_kinematics(frame, goal, quat, warm_start=seed)
+            return np.asarray(out, dtype=float), bool(ok)
+
+        self._pose_solution = self._nearest_branch(
+            solve, np.asarray(action.joint_positions, dtype=float), self._pose_seed
+        )
+        self._pose_command = self._pose_solution.copy()
+        self._pose_goal = goal
+        self._pose_orientation = rotation
         self._pose_ramp = max(0, int(ramp))
         self._pose_phase = 0
         if self._pose_ramp:
@@ -1897,6 +1963,47 @@ class Manipulator(Robot):
         else:
             self._apply_pose_command()
         return True
+
+    @staticmethod
+    def _nearest_branch(solve: Any, solution: np.ndarray, current: np.ndarray) -> np.ndarray:
+        """Of the IK branches the solver will admit, the one nearest the arm.
+
+        A six-axis wrist reaches most poses two ways - a4 and a6 turned by pi
+        with a5 negated - and Lula returns whichever its seed falls nearest.
+        Seeded from a pick configuration whose a4 sits between the two, that is
+        a coin toss. Measured on a KR210 carrying a carton to the same slot four
+        times: three cycles solved `[.., 0.05, 2.17, 0.03]`, the fourth
+        `[.., 3.08, -2.18, 3.10]`, and the 4.3 rad wrist swing on the way there
+        put the tool through two cartons already on the pallet and threw one
+        1.28 m. The base has the same ambiguity at +/-pi.
+
+        `solve(seed)` must return `(joints, ok)`. The choice is by the largest
+        single joint move from `current`, which is what a swing is.
+        """
+        n = int(solution.size)
+        if n < 6 or int(current.size) != n:
+            return solution
+        seeds = []
+        for flip in (np.pi, -np.pi):
+            seed = solution.copy()
+            seed[n - 3] += flip
+            seed[n - 2] = -seed[n - 2]
+            seed[n - 1] += flip
+            seeds.append(seed)
+        for flip in (np.pi, -np.pi):
+            seed = current.copy()
+            seed[0] += flip
+            seeds.append(seed)
+        seeds.append(current.copy())
+        candidates = [solution]
+        for seed in seeds:
+            try:
+                out, ok = solve(seed)
+            except Exception:  # noqa: BLE001 - a seed the solver rejects is not an answer
+                continue
+            if ok and out.size == n:
+                candidates.append(np.asarray(out, dtype=float))
+        return min(candidates, key=lambda c: float(np.max(np.abs(c - current))))
 
     def advance_pose(self) -> bool:
         """Issue the next increment of a ramped move. True once the target is out.

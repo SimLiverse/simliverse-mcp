@@ -122,6 +122,29 @@ def test_vision_look_takes_the_scale_the_docstring_promises() -> None:
     assert "scale" in inspect.signature(vision.look).parameters
 
 
+def test_the_docstring_tells_the_agent_to_ask_before_committing() -> None:
+    """A move with no solution returns without moving; the cup opened anyway."""
+    source = _control_source()
+    for token in ("can_reach", "MotionResult", "verify_pallet", "go_home", "CEILING", "DRIVE_GAINS", "wrist branch"):
+        assert token in source, "run_control never mentions %r" % token
+
+
+def test_the_guide_carries_the_reach_ceiling_and_the_arm_table() -> None:
+    text = GUIDE.read_text(encoding="utf-8")
+    for token in ("reach_ceiling", "0.66", "0.82", "crx10ia_l", "1e6", "motion_config"):
+        assert token in text, "the guide never mentions %r" % token
+
+
+def test_the_reach_api_the_agent_is_told_about_exists() -> None:
+    import demo.ur10_palletizing as demo
+    from simliverse_sim.robots.manipulator import Manipulator
+
+    assert hasattr(Manipulator, "can_reach")
+    assert hasattr(Manipulator, "reach_ceiling")
+    for name in ("go_home", "slot_reach", "drive_gains", "DRIVE_GAINS"):
+        assert hasattr(demo, name), "the docstring advertises %s" % name
+
+
 def test_the_guide_states_the_working_envelope_rather_than_implying_it() -> None:
     """A demo that only says what works has not said what does not."""
     text = GUIDE.read_text(encoding="utf-8")
