@@ -212,13 +212,17 @@ def cell_geometry(box: float) -> dict:
 #: the joints converge in about 60 steps and a cycle takes 36 s, not 91. The UR
 #: family and the Fanuc CRX hold to under 3 mm at the UR10 values.
 DRIVE_GAINS = {
-    "default": {"stiffness": 1.0e5, "damping": 1.0e4, "max_force": 1.0e4},
-    "kuka_kr210": {"stiffness": 1.0e5, "damping": 1.0e4, "max_force": 1.0e6},
+    "ur": {"stiffness": 1.0e5, "damping": 1.0e4, "max_force": 1.0e4},
+    "default": {"stiffness": 1.0e5, "damping": 1.0e4, "max_force": 1.0e6},
 }
 
 
 def drive_gains(robot: str) -> dict:
-    return dict(DRIVE_GAINS.get(robot, DRIVE_GAINS["default"]))
+    """The UR family holds at 1e4. Nothing heavier has: a KR210's first three
+    joints barely moved, and a Fanuc CRX's shoulder sat sagged at -0.82 rad
+    while joints 3-6 tracked their solution to the milliradian - the IK was
+    right and the tool ended 1.24 m from its target."""
+    return dict(DRIVE_GAINS["ur" if _is_ur(robot) else "default"])
 
 
 #: Nominal reach in metres, from the vendors' data sheets. The library records
@@ -252,6 +256,17 @@ REACH = {
 
 #: RMPflow configurations the library cannot match by name on its own.
 RMP_CONFIG = {"crx10ia_l": "Fanuc_CRX10IAL"}
+
+#: Arms that build and drive but do not yet complete a pick, with why. A
+#: sweep should say "known, and here is the reason" rather than print a bare
+#: failure that reads as a regression.
+KNOWN_GAPS = {
+    "crx10ia_l": (
+        "the shoulder housing (chain link 3) reaches ~0.30 m at belt height and "
+        "the 2-link footprint under-measures it, so the base joint jams on the belt; "
+        "the flange tool axis (-Y) is handled but the cell is not yet cleared for it"
+    ),
+}
 
 #: Decks a stack can be built on: the real pallet prop, or a static slab for
 #: loads a small arm can actually span. (length, width, height) in metres.
@@ -299,6 +314,68 @@ def layout_for(robot: str, *, box: float = BOX) -> dict:
         # A big arm cannot fold in to a deck at its own feet; raise the base.
         out["pedestal"] = 0.35
     return out
+
+
+#: Air between the arm's body and anything built beside it.
+CLEARANCE = 0.05
+
+
+def arm_footprint(arm, *, links: int = 2) -> float:
+    """How far the arm's base and shoulder reach out from the base axis.
+
+    The horizontal extent of the first `links` links of the kinematic chain
+    - the base and the shoulder housing, which do not fold away - measured
+    from the base. A UR10 answers about 0.15; a Fanuc CRX-10iA/L about 0.3,
+    and that difference is a shoulder that a belt edge stops.
+
+    Only those links, and only by chain order. Measuring every link low
+    enough to matter took the whole arm on a UR10, whose asset spawns lying
+    flat: the "footprint" was 1.3 m, the belt and pallet were pushed out
+    past it, and every slot came back unreachable.
+    """
+    from simliverse_sim.conveyor import _world_bounds
+
+    base = np.asarray(arm.base_position, dtype=float)[:2]
+    chain = arm.chain_links() if hasattr(arm, "chain_links") else list(arm.links())
+    radius = 0.0
+    for link in chain[: max(1, int(links))]:
+        bounds = _world_bounds(link)
+        if bounds is None:
+            continue
+        low, high = (np.asarray(b, dtype=float) for b in bounds)
+        for x in (low[0], high[0]):
+            for y in (low[1], high[1]):
+                radius = max(radius, float(np.hypot(x - base[0], y - base[1])))
+    return radius
+
+
+def _deck_half_width(pallet: str) -> float:
+    return 0.40 if DECKS.get(pallet) is None else DECKS[pallet][1] / 2.0
+
+
+def clear_offsets(
+    offset_y: float, pallet_y: float, *, width: float, pallet_half_width: float, footprint: float
+) -> tuple[float, float, dict]:
+    """Push the belt and the deck out until their near edges clear `footprint`.
+
+    Returns the (possibly moved) offsets and a record of what moved, so a
+    cell that had to be re-laid says so instead of quietly being a different
+    cell from the one asked for.
+    """
+    need = footprint + CLEARANCE
+    record = {"footprint": round(float(footprint), 3), "moved": {}}
+    belt_edge = abs(float(offset_y)) - float(width) / 2.0
+    if belt_edge < need:
+        sign = -1.0 if float(offset_y) < 0 else 1.0
+        moved = sign * (need + float(width) / 2.0)
+        record["moved"]["offset_y"] = {"from": round(float(offset_y), 3), "to": round(moved, 3)}
+        offset_y = moved
+    deck_edge = float(pallet_y) - float(pallet_half_width)
+    if deck_edge < need:
+        moved = need + float(pallet_half_width)
+        record["moved"]["pallet_y"] = {"from": round(float(pallet_y), 3), "to": round(moved, 3)}
+        pallet_y = moved
+    return round(float(offset_y), 3), round(float(pallet_y), 3), record
 
 
 def build(
@@ -371,6 +448,16 @@ def build(
     shape = cell_geometry(box)
     gate_height, width, spacing = (shape["gate_height"], shape["width"], shape["spacing"])
 
+    # The belt and the deck must clear the arm's own body, not just its base
+    # point. A Fanuc CRX's shoulder housing reaches 0.3 m out at belt height;
+    # with the belt edge 0.23 m from the base axis the base joint stopped at
+    # -43 degrees on every move toward the belt, the IK was right, the drives
+    # were right, and the pick reported "hover not reached: 1.08 m short".
+    footprint = arm_footprint(arm)
+    offset_y, pallet_y, clearance = clear_offsets(
+        offset_y, pallet_y, width=width, pallet_half_width=_deck_half_width(pallet), footprint=footprint
+    )
+
     belt = Conveyor.build(
         BELT,
         length=LENGTH,
@@ -436,8 +523,12 @@ def build(
 
     cup_radius = shape["cup_radius"]
 
+    # "Z" was measured on the UR family and is right there. It is not right
+    # everywhere: a Fanuc CRX flange's tool axis is -Y, and "Z" bolted the cup
+    # on sideways so it descended to 0.2 mm of its target and never sealed.
+    # Every other arm gets the axis measured off its own flange.
     cup = arm.attach_suction_gripper(
-        approach_axis="Z",
+        approach_axis="Z" if _is_ur(robot) else "auto",
         max_grip_distance=(shape["max_grip_distance"] if grip_distance is None else float(grip_distance)),
         cup_radius=cup_radius,
         cup_length=0.04,
@@ -490,6 +581,10 @@ def build(
         "fouled": fouled,
         "pedestal": plinth,
         "base_z": base_z,
+        # The tool-down orientation for *this* flange. DOWN is the UR's; a
+        # Fanuc CRX's tool axis is -Y and needs a different quaternion.
+        "down": list(arm.down_at_yaw(0.0)),
+        "clearance": clearance,
     }
     # Say now which slots the arm cannot serve with the tool down, rather than
     # one carton at a time. On a KR210 with the pallet 1.9 m out the far
@@ -571,6 +666,11 @@ def wait_for_box(belt, *, seconds: float = 12.0, step: float = 0.5):
     return None
 
 
+def _down_of(cell: dict) -> list:
+    """The tool-down quaternion for this cell's flange; DOWN when unrecorded."""
+    return list(cell.get("down") or DOWN)
+
+
 def _box_of(cell: dict) -> float:
     """The carton this cell was actually built with, not the demo's default.
 
@@ -597,12 +697,28 @@ def _describe(moved) -> str:
     return "%.3f m short after %d steps" % (float(moved.final_error), int(moved.steps))
 
 
+#: What an arm in this cell can be stopped by. Named, because "1.08 m short"
+#: says nothing and "1.08 m short, touching /World/Belt" names the layout.
+OBSTACLES = (BELT, "%sGate" % BELT, PALLET, "/World/Pedestal")
+
+
+def _blocked_by(arm) -> str:
+    touching = []
+    for path in OBSTACLES:
+        try:
+            if arm.touching(path):
+                touching.append(path)
+        except Exception:  # noqa: BLE001 - a diagnostic, never the failure
+            continue
+    return (", touching " + " and ".join(touching)) if touching else ""
+
+
 #: How far under the reach ceiling a traverse runs. The ceiling is where the
 #: solver stops finding solutions; right at it the drives track badly.
 CEILING_MARGIN = 0.03
 
 
-def travel_height(arm, place, place_z: float, wanted: float) -> float | None:
+def travel_height(arm, place, place_z: float, wanted: float, down=DOWN) -> float | None:
     """The traverse height for a slot: `wanted` if the arm can hold the tool
     down there, otherwise the highest it can, or None if even the release
     height is out of reach.
@@ -612,7 +728,7 @@ def travel_height(arm, place, place_z: float, wanted: float) -> float | None:
     0.818 m. A traverse fixed at 0.764 m reached the near slots and none of the
     far ones.
     """
-    top = arm.reach_ceiling(place[:2], DOWN, floor=place_z, limit=wanted)
+    top = arm.reach_ceiling(place[:2], down, floor=place_z, limit=wanted)
     if top is None:
         return None
     if top >= wanted:
@@ -628,12 +744,13 @@ def slot_reach(cell: dict) -> dict:
     not discovered one carton at a time.
     """
     arm, cup = cell["arm"], cell["cup"]
+    down = _down_of(cell)
     size = _box_of(cell)
     reachable, unreachable, ceilings = [], [], {}
     for slot in cell["slots"]:
         place = slot["place"]
         place_z = float(place[2]) + size / 2.0 + cup.tip_offset
-        top = arm.reach_ceiling(place[:2], DOWN, floor=place_z, limit=place_z + 1.0)
+        top = arm.reach_ceiling(place[:2], down, floor=place_z, limit=place_z + 1.0)
         ceilings[slot["index"]] = None if top is None else round(float(top), 3)
         (unreachable if top is None else reachable).append(slot["index"])
     return {"reachable": reachable, "unreachable": unreachable, "ceilings": ceilings}
@@ -674,6 +791,7 @@ def go_home(cell: dict, *, settle_steps: int = 90) -> None:
 def pick_waiting_box(cell: dict) -> dict:
     """Seal on the box at the stop and lift it clear. Returns what was measured."""
     arm, cup, belt = cell["arm"], cell["cup"], cell["belt"]
+    down = _down_of(cell)
     box = belt.box_at_gate() or wait_for_box(belt)
     if box is None:
         return {"picked": False, "reason": "no box settled against the stop in 12 s"}
@@ -700,10 +818,13 @@ def pick_waiting_box(cell: dict) -> dict:
     # servo stalled 65 mm out at the edge of reach. `pose_to` either arrives
     # or says so.
     hover = arm.pose_to(
-        [float(here[0]), float(here[1]), box_top + cup.tip_offset + 0.18], DOWN, corrections=6, raise_on_fail=False
+        [float(here[0]), float(here[1]), box_top + cup.tip_offset + 0.18], down, corrections=6, raise_on_fail=False
     )
     if not _arrived(hover):
-        return {"picked": False, "reason": "hover over the carton not reached: %s" % _describe(hover)}
+        return {
+            "picked": False,
+            "reason": "hover over the carton not reached: %s%s" % (_describe(hover), _blocked_by(arm)),
+        }
 
     # Re-read once more now the arm is parked above it, so the descent is
     # centred on the face rather than on where the box used to be.
@@ -760,7 +881,7 @@ def pick_waiting_box(cell: dict) -> dict:
         box_top = float(here[2]) + size / 2.0
         arm.pose_to(
             [float(here[0]), float(here[1]), box_top + cup.tip_offset + STANDOFF - attempt * 0.002],
-            DOWN,
+            down,
             corrections=8,
             raise_on_fail=False,
         )
@@ -800,7 +921,7 @@ def pick_waiting_box(cell: dict) -> dict:
     # down to 0.525 — belt height — so the pick reported `rise: -0.0000` and
     # looked like a grasp that never happened rather than one that let go.
     arm.pose_to(
-        [float(here[0]), float(here[1]), box_top + cup.tip_offset + 0.30], DOWN, corrections=8, raise_on_fail=False
+        [float(here[0]), float(here[1]), box_top + cup.tip_offset + 0.30], down, corrections=8, raise_on_fail=False
     )
     arm.scene.settle(1.2)
 
@@ -828,6 +949,7 @@ def place_on_slot(cell: dict, slot: dict, *, box=None) -> dict:
     clearance below is measured from the pallet deck rather than assumed.
     """
     arm, cup = cell["arm"], cell["cup"]
+    down = _down_of(cell)
     scene = arm.scene
     if not (cup.holding and cup.gripped_objects):
         return {"placed": False, "reason": "nothing held"}
@@ -840,7 +962,7 @@ def place_on_slot(cell: dict, slot: dict, *, box=None) -> dict:
     size = _box_of(cell)
     place_z = float(place[2]) + size / 2.0 + cup.tip_offset
     wanted = max(float(slot["approach"][2]), 0.55) + cup.tip_offset + size / 2.0
-    travel_z = travel_height(arm, place, place_z, wanted)
+    travel_z = travel_height(arm, place, place_z, wanted, down=down)
     if travel_z is None:
         return {
             "placed": False,
@@ -854,18 +976,18 @@ def place_on_slot(cell: dict, slot: dict, *, box=None) -> dict:
     # on the traverse from over the belt: the arm stayed put, the descent then
     # went partway, and the cup opened wherever it was - 0.55 m off the slot,
     # reported as a placement error rather than the move failure it was.
-    moved = arm.pose_to([float(place[0]), float(place[1]), travel_z], DOWN, corrections=8, raise_on_fail=False)
+    moved = arm.pose_to([float(place[0]), float(place[1]), travel_z], down, corrections=8, raise_on_fail=False)
     scene.settle(1.0)
     if not (cup.holding and cup.gripped_objects):
         return {"placed": False, "reason": "dropped during traverse"}
     if not _arrived(moved):
         return {"placed": False, "reason": "traverse not reached: %s" % _describe(moved)}
 
-    moved = arm.pose_to([float(place[0]), float(place[1]), place_z], DOWN, corrections=8, raise_on_fail=False)
+    moved = arm.pose_to([float(place[0]), float(place[1]), place_z], down, corrections=8, raise_on_fail=False)
     scene.settle(1.0)
     if not _arrived(moved):
         # Still holding: go back up rather than let go over the wrong spot.
-        arm.pose_to([float(place[0]), float(place[1]), travel_z], DOWN, corrections=4, raise_on_fail=False)
+        arm.pose_to([float(place[0]), float(place[1]), travel_z], down, corrections=4, raise_on_fail=False)
         return {"placed": False, "reason": "descent not reached: %s" % _describe(moved)}
 
     cup.open(settle_steps=0)
@@ -879,7 +1001,7 @@ def place_on_slot(cell: dict, slot: dict, *, box=None) -> dict:
     # there and the joint-space home that followed started with the cup 3 mm
     # over the carton — and swept it 0.34 m along the deck, turned 43 degrees.
     retreat_z = min(place_z + 0.25, travel_z)
-    lifted = arm.pose_to([float(place[0]), float(place[1]), retreat_z], DOWN, corrections=8, raise_on_fail=False)
+    lifted = arm.pose_to([float(place[0]), float(place[1]), retreat_z], down, corrections=8, raise_on_fail=False)
     scene.settle(1.2)
 
     final = np.asarray(box.position, dtype=float)

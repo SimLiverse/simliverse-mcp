@@ -111,6 +111,8 @@ def sweep(
                     "complete": bool(report_.get("complete")),
                     "intact": int(stack.get("placed", 0)),
                     "unreachable": list((cell.get("reach") or {}).get("unreachable", [])),
+                    "clearance": cell.get("clearance"),
+                    "known_gap": cell_mod.KNOWN_GAPS.get(spec.get("robot") or ""),
                     "s_per_carton": report_.get("seconds_per_carton"),
                     "per_hour": report_.get("cartons_per_hour"),
                     "errors_mm": [
@@ -144,6 +146,8 @@ def report(rows: list[dict[str, Any]]) -> str:
         note = "; ".join(row["why"]) or "ok"
         if row.get("unreachable"):
             note += "; unreachable slots %s" % row["unreachable"]
+        if row.get("known_gap"):
+            note = "KNOWN GAP: " + row["known_gap"]
         lines.append(
             "%-14s %-7s %-7s %-22s %-11s %s"
             % (

@@ -318,12 +318,26 @@ an RMPflow/Lula config, and only 21 arms have one. Check
 | `ur10` | 1.3 m | yes | 1e5 / 1e4 / 1e4 | the measured cell |
 | `ur3`, `ur3e`, `ur5`, `ur5e`, `ur10e`, `ur16e` | 0.5–0.9 m | yes | UR10 values, <3 mm | `ur20`/`ur30` have no config: joint control only |
 | `kuka_kr210` | ~2.7 m | yes | 1e5 / 1e4 / **1e6** | 150 kg payload; at 1e4 the first three joints barely move |
-| `crx10ia_l` (Fanuc) | 1.2 m | yes, but pass `rmp_config="Fanuc_CRX10IAL"` | UR10 values, 0.3 mm | the name matcher misses the `/` in `Fanuc/crx10ia_l` |
+| `crx10ia_l` (Fanuc) | 1.2 m | yes (auto-matched now) | 1e6 | drives and points down (tool axis -Y); pick not yet completing — shoulder clearance is a known gap |
 | `r2000ic_210f`, `lrmate200id`, other Fanuc | — | **no** | — | `MotionError: No RMPflow configuration` |
 | Kawasaki, Denso, Techman, Franka, Flexiv | — | yes | untested | RMPflow configs ship for these |
 
+**Clear the arm's body, not just its base point.** A Fanuc CRX-10iA/L's
+shoulder housing reaches 0.30 m out at belt height; a UR10's about 0.15 m.
+With the belt edge 0.23 m from the base axis the CRX's base joint stopped at
+-43 degrees on every move toward the belt — the IK solution was right, the
+drive caps were right, and the pick reported "hover not reached: 1.08 m
+short". `build()` measures `arm_footprint(arm, below=deck + 0.25)` off the
+link bounds and pushes the belt and the deck out past it (`cell["clearance"]`
+records what moved); a failed move now says what the arm is `touching`. If
+you lay a cell out by hand, keep every edge outside that radius and use
+`capture_view` — the jam was obvious in one render and invisible in a page
+of joint numbers.
+
 Gains are per robot (`demo.ur10_palletizing.DRIVE_GAINS`), not one global
-default. Lay the cell out to the arm, not the arm into the UR10's cell:
+default: the UR family holds at `max_force=1e4`, everything heavier needs
+`1e6` (a CRX's shoulder sat sagged at -0.82 rad at 1e4 while joints 3-6
+tracked to the milliradian). Lay the cell out to the arm, not the arm into the UR10's cell:
 `layout_for("ur5e")` scales the pick point, belt height and stack to the
 arm's reach and swaps the 1.21 m pallet for a tote a small arm can span —
 `build(**layout_for(robot))`. The pallet is the constraint: 0.80 m wide and

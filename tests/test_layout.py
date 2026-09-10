@@ -69,6 +69,27 @@ def test_robot_scenarios_name_each_arm():
     assert names == ["ur10", "ur5e"]
 
 
+def test_a_slim_arm_keeps_the_cell_it_was_given():
+    offset, pallet, record = demo.clear_offsets(-0.398, 0.78, width=0.40, pallet_half_width=0.40, footprint=0.14)
+    assert (offset, pallet) == (-0.398, 0.78)
+    assert record["moved"] == {}
+
+
+def test_a_wide_shoulder_pushes_the_belt_and_the_deck_out():
+    """The CRX numbers: 0.30 m of shoulder against a belt edge at 0.234 m."""
+    offset, pallet, record = demo.clear_offsets(-0.434, 0.45, width=0.40, pallet_half_width=0.40, footprint=0.30)
+    assert abs(offset) - 0.20 >= 0.30 + demo.CLEARANCE - 1e-9
+    assert offset < 0, "the belt stays on the side it was drawn"
+    assert pallet - 0.40 >= 0.30 + demo.CLEARANCE - 1e-9
+    assert set(record["moved"]) == {"offset_y", "pallet_y"}
+    assert record["footprint"] == 0.3
+
+
+def test_deck_half_widths_follow_the_deck():
+    assert demo._deck_half_width("pallet") == 0.40
+    assert demo._deck_half_width("tote") == 0.20
+
+
 SUPPORTED = ["Fanuc_CRX10IAL", "UR3", "UR30", "UR10e", "Kuka_KR210", "Franka", "FrankaFR3"]
 
 

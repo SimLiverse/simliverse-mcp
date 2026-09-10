@@ -193,6 +193,49 @@ def _match_motion_config(supported: Any, joints: str, asset: str, leaf: str) -> 
     return None
 
 
+def down_quaternion(approach_axis: str, yaw_degrees: float = 0.0) -> list:
+    """(w, x, y, z) that sends the tool's `approach_axis` to world -Z, yawed.
+
+    `approach_axis` is a signed tool axis name: "Z", "-Y", "X"... The tool is
+    first turned so that axis points at the floor, then yawed about world Z.
+    For "Z" this is `qz(yaw) * qx(pi)` and for "X" `qz(yaw) * qy(pi/2)`, the
+    two cases that used to be written out by hand.
+    """
+    import math
+
+    name = str(approach_axis).upper().strip()
+    sign = -1.0 if name.startswith("-") else 1.0
+    letter = name.lstrip("+-")
+    if letter not in ("X", "Y", "Z"):
+        raise ValueError("approach_axis must be a signed X, Y or Z, not %r" % (approach_axis,))
+    axis = np.zeros(3)
+    axis["XYZ".index(letter)] = sign
+    target = np.array([0.0, 0.0, -1.0])
+
+    cosine = float(np.dot(axis, target))
+    if cosine > 1.0 - 1e-9:
+        align = np.array([1.0, 0.0, 0.0, 0.0])
+    elif cosine < -1.0 + 1e-9:
+        # Tool +Z: half a turn about X, the convention every down pose used.
+        align = np.array([0.0, 1.0, 0.0, 0.0])
+    else:
+        cross = np.cross(axis, target)
+        s = math.sqrt((1.0 + cosine) * 2.0)
+        align = np.array([s / 2.0, cross[0] / s, cross[1] / s, cross[2] / s])
+
+    half = math.radians(float(yaw_degrees)) / 2.0
+    yaw = np.array([math.cos(half), 0.0, 0.0, math.sin(half)])
+    w1, x1, y1, z1 = yaw
+    w2, x2, y2, z2 = align
+    out = [
+        w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
+        w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+        w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
+        w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
+    ]
+    return [float(v) for v in out]
+
+
 class Gripper:
     """Finger joints that open and close together.
 
@@ -1420,7 +1463,57 @@ class Manipulator(Robot):
                     return link
         if not links:
             raise MotionError(f"{self.prim_path} reports no links, so there is nothing to mount a gripper on.")
-        return links[-1]
+        # The end of the kinematic chain, not the last prim on the stage. Those
+        # agree on most assets and not on the UR16e, whose `base_link` is
+        # authored last: the cup was bolted to the base, the arm reached every
+        # pose to 0.1 mm, and the cup never met a carton.
+        leaf = self._chain_leaf(links)
+        return leaf or links[-1]
+
+    def _chain_leaf(self, links: list[str]) -> str | None:
+        """The deepest link reached by following joints from the root."""
+        chain = self.chain_links(links)
+        return chain[-1] if chain else None
+
+    def chain_links(self, links: list[str] | None = None) -> list[str]:
+        """The arm's links in kinematic order, root first, longest chain.
+
+        Stage order is authoring order and means nothing: a UR16e lists its
+        `base_link` last. Following joint body0 -> body1 from the root gives
+        the order a robot actually has, which is what "the first two links"
+        (the base and the shoulder housing) or "the last link" (the flange)
+        refer to.
+        """
+        from pxr import Usd, UsdPhysics
+
+        links = [str(link) for link in (links if links is not None else self.links())]
+        stage = get_stage()
+        root = stage.GetPrimAtPath(self.prim_path)
+        known = set(links)
+        parent_of: dict[str, str] = {}
+        for prim in Usd.PrimRange(root):
+            if not prim.IsA(UsdPhysics.Joint):
+                continue
+            joint = UsdPhysics.Joint(prim)
+            body0 = [str(t) for t in joint.GetBody0Rel().GetTargets()]
+            body1 = [str(t) for t in joint.GetBody1Rel().GetTargets()]
+            if body0 and body1 and body0[0] in known and body1[0] in known and body1[0] != body0[0]:
+                parent_of.setdefault(body1[0], body0[0])
+        if not parent_of:
+            return []
+        parents = set(parent_of.values())
+        leaves = [child for child in parent_of if child not in parents]
+
+        def lineage(link: str) -> list[str]:
+            out, seen = [link], {link}
+            while link in parent_of and parent_of[link] not in seen:
+                link = parent_of[link]
+                seen.add(link)
+                out.append(link)
+            return out[::-1]
+
+        best = max((lineage(leaf) for leaf in leaves), key=len, default=[])
+        return best
 
     def _approach_axis(self, tool_link: str) -> str:
         """Which of `tool_link`'s own axes points away from the arm.
@@ -1915,8 +2008,11 @@ class Manipulator(Robot):
         28 m. Warm-started, consecutive solutions differ by about 0.07 rad for a
         10 cm step, and the arm simply travels.
         """
-        self._require_solvable()
+        # Build the solver before asking whether there is one. The other way
+        # round, `pose_to` on a freshly attached arm raised "no inverse-
+        # kinematics solver" unless some earlier call had happened to build it.
         self._ensure_motion_policy()
+        self._require_solvable()
         self._sync_base_pose()
         target = as_vec3(position, name="position")
         rotation = as_quat(orientation) if orientation is not None else None
@@ -2291,15 +2387,12 @@ class Manipulator(Robot):
         * Approach along **X**: `qz(yaw) * qy(pi/2)` sends tool X to world -Z,
           which is what puts a KR210's flange plate face-down with the tool
           hanging off it, rather than the plate on edge.
+        * Any other signed axis the same way. A Fanuc CRX's tool axis is -Y,
+          and until this was general it fell through to the Z case: the cup
+          was mounted right, the arm arrived to 0.2 mm, and the cup pointed
+          at the wall.
         """
-        import math
-
-        half = math.radians(float(yaw_degrees)) / 2.0
-        axis = self.approach_axis.upper().lstrip("-")
-        if axis == "X":
-            root = math.sqrt(0.5)
-            return [root * math.cos(half), -root * math.sin(half), root * math.cos(half), root * math.sin(half)]
-        return [0.0, math.cos(half), math.sin(half), 0.0]
+        return down_quaternion(self.approach_axis, yaw_degrees)
 
     def downward_orientation(self, target: Any) -> list:
         """A tool-down orientation whose yaw faces the reach, as (w, x, y, z).

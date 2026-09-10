@@ -186,7 +186,7 @@ def test_homing_lifts_before_it_swings():
 
 @pytest.mark.parametrize(
     "robot,max_force",
-    [("ur10", 1.0e4), ("ur5e", 1.0e4), ("kuka_kr210", 1.0e6)],
+    [("ur10", 1.0e4), ("ur5e", 1.0e4), ("ur16e", 1.0e4), ("kuka_kr210", 1.0e6), ("crx10ia_l", 1.0e6)],
 )
 def test_drive_gains_are_per_robot(robot, max_force):
     assert demo.drive_gains(robot)["max_force"] == max_force

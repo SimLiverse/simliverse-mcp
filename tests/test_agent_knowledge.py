@@ -131,7 +131,7 @@ def test_the_docstring_tells_the_agent_to_ask_before_committing() -> None:
 
 def test_the_guide_carries_the_reach_ceiling_and_the_arm_table() -> None:
     text = GUIDE.read_text(encoding="utf-8")
-    for token in ("reach_ceiling", "0.66", "0.82", "crx10ia_l", "1e6", "motion_config"):
+    for token in ("reach_ceiling", "0.66", "0.82", "crx10ia_l", "1e6", "motion_config", "arm_footprint", "touching"):
         assert token in text, "the guide never mentions %r" % token
 
 
