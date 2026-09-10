@@ -1357,20 +1357,25 @@ def place_on_slot(cell: dict, slot: dict, *, box=None) -> dict:
     if box is None:
         box = cell["belt"].boxes[0]
 
-    # Land the carton SQUARE. A cup carries whatever yaw the box drifted to on
-    # the belt; the box is rigid on the tool, so rotating the wrist by that yaw
-    # before release turns it back onto the slot's angle. Falls back to a plain
-    # tool-down when nothing measured the pick yaw (an old cell, or a direct
-    # call), which is the previous behaviour.
-    delta = _square_delta(cell.get("pick_box_yaw", 0.0), slot)
-    down = arm.down_at_yaw(delta) if "pick_box_yaw" in cell else _down_of(cell)
-
     place = slot["place"]
     # Release height: `place` is where the carton's centre goes, so the tool
     # sits a hold-offset above it - half a box plus a cup for suction, or the
     # pad plane for a jaw, which is the box centre itself.
     size = _box_of(cell)
     place_z = float(place[2]) + ee.hold_center_offset(size)
+
+    # Land the carton SQUARE - but only under a CUP. A cup grips the top face
+    # and does nothing to the box's yaw, so a carton that drifted askew on the
+    # belt lands askew (a UR16e stacked one 11 deg off); the box is rigid on the
+    # cup, so carrying the whole descent at a corrected wrist yaw turns it back
+    # onto the slot's angle while it is still in the air, where friction on the
+    # stack cannot resist it. A finger JAW grips the box between its pads, so it
+    # is already aligned to the tool and lands square with no turn - and turning
+    # a small arm's wrist at full stretch only costs it reach and shakes the box
+    # loose. Cups here run on big-reach arms, so the yaw never strands the place.
+    down = _down_of(cell)
+    if "pick_box_yaw" in cell and str(cell.get("gripper", "suction")) == "suction":
+        down = arm.down_at_yaw(_square_delta(cell["pick_box_yaw"], slot))
     wanted = max(float(slot["approach"][2]), 0.55) + ee.hold_center_offset(size)
     travel_z = travel_height(arm, place, place_z, wanted, down=down)
     if travel_z is None:
