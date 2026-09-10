@@ -80,6 +80,14 @@ def test_the_guide_covers_sketch_building_and_dressing_orientation() -> None:
         assert token in text, "the guide never mentions %r" % token
 
 
+def test_the_guide_covers_the_incline_belt() -> None:
+    """A pitched belt drives its surface up-slope in local space; the friction
+    rule and the local-space caveat are both things the agent cannot guess."""
+    text = GUIDE.read_text(encoding="utf-8")
+    for token in ("pitch=", "tan(pitch)", "local space", "ride UP"):
+        assert token in text, "the guide never mentions %r" % token
+
+
 def test_the_agent_is_told_to_look_at_more_than_one_view() -> None:
     source = _control_source()
     assert "vision.look" in source

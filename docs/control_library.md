@@ -179,6 +179,17 @@ belt = Conveyor.build(
   surface under it started moving. `start()` nudges every tracked body; without
   it the trace reads "no carton settled at the stop" while
   `surfaceVelocityEnabled` is `True` and the cartons sit at v=0.
+- **`pitch=` (degrees) tilts the belt so cartons ride UP to the stop.**
+  Measured live: a 1 kg carton climbed 10-25 deg and settled against the
+  raised stop, driven by a surface velocity along the slope (local space, not
+  horizontal — otherwise it drives the carton into the deck). The deck
+  friction must exceed `tan(pitch)` or it slides back; `build()` warns when it
+  does not, and 0.9 is comfortable to ~25 deg. `position[2]` stays the deck at
+  the belt centre, so a pitched belt pivots about its middle; the stop, the
+  guides and the loaded cartons all tilt and rise with it, and `box_at_gate`
+  measures the rest height at each carton's own point on the slope. Only
+  `Conveyor.build` inclines; a `from_prop` ramp asset (A25/A37/...) is a
+  separate, un-driven path.
 - **Cartons accumulate against the stop**, so the next one is touching the one
   being picked. Keep `max_grip_distance` well under the carton size or the cup
   seals on the neighbour.
@@ -287,11 +298,17 @@ all come back empty — say so rather than spawning a grey cylinder.
 ```python
 from simliverse_sim import Cable, verify_cable
 
-cable = Cable.build("/World/Dress", start=[0, 0, 1.5], end=[2, 0, 1.5],
-                    slack=0.10, radius=0.012,
-                    anchor_start="", anchor_end="/World/KUKA/link_6")
+cable = Cable.build(
+    "/World/Dress",
+    start=[0, 0, 1.5],
+    end=[2, 0, 1.5],
+    slack=0.10,
+    radius=0.012,
+    anchor_start="",
+    anchor_end="/World/KUKA/link_6",
+)
 scene.settle(2.0)
-print(verify_cable(cable))     # ends on their anchors, sag, settled
+print(verify_cable(cable))  # ends on their anchors, sag, settled
 ```
 
 A chain of capsules on spherical joints, laid along a parabola with the
