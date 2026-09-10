@@ -336,6 +336,7 @@ class Gripper:
         self.joint_indices = joint_indices
         self._open_value: float | None = None
         self._closed_value: float | None = None
+        self._tip_offset: float | None = None
 
     def __repr__(self) -> str:
         return f"<Gripper {len(self.joint_indices)} joints: {self.joint_names}>"
@@ -487,6 +488,53 @@ class Gripper:
     @property
     def open_width(self) -> float:
         return self._limits()[0]
+
+    def pad_center(self) -> "np.ndarray | None":
+        """World position of the point midway between the two pads, or None.
+
+        This is where a grasped object's centre ends up: a jaw grips a box by
+        its sides, so the box centre sits between the pads rather than below a
+        tip. `None` when the two pads cannot be found, in which case there is
+        nothing to measure against and the caller must fall back.
+        """
+        from pxr import UsdGeom
+
+        pads = self._pad_links()
+        if len(pads) < 2:
+            return None
+        stage = get_stage()
+        points = []
+        for path in pads:
+            matrix = UsdGeom.Xformable(stage.GetPrimAtPath(path)).ComputeLocalToWorldTransform(0)
+            points.append(np.array([float(v) for v in matrix.ExtractTranslation()]))
+        return np.mean(points, axis=0)
+
+    @property
+    def tip_offset(self) -> float:
+        """Distance from the flange tool origin down to the pad plane.
+
+        A suction cup's `tip_offset` is how far the cup tip sits past the mount
+        frame; a jaw's is how far the pads sit past it. Naming them the same is
+        what lets pick-and-place command either end effector without branching:
+        the tool goes to a datum a `tip_offset` above where the grip happens.
+
+        Measured from the pads and cached. A jaw whose pads cannot be found
+        falls back to 0.155 m -- the 2F-85's measured pad drop -- and says so,
+        because guessing zero would drive the flange onto the box.
+        """
+        if self._tip_offset is None:
+            center = self.pad_center()
+            if center is None:
+                logger.warning(
+                    "%s: could not find two pads to measure the grip offset; "
+                    "assuming 0.155 m (a 2F-85). If this jaw is longer or "
+                    "shorter, picks will aim high or low by the difference.",
+                    self._robot.prim_path,
+                )
+                self._tip_offset = 0.155
+            else:
+                self._tip_offset = float(np.linalg.norm(np.asarray(self._robot.ee_position) - center))
+        return self._tip_offset
 
     def _assert_can_grip(self) -> None:
         """Refuse to command fingers whose drives cannot exert force.

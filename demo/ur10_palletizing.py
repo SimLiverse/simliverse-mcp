@@ -440,6 +440,7 @@ def build(
     dressing: str | None = None,
     pallet: str = "pallet",
     rmp_config: str | None = None,
+    gripper: str = "suction",
 ) -> dict:
     """Author the cell and leave it playing with a box waiting at the stop.
 
@@ -575,20 +576,30 @@ def build(
     # MEASURED axis down, so "auto" gives both a down-facing cup and a flange
     # that stands vertical over the carton - measured, wrist_3 Z is [0,0,-1]
     # with the axis (correct look), and [1,0,0] with "Z" (flange on its side).
-    cup = arm.attach_suction_gripper(
-        approach_axis="auto",
-        max_grip_distance=(shape["max_grip_distance"] if grip_distance is None else float(grip_distance)),
-        cup_radius=cup_radius,
-        cup_length=0.04,
-        # 1e6, not the 500 taken from Isaac's tutorial. At 500 the seal forms
-        # and breaks within 2 mm of the first commanded motion, whatever that
-        # motion is. Whatever these units are, they are not newtons holding a
-        # 1 kg carton: at 1e6 the same carton rides through a 0.28 m lift with
-        # `gripped 1` at every step.
-        coaxial_force_limit=1.0e6,
-        shear_force_limit=1.0e6,
-        retry_interval=0.1,
-    )
+    is_suction = str(gripper).lower() in ("suction", "cup", "vacuum")
+    if is_suction:
+        cup = arm.attach_suction_gripper(
+            approach_axis="auto",
+            max_grip_distance=(shape["max_grip_distance"] if grip_distance is None else float(grip_distance)),
+            cup_radius=cup_radius,
+            cup_length=0.04,
+            # 1e6, not the 500 taken from Isaac's tutorial. At 500 the seal forms
+            # and breaks within 2 mm of the first commanded motion, whatever that
+            # motion is. Whatever these units are, they are not newtons holding a
+            # 1 kg carton: at 1e6 the same carton rides through a 0.28 m lift with
+            # `gripped 1` at every step.
+            coaxial_force_limit=1.0e6,
+            shear_force_limit=1.0e6,
+            retry_interval=0.1,
+        )
+    else:
+        # A finger jaw grips by squeezing the sides, so it takes only parcels
+        # narrower than it opens - a 2F-85 opens 85 mm and will not touch a
+        # 150 mm carton. `attach_gripper` stops the timeline (it changes the
+        # articulation) and points the fingers down the flange's measured tool
+        # axis, the same axis the cup uses.
+        arm.attach_gripper(gripper)
+        cup = None
     described = belt.describe()
 
     scene.play()
@@ -601,7 +612,17 @@ def build(
     # its own: the Fanuc came back "No RMPflow configuration matches" with
     # Fanuc_CRX10IAL in the list it printed.
     arm = Robot.attach(ARM, scene=scene, **spawn_kwargs)
-    cup = arm.rebind_suction()
+    if is_suction:
+        cup = arm.rebind_suction()
+        ee = _SuctionEE(cup)
+    else:
+        # Play rebuilt the articulation with the jaw's joints in it; rebind so
+        # `open()`/`close()` find them. `attach_gripper` recorded the jaw's own
+        # joint names on the arm's prim, so this finds them even when the asset
+        # names them unhelpfully.
+        jaw = arm.rebind_gripper()
+        ee = _JawEE(arm, jaw, str(gripper))
+        cup = None
     if _is_ur(robot):
         arm.set_joint_positions(HOME, settle_steps=120)
     else:
@@ -621,6 +642,8 @@ def build(
     cell = {
         "arm": arm,
         "cup": cup,
+        "ee": ee,
+        "gripper": "suction" if is_suction else str(gripper),
         "belt": belt,
         "slots": slots,
         "gains": gains,
@@ -659,6 +682,7 @@ def build(
         "dressing": dressing,
         "pallet": pallet,
         "rmp_config": rmp_config,
+        "gripper": "suction" if is_suction else str(gripper),
     }
     return cell
 
@@ -792,13 +816,13 @@ def slot_reach(cell: dict) -> dict:
     so an unreachable pallet position is reported when the cell is built,
     not discovered one carton at a time.
     """
-    arm, cup = cell["arm"], cell["cup"]
+    arm, ee = cell["arm"], _ee_of(cell)
     down = _down_of(cell)
     size = _box_of(cell)
     reachable, unreachable, ceilings = [], [], {}
     for slot in cell["slots"]:
         place = slot["place"]
-        place_z = float(place[2]) + size / 2.0 + cup.tip_offset
+        place_z = float(place[2]) + ee.hold_center_offset(size)
         top = arm.reach_ceiling(place[:2], down, floor=place_z, limit=place_z + 1.0)
         ceilings[slot["index"]] = None if top is None else round(float(top), 3)
         (unreachable if top is None else reachable).append(slot["index"])
@@ -816,6 +840,196 @@ def _home_of(cell: dict) -> list[float]:
 def _is_ur(robot: str) -> bool:
     """The whole UR family shares the UR10's kinematic chain, so HOME fits."""
     return str(robot).lower().startswith("ur")
+
+
+# ---------------------------------------------------------------------------
+# End effectors. A palletising cell grips one of two ways and the cycle should
+# not care which: a suction cup latches onto the top FACE of a carton, a finger
+# jaw closes on its SIDES. The geometry differs (the box hangs below a cup; it
+# sits between pads) and so does verification (a cup reports a seal; a jaw is
+# checked from contact forces), but "approach, grip, is it held, let go" is one
+# interface. `pick_waiting_box` and `place_on_slot` talk to that interface, so
+# `build(gripper="2f_85")` runs the same loop as `build()` on a different tool.
+#
+# The physics that the agent cannot guess and must be told: a jaw can only hold
+# a box narrower than it opens. A 2F-85 opens 85 mm, so it palletises small
+# parcels, not the 150-300 mm cartons a suction cell handles. That is not a
+# tuning limit to push past - it is what the tool is. `fits()` says so up front
+# rather than letting a too-wide box wedge the jaw open and read as bad control.
+# ---------------------------------------------------------------------------
+
+
+class _SuctionEE:
+    """Suction cup: grips the carton's top face. Wraps the existing cup so the
+    proven descend-and-seal path is unchanged, only routed through one door."""
+
+    kind = "suction"
+
+    def __init__(self, cup):
+        self.cup = cup
+
+    @property
+    def tip_offset(self) -> float:
+        return self.cup.tip_offset
+
+    def approach_tool_z(self, here, size: float) -> float:
+        """World z to send the flange for the grab: cup tip on the top face."""
+        return float(here[2]) + size / 2.0 + self.cup.tip_offset
+
+    def hold_center_offset(self, size: float) -> float:
+        """Flange to held-box centre: half a box below the cup tip."""
+        return size / 2.0 + self.cup.tip_offset
+
+    def fits(self, size: float):
+        """A cup grips a top face; carton width does not gate it here."""
+        return True, ""
+
+    def holding(self) -> bool:
+        return bool(self.cup.holding and self.cup.gripped_objects)
+
+    def held(self) -> list:
+        return list(self.cup.gripped_objects)
+
+    def release(self, scene) -> None:
+        self.cup.open(settle_steps=0)
+        for _ in range(12):
+            scene.settle(0.3)
+            if not self.cup.holding:
+                break
+
+    def secure(self, arm, box, size: float, down) -> bool:
+        """Descend until the cup seals, re-reading the carton each attempt.
+
+        This is the measured suction pick, moved here verbatim: 30/20/12 mm
+        never seal and 6 mm does, so a single fixed standoff is a knife edge;
+        it steps down 2 mm at a time, closes, and requires a NAMED gripped
+        object (a cup reaches "Closed" transiently on nothing). Re-reading
+        every attempt keeps it from chasing a carton it has nudged.
+        """
+        cup = self.cup
+        for attempt in range(10):
+            here = np.asarray(box.position, dtype=float)
+            box_top = float(here[2]) + size / 2.0
+            arm.pose_to(
+                [float(here[0]), float(here[1]), box_top + cup.tip_offset + STANDOFF - attempt * 0.002],
+                down,
+                corrections=8,
+                raise_on_fail=False,
+            )
+            arm.scene.settle(0.6)
+            cup.close(settle_steps=0)
+            for _ in range(8):
+                arm.scene.settle(0.25)
+                if cup.holding and cup.gripped_objects:
+                    break
+            if cup.holding and cup.gripped_objects:
+                return True
+            cup.open(settle_steps=0)
+            arm.scene.settle(0.2)
+        return False
+
+    def secure_failed(self) -> str:
+        return f"cup did not seal after 10 descents (status {self.cup.status})"
+
+
+class _JawEE:
+    """Finger jaw: closes on the carton's sides. Verified from contact forces,
+    because a friction pinch has no seal to report and a jaw pushed open by a
+    too-wide box reads exactly like bad control unless something checks."""
+
+    def __init__(self, arm, jaw, key: str):
+        self.arm = arm
+        self.jaw = jaw
+        self.kind = key
+        self._box = None
+
+    @property
+    def tip_offset(self) -> float:
+        return self.jaw.tip_offset
+
+    def approach_tool_z(self, here, size: float) -> float:
+        """World z to send the flange: pads straddling the box centre."""
+        return float(here[2]) + self.jaw.tip_offset
+
+    def hold_center_offset(self, size: float) -> float:
+        """Flange to held-box centre: the pad plane, which is the box centre."""
+        return self.jaw.tip_offset
+
+    def fits(self, size: float):
+        """True only if the jaw opens wider than the box, with margin.
+
+        The margin is 8 mm: the pads need room to drop around the box without
+        clipping it, and the drive needs travel left to squeeze. A 2F-85 opens
+        about 85 mm, so it takes a parcel up to ~70 mm and refuses a carton.
+        """
+        try:
+            span = float(self.jaw.open_width)
+        except Exception:  # noqa: BLE001 - unmeasurable width is not a grip promise
+            return False, "jaw opening could not be measured"
+        if size + 0.008 <= span:
+            return True, ""
+        return False, "box is %.0f mm across; the jaw opens %.0f mm" % (size * 1000.0, span * 1000.0)
+
+    def holding(self) -> bool:
+        return bool(self._box is not None and self.arm.is_grasping(self._box))
+
+    def held(self) -> list:
+        return [self._box.prim_path] if self.holding() else []
+
+    def release(self, scene) -> None:
+        self.jaw.open(settle_steps=0)
+        for _ in range(12):
+            scene.settle(0.3)
+            if not self.holding():
+                break
+
+    def secure(self, arm, box, size: float, down) -> bool:
+        """Open, drop the pads around the box, close, and verify the grasp.
+
+        Unlike a cup, a jaw must open BEFORE it descends or the pads land on
+        the box top and shove it; and it grips the sides, so the pad plane goes
+        to the box centre, not its face. The grasp is confirmed from contact,
+        after a settle under gravity, so a jaw that closed on air or on one
+        corner is not mistaken for a hold.
+        """
+        self._box = box
+        self.jaw.open(settle_steps=30)
+        here = np.asarray(box.position, dtype=float)
+        # Straddle from just above, then settle onto the box centre. Descending
+        # with the pads already at centre height can catch the near face; a
+        # short hop down lets them clear the top edge first.
+        arm.pose_to(
+            [float(here[0]), float(here[1]), self.approach_tool_z(here, size) + 0.04],
+            down,
+            corrections=8,
+            raise_on_fail=False,
+        )
+        arm.scene.settle(0.4)
+        here = np.asarray(box.position, dtype=float)
+        arm.pose_to(
+            [float(here[0]), float(here[1]), self.approach_tool_z(here, size)],
+            down,
+            corrections=8,
+            raise_on_fail=False,
+        )
+        arm.scene.settle(0.5)
+        self.jaw.close(settle_steps=45)
+        for _ in range(8):
+            arm.scene.settle(0.25)
+            if self.holding():
+                return True
+        return self.holding()
+
+    def secure_failed(self) -> str:
+        return "jaw did not grip (closed to %.3f, pads never carried the box)" % self.jaw.position
+
+
+def _ee_of(cell: dict):
+    """This cell's end effector. Old cells carry only a cup; wrap it."""
+    ee = cell.get("ee")
+    if ee is not None:
+        return ee
+    return _SuctionEE(cell["cup"])
 
 
 def go_home(cell: dict, *, settle_steps: int = 90) -> None:
@@ -838,8 +1052,17 @@ def go_home(cell: dict, *, settle_steps: int = 90) -> None:
 
 
 def pick_waiting_box(cell: dict) -> dict:
-    """Seal on the box at the stop and lift it clear. Returns what was measured."""
-    arm, cup, belt = cell["arm"], cell["cup"], cell["belt"]
+    """Grip the box at the stop and lift it clear. Returns what was measured.
+
+    Gripper-agnostic: the shared skeleton (home, hover, lift, measure) is here;
+    the grab itself is `ee.secure`, which is a cup descending until it seals or
+    a jaw closing on the sides. Every pose below comes from a reading taken
+    after the arm has stopped moving, because a carton keeps settling while the
+    arm swings across and a 15 cm box only has to drift 3 cm for the tool to
+    land on an edge instead of the middle.
+    """
+    arm, belt = cell["arm"], cell["belt"]
+    ee = _ee_of(cell)
     down = _down_of(cell)
     box = belt.box_at_gate() or wait_for_box(belt)
     if box is None:
@@ -848,26 +1071,29 @@ def pick_waiting_box(cell: dict) -> dict:
     start = np.asarray(box.position, dtype=float).copy()
     belt.halt()
 
-    # Home first, then read the box. Reading it before homing and descending to
-    # that reading is how the cup ends up on a corner: the box keeps settling
-    # while the arm swings across, and a 15 cm box only has to drift 3 cm for
-    # the cup to land on its top-back edge instead of the middle of its face.
-    # Measured that way, the box was grabbed by a corner and swung 3.4 cm during
-    # the lift. Every pose below comes from a reading taken after the arm has
-    # already stopped moving.
     size = _box_of(cell)
+    fits, why = ee.fits(size)
+    if not fits:
+        # Say it plainly and up front: a jaw that cannot open around the box
+        # will close on air or wedge, and either reads as bad control. The tool
+        # for a wide carton is a suction cup.
+        return {"picked": False, "reason": "this end effector cannot grip this box: %s" % why}
+
+    # Home first, then read the box, so the descent is centred on where the
+    # carton actually is rather than where it was when the last cycle ended.
     go_home(cell)
     arm.scene.settle(0.5)
 
     here = np.asarray(box.position, dtype=float)
-    box_top = float(here[2]) + size / 2.0
-    # Route the hover, do not servo it. RMPflow never moved a Fanuc CRX
-    # toward its hover point at all (closest approach 0.67 m, i.e. where it
-    # started) while Lula IK drove the same arm to 0.3 mm; and on a UR5e the
-    # servo stalled 65 mm out at the edge of reach. `pose_to` either arrives
-    # or says so.
+    # Route the hover, do not servo it. RMPflow never moved a Fanuc CRX toward
+    # its hover point at all while Lula IK drove the same arm to 0.3 mm; and on
+    # a UR5e the servo stalled 65 mm out at the edge of reach. `pose_to` either
+    # arrives or says so.
     hover = arm.pose_to(
-        [float(here[0]), float(here[1]), box_top + cup.tip_offset + 0.18], down, corrections=6, raise_on_fail=False
+        [float(here[0]), float(here[1]), ee.approach_tool_z(here, size) + 0.18],
+        down,
+        corrections=6,
+        raise_on_fail=False,
     )
     if not _arrived(hover):
         return {
@@ -875,118 +1101,39 @@ def pick_waiting_box(cell: dict) -> dict:
             "reason": "hover over the carton not reached: %s%s" % (_describe(hover), _blocked_by(arm)),
         }
 
-    # Re-read once more now the arm is parked above it, so the descent is
-    # centred on the face rather than on where the box used to be.
+    # The grab. A cup steps down until it seals (a single fixed standoff is a
+    # knife edge - see `_SuctionEE.secure`); a jaw opens, drops around the box,
+    # and closes on its sides (`_JawEE.secure`). Both re-read the carton as they
+    # go and both verify from state, not from the command having been issued.
+    if not ee.secure(arm, box, size, down):
+        return {"picked": False, "reason": ee.secure_failed()}
+
+    # The lift carries the same eight corrections the grab needed. With the
+    # default budget of four this raised mid-lift; with trailing refines it
+    # shook the carton loose, and the box came back down to belt height, so the
+    # pick reported `rise: -0.0000` and looked like a grasp that never happened.
     here = np.asarray(box.position, dtype=float)
-    box_top = float(here[2]) + size / 2.0
-
-    # Seal from a standoff; never drive the cup onto the box. The attachment
-    # joint has 35 mm of travel along its approach axis, so it reaches down to
-    # a box it is hovering over. Descending to contact instead shoves a carton
-    # resting against the stop 1.6 cm before the seal forms, and the grip then
-    # lands on an edge with the box hanging off the cup.
-    # Eight corrections, not the default four, because convergence here is not
-    # monotonic and stopping early reads as a failure that isn't one. Measured,
-    # descending onto a settled carton:
-    #
-    #   command 0.0828 -> 0.0068 -> 0.0286 -> 0.0263 -> 0.0193 -> 0.0061 -> 0.0022
-    #
-    # The first correction very nearly lands it, the second overshoots, and the
-    # oscillation takes six passes to damp. The default budget stops at the
-    # fourth, at 19 mm, and `pose_to` raises "the drives are not tracking it" —
-    # which is true of that instant and false about the pose, since two more
-    # corrections reach 2.2 mm. Loosening the tolerance instead would hide the
-    # overshoot and hand the seal a cup that is still moving.
-    # Descend until it seals, rather than betting the pick on one height.
-    #
-    # A single attempt at a fixed standoff is a knife edge, and the measurements
-    # say so: 30/20/12 mm never seal, 6 mm does, and 6 mm is close enough that
-    # the descent's own overshoot can land inside the carton. Worse, the same
-    # 6 mm approach seals on one run and not the next, because whether the cup
-    # is perfectly still at the instant it closes is not something the pose
-    # controller guarantees.
-    #
-    # The grip distance says this should not be necessary - the attachment
-    # origin sits 26 mm above the carton with a 100 mm grip distance, and its
-    # forward axis measures [0.0002, -0.0003, -1.0], straight down. Why the
-    # raycast does not find the box from there is unresolved. Retrying is not a
-    # workaround for not knowing: a real vacuum cell also descends until it has
-    # vacuum rather than asserting a height, so this is what the cell should
-    # have done anyway.
-    #
-    # Steps are 2 mm and it gives up after ten, so the worst case is 20 mm of
-    # travel below the first attempt - less than the overshoot a single attempt
-    # already risks.
-    sealed = False
-    for attempt in range(10):
-        # Re-read every attempt. `here` was measured once, before the first
-        # descent, and a carton that moves between attempts then gets the cup
-        # driven at where it used to be - which shoves it further, so the next
-        # attempt is aimed further out still. At 1.0 kg the carton does not
-        # move and this never showed. At 1.5 kg ten descents walked it off the
-        # side of the belt and onto the floor, and the pick reported "cup did
-        # not seal", which is true and says nothing about why.
-        here = np.asarray(box.position, dtype=float)
-        box_top = float(here[2]) + size / 2.0
-        arm.pose_to(
-            [float(here[0]), float(here[1]), box_top + cup.tip_offset + STANDOFF - attempt * 0.002],
-            down,
-            corrections=8,
-            raise_on_fail=False,
-        )
-        # Settle, then close. Do NOT refine again here. `pose_to` has already
-        # run its corrections and returned converged; refining from a converged
-        # pose re-enters the same overshoot that made the budget of eight
-        # necessary, and at this standoff that means the cup is moving when it
-        # is asked to seal.
-        arm.scene.settle(0.6)
-        cup.close(settle_steps=0)
-        # `holding` alone is not enough, and believing it cost a debugging
-        # session. It reads the gripper's status token, and the token reaches
-        # "Closed" transiently with `gripped_objects` still empty — a cup that
-        # has shut on nothing. The pick then reported success-shaped output with
-        # `gripped: []`, `rise: -0.0000` and a carton that never moved, which
-        # reads as a lift that failed rather than a grasp that never happened.
-        #
-        # Requiring a named object is the same discipline `verify()` applies
-        # when it refuses to call a run reproduced just because something moved.
-        for _ in range(8):
-            arm.scene.settle(0.25)
-            if cup.holding and cup.gripped_objects:
-                break
-        if cup.holding and cup.gripped_objects:
-            sealed = True
-            break
-        cup.open(settle_steps=0)
-        arm.scene.settle(0.2)
-
-    if not sealed:
-        return {"picked": False, "reason": f"cup did not seal after 10 descents (status {cup.status})"}
-
-    # The lift carries the same two corrections the descent needed, for the same
-    # reasons, and it took a third debugging pass to notice they were missing
-    # here. With the default budget of four this raised mid-lift; with three
-    # trailing refines it shook the carton off the cup, and the box came back
-    # down to 0.525 — belt height — so the pick reported `rise: -0.0000` and
-    # looked like a grasp that never happened rather than one that let go.
     arm.pose_to(
-        [float(here[0]), float(here[1]), box_top + cup.tip_offset + 0.30], down, corrections=8, raise_on_fail=False
+        [float(here[0]), float(here[1]), ee.approach_tool_z(here, size) + 0.30],
+        down,
+        corrections=8,
+        raise_on_fail=False,
     )
     arm.scene.settle(1.2)
 
     end = np.asarray(box.position, dtype=float)
-    ee = arm.ee_position
-    # Tool against the *box*, not against the target it was sent to - the
-    # latter is trivially zero and reported 0.0 through every corner grab.
-    offcentre = float(np.linalg.norm(np.asarray(ee)[:2] - end[:2]))
+    flange = np.asarray(arm.ee_position, dtype=float)
+    # Tool against the *box*, not against the target it was sent to - the latter
+    # is trivially zero and reported 0.0 through every corner grab.
+    offcentre = float(np.linalg.norm(flange[:2] - end[:2]))
     return {
-        "picked": bool(cup.holding),
+        "picked": ee.holding(),
         "box": box.prim_path,
         "rise": round(float(end[2] - start[2]), 4),
         "off_centre": round(offcentre, 4),
         "from": start.round(4).tolist(),
         "to": end.round(4).tolist(),
-        "gripped": cup.gripped_objects,
+        "gripped": ee.held(),
     }
 
 
@@ -997,20 +1144,21 @@ def place_on_slot(cell: dict, slot: dict, *, box=None) -> dict:
     18 cm, so a traverse at picking height drags it through the stop; the
     clearance below is measured from the pallet deck rather than assumed.
     """
-    arm, cup = cell["arm"], cell["cup"]
+    arm, ee = cell["arm"], _ee_of(cell)
     down = _down_of(cell)
     scene = arm.scene
-    if not (cup.holding and cup.gripped_objects):
+    if not ee.holding():
         return {"placed": False, "reason": "nothing held"}
     if box is None:
         box = cell["belt"].boxes[0]
 
     place = slot["place"]
     # Release height: `place` is where the carton's centre goes, so the tool
-    # sits half a box plus the cup above it.
+    # sits a hold-offset above it - half a box plus a cup for suction, or the
+    # pad plane for a jaw, which is the box centre itself.
     size = _box_of(cell)
-    place_z = float(place[2]) + size / 2.0 + cup.tip_offset
-    wanted = max(float(slot["approach"][2]), 0.55) + cup.tip_offset + size / 2.0
+    place_z = float(place[2]) + ee.hold_center_offset(size)
+    wanted = max(float(slot["approach"][2]), 0.55) + ee.hold_center_offset(size)
     travel_z = travel_height(arm, place, place_z, wanted, down=down)
     if travel_z is None:
         return {
@@ -1027,7 +1175,7 @@ def place_on_slot(cell: dict, slot: dict, *, box=None) -> dict:
     # reported as a placement error rather than the move failure it was.
     moved = arm.pose_to([float(place[0]), float(place[1]), travel_z], down, corrections=8, raise_on_fail=False)
     scene.settle(1.0)
-    if not (cup.holding and cup.gripped_objects):
+    if not ee.holding():
         return {"placed": False, "reason": "dropped during traverse"}
     if not _arrived(moved):
         return {"placed": False, "reason": "traverse not reached: %s" % _describe(moved)}
@@ -1039,11 +1187,7 @@ def place_on_slot(cell: dict, slot: dict, *, box=None) -> dict:
         arm.pose_to([float(place[0]), float(place[1]), travel_z], down, corrections=4, raise_on_fail=False)
         return {"placed": False, "reason": "descent not reached: %s" % _describe(moved)}
 
-    cup.open(settle_steps=0)
-    for _ in range(12):
-        scene.settle(0.3)
-        if not cup.holding:
-            break
+    ee.release(scene)
 
     # Retreat to a height the solver has already said yes to. `place_z + 0.25`
     # sits above the far column's 0.661 m ceiling, so the retreat did nothing
