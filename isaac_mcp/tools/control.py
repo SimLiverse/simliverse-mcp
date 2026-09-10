@@ -93,6 +93,7 @@ def register_tools(mcp: FastMCP, get_connection: "Callable[[], IsaacConnection]"
           spawn_pedestal(...) / spawn_operator(...) / vision.look(scale=)
           fence_from_sketch(text) / zones_from_sketch(text)
           Cable.build(path, start=, end=, slack=, anchor_end=) / verify_cable
+          arm.attach_gripper("2f_85")      # finger jaw on a bare arm; Play, re-attach, arm.gripper
           arm.can_reach(pos, quat) / arm.reach_ceiling(xy, quat, floor=)
           demo.ur10_palletizing: build(**layout_for(robot)), palletise(cell)
 

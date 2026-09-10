@@ -463,8 +463,50 @@ for `franka` and `ur10` only, so on every other arm the long moves are
 
 Grippers: `arm.suction` (one cup, `holding`, `gripped_objects`) and `Gripper`
 (parallel jaw, auto-detected from an asset's own finger joints — Franka hand,
-`rs013n_onrobot_rg2`). There is no `attach_gripper` yet: a bare UR, KR210 or
-Fanuc has no jaw to close, only the suction cup you author.
+`rs013n_onrobot_rg2`). A bare UR, KR210 or Fanuc ships with no jaw; bolt one
+on:
+
+```python
+arm = Robot.spawn("ur10e")
+fit = arm.attach_gripper("2f_85")  # stops the timeline; the articulation changes
+scene.play()
+scene.step(10)
+arm = Robot.attach("/World/ur10e")  # rebuild the handle: arm.gripper is the jaw
+arm.gripper.open()
+arm.gripper.close(settle_steps=45)
+arm.is_grasping(box)
+```
+
+The finger grippers in the library (`list_robots()` finds them under
+`/Isaac/Robots/Robotiq` and `/Isaac/Robots/Schunk`; there is no OnRobot,
+Zimmer or WSG on the server), read off their USDs:
+
+| key | mechanism | driven joint | travel | note |
+|---|---|---|---|---|
+| `2f_85` | Robotiq 2F-85 linkage | `finger_joint` | 0–47° | mimic followers, 0.21 kg |
+| `2f_140` | Robotiq 2F-140 linkage | `finger_joint` | 0–45° | every joint driven in the physics edit |
+| `hand_e` | Robotiq Hand-E parallel | `Slider_1`, `Slider_2` | prismatic | **no drives** — `close()` refuses until `repair_drives()` |
+| `egk_25` / `egu_50` / `ezu_35` | Schunk parallel | `Jaw_Drive` | 26.5 / 51 / 35 mm | one mimic follower |
+
+`attach_gripper` references the asset **beside** the arm as `<arm>Gripper`,
+puts its base on the flange along the measured tool axis (Z on a UR, X on a
+KR210, -Y on a Fanuc CRX) from a standoff measured off the flange link's own
+bound, drops the gripper's articulation root, joins it with a fixed joint
+that stays *inside* the articulation, masks arm–gripper collisions and zeroes
+the joint states — the Robot Assembler's recipe, and each step is there
+because the Assembler documents what goes wrong without it. The fitted joints
+are recorded on the arm's prim (`simliverse:gripper`), which is how a Hand-E's
+`Slider_1` — a name no token matches — still ends up in `arm.gripper`.
+
+Measured live, a 2F-85 on a UR10e (Isaac Sim 6.0.1): the articulation came
+back as 12 DOF (6 + 6), `drive_health()` clean, the descent reached to 0.4 mm,
+`close()` stopped at 0.73 rad against a 4 cm block with both inner fingers in
+its contact list and `is_grasping` true, a 0.20 m lift carried it up 0.196 m,
+and `open()` put it back on the table. Two numbers to plan with: the 2F-85's
+pads close **about 0.155 m below the flange face**, so a grasp pose puts the
+flange that far above the object's centre; and `finger_joint` read 2.20 rad
+right after `open()` (its limit is 0.82) before closing normally — read the
+grasp off `is_grasping` and the contact list, not off that joint.
 
 Suction: force limits of 500 (Isaac's tutorial value) break the seal within
 2 mm of any motion. Use `1.0e6`. **Writing any `isaac:*` attribute on a closed

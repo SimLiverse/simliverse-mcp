@@ -227,6 +227,19 @@ def test_the_agent_is_told_there_is_no_cable_asset() -> None:
     assert "Cable.build" in _control_source()
 
 
+def test_the_agent_is_told_how_to_bolt_a_finger_gripper_on() -> None:
+    """A bare arm has no jaw; the guide must say which grippers ship and
+    that a Hand-E ships without drives."""
+    from simliverse_sim.robots.manipulator import Manipulator
+
+    text = GUIDE.read_text(encoding="utf-8")
+    for token in ("attach_gripper", "2f_85", "egk_25", "hand_e", "repair_drives", "simliverse:gripper"):
+        assert token in text, "the guide never mentions %r" % token
+    assert "attach_gripper" in _control_source()
+    assert hasattr(Manipulator, "attach_gripper")
+    assert hasattr(Manipulator, "rebind_gripper")
+
+
 def test_the_guide_states_the_working_envelope_rather_than_implying_it() -> None:
     """A demo that only says what works has not said what does not."""
     text = GUIDE.read_text(encoding="utf-8")
