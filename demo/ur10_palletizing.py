@@ -262,9 +262,9 @@ RMP_CONFIG = {"crx10ia_l": "Fanuc_CRX10IAL"}
 #: failure that reads as a regression.
 KNOWN_GAPS = {
     "crx10ia_l": (
-        "the shoulder housing (chain link 3) reaches ~0.30 m at belt height and "
-        "the 2-link footprint under-measures it, so the base joint jams on the belt; "
-        "the flange tool axis (-Y) is handled but the cell is not yet cleared for it"
+        "builds, clears its shoulder (FOOTPRINT floor moves the belt to -0.57) and "
+        "reaches the carton, but the suction cup does not seal on its -Y flange - "
+        "the mount points the cup right in a render, and the seal is the open detail"
     ),
 }
 
@@ -320,18 +320,26 @@ def layout_for(robot: str, *, box: float = BOX) -> dict:
 CLEARANCE = 0.05
 
 
+#: A measured floor on the belt-height footprint, for arms whose shoulder sits
+#: at belt height in their spawn pose and so is not caught by the base+shoulder
+#: links a fresh handle can see. Measured live at the home pose (deck 0.45,
+#: base on the floor): a Fanuc CRX's J2 shoulder reaches 0.31 m across the belt
+#: band, where the UR family folds below the deck (0.0) and the KR210's own
+#: layout already clears its reach. Only arms that need more than the cheap
+#: lower bound appear here.
+FOOTPRINT = {"crx10ia_l": 0.32}
+
+
 def arm_footprint(arm, *, links: int = 2) -> float:
-    """How far the arm's base and shoulder reach out from the base axis.
+    """A cheap lower bound on how far the arm's body reaches from its base.
 
-    The horizontal extent of the first `links` links of the kinematic chain
-    - the base and the shoulder housing, which do not fold away - measured
-    from the base. A UR10 answers about 0.15; a Fanuc CRX-10iA/L about 0.3,
-    and that difference is a shoulder that a belt edge stops.
-
-    Only those links, and only by chain order. Measuring every link low
-    enough to matter took the whole arm on a UR10, whose asset spawns lying
-    flat: the "footprint" was 1.3 m, the belt and pallet were pushed out
-    past it, and every slot came back unreachable.
+    The horizontal extent of the first `links` chain links - the base and the
+    shoulder housing, which do not fold away. Measuring every link took the
+    whole arm on a UR10, whose asset spawns lying flat (1.3 m), so the belt and
+    pallet were pushed out past it and every slot came back unreachable. This
+    stays a lower bound on purpose; an arm whose shoulder sits at belt height
+    (a Fanuc CRX) carries a measured floor in FOOTPRINT, because measuring it
+    at the true home pose needs a play the build cannot spare mid-authoring.
     """
     from simliverse_sim.conveyor import _world_bounds
 
@@ -449,11 +457,14 @@ def build(
     gate_height, width, spacing = (shape["gate_height"], shape["width"], shape["spacing"])
 
     # The belt and the deck must clear the arm's own body, not just its base
-    # point. A Fanuc CRX's shoulder housing reaches 0.3 m out at belt height;
-    # with the belt edge 0.23 m from the base axis the base joint stopped at
-    # -43 degrees on every move toward the belt, the IK was right, the drives
-    # were right, and the pick reported "hover not reached: 1.08 m short".
-    footprint = arm_footprint(arm)
+    # point. A Fanuc CRX's shoulder reaches 0.31 m out where the belt runs; with
+    # the belt edge 0.23 m from the base the base joint stopped at -43 degrees
+    # on every move toward it, the IK right, the drives right, and the pick
+    # reported "hover not reached: 1.08 m short". The base+shoulder links give a
+    # cheap lower bound; arms whose shoulder sits at belt height carry a
+    # measured floor in FOOTPRINT (a live play-home-measure was tried and
+    # de-initialised the articulation mid-build - it is not worth a stop cycle).
+    footprint = max(arm_footprint(arm), FOOTPRINT.get(robot, 0.0))
     offset_y, pallet_y, clearance = clear_offsets(
         offset_y, pallet_y, width=width, pallet_half_width=_deck_half_width(pallet), footprint=footprint
     )
