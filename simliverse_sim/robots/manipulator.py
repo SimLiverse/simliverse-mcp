@@ -372,18 +372,38 @@ class Gripper:
         return self.primary_index is not None
 
     def _pad_links(self) -> list[str]:
-        """The two opposing pads, which is what "how open is it" means."""
+        """The two OPPOSING pads, which is what "how open is it" means.
+
+        Opposing is the whole point and the first version missed it: filtering a
+        2F-85's links for "finger" and taking the first two returned
+        `left_outer_finger` and `left_inner_finger` - both on the left. The gap
+        between two same-side links does not track the jaw opening, so
+        `_ends_by_measurement` read the closing direction backwards and the
+        metric span came out as nonsense. So prefer the inner contact pads and
+        take one from each side.
+        """
         # A fitted gripper is a sibling of the arm, not under it, so its links
         # are not in `robot.links()`; the arm knows where it put them.
         extra = getattr(self._robot, "_fitted_gripper_links", None)
         candidates = list(self._robot.links()) + (list(extra()) if callable(extra) else [])
-        pads = [
+
+        def leaf(path: str) -> str:
+            return path.rsplit("/", 1)[-1].lower()
+
+        fingers = [
             path
             for path in candidates
-            if "knuckle" not in path.lower()
-            and any(token in path.rsplit("/", 1)[-1].lower() for token in ("finger", "pad", "jaw", "tip"))
+            if "knuckle" not in leaf(path)
+            and any(token in leaf(path) for token in ("finger", "pad", "jaw", "tip"))
         ]
-        return pads[:2]
+        # The inner fingers carry the pads on a Robotiq/OnRobot jaw; fall back to
+        # every finger when the asset does not name them "inner".
+        inner = [p for p in fingers if "inner" in leaf(p)] or fingers
+        left = [p for p in inner if "left" in leaf(p) or leaf(p).startswith(("l_", "left"))]
+        right = [p for p in inner if "right" in leaf(p) or leaf(p).startswith(("r_", "right"))]
+        if left and right:
+            return [left[0], right[0]]
+        return inner[:2]
 
     def _pad_gap(self, pads: list[str]) -> float:
         from pxr import UsdGeom

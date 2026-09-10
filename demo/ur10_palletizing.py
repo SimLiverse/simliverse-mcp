@@ -424,6 +424,7 @@ def build(
     *,
     boxes: int = 4,
     box: float = BOX,
+    box_h: float | None = None,
     box_mass: float = BOX_MASS,
     deck: float = DECK,
     stop_x: float = STOP_X,
@@ -487,8 +488,18 @@ def build(
     arm = Robot.spawn(robot, position=[0.0, 0.0, base_z], prim_path=ARM, **spawn_kwargs)
     gains = arm.tune_drives(**drive_gains(robot))
 
+    # A carton is rarely a cube. `box` is the footprint side (what the jaw's
+    # width gate and the cup radius follow from) and `box_h` its height (what
+    # the gate must clear and what a stack steps by). They are equal by default,
+    # so every measured cube number still reproduces; a tall parcel is what a
+    # finger jaw wants, since it grips the mid-height sides with its tips clear
+    # of the belt where a short box gives them nowhere to close but the deck.
+    bh = float(box if box_h is None else box_h)
     shape = cell_geometry(box)
-    gate_height, width, spacing = (shape["gate_height"], shape["width"], shape["spacing"])
+    width, spacing = (shape["width"], shape["spacing"])
+    # The gate is a physical stop: it must clear whichever is taller, the
+    # footprint-derived default or the parcel's own height.
+    gate_height = max(shape["gate_height"], bh + 0.03)
 
     # The belt and the deck must clear the arm's own body, not just its base
     # point. A Fanuc CRX's shoulder reaches 0.31 m out where the belt runs; with
@@ -529,7 +540,7 @@ def build(
         dressing=dressing,
         scene=scene,
     )
-    belt.load(boxes, box=(box, box, box), mass=box_mass, spacing=spacing, start_offset=0.20)
+    belt.load(boxes, box=(box, box, bh), mass=box_mass, spacing=spacing, start_offset=0.20)
 
     if pallet not in DECKS:
         raise ValueError("pallet=%r: one of %s" % (pallet, sorted(DECKS)))
@@ -563,7 +574,7 @@ def build(
         deck_top = height
         fouled = [{"robot": ARM}] if pallet_y - width_ / 2.0 < 0.25 else []
     slots = pallet_slots(
-        origin=[0.0, pallet_y, deck_top], box=(box, box, box), rows=rows, cols=cols, layers=layers, gap=0.01
+        origin=[0.0, pallet_y, deck_top], box=(box, box, bh), rows=rows, cols=cols, layers=layers, gap=0.01
     )
 
     cup_radius = shape["cup_radius"]
@@ -624,7 +635,9 @@ def build(
         ee = _JawEE(arm, jaw, str(gripper))
         cup = None
     if _is_ur(robot):
-        arm.set_joint_positions(HOME, settle_steps=120)
+        # Arm joints only: a fitted finger jaw has grown the articulation past
+        # HOME's six values, and _set_home targets the arm without disturbing it.
+        _set_home(arm, HOME, settle_steps=120)
     else:
         # HOME was measured on a UR10's six joints. Handing it to another arm
         # is either a shape error or, worse, a silent pose on a different
@@ -648,7 +661,11 @@ def build(
         "slots": slots,
         "gains": gains,
         "described": described,
-        "box_size": box,
+        # box_size is the VERTICAL size the pick/place maths use (a top face is
+        # half a box up, a stack steps by a box); box_w is the footprint the
+        # jaw's width gate follows. Equal for a cube.
+        "box_size": bh,
+        "box_w": box,
         "fouled": fouled,
         "pedestal": plinth,
         "base_z": base_z,
@@ -666,6 +683,7 @@ def build(
     cell["spec"] = {
         "boxes": boxes,
         "box": box,
+        "box_h": bh,
         "box_mass": box_mass,
         "deck": deck,
         "stop_x": stop_x,
@@ -752,6 +770,12 @@ def _box_of(cell: dict) -> float:
     15 cm one, and the cup descends 35 mm into the box it meant to seal.
     """
     return float(cell.get("box_size", BOX))
+
+
+def _box_w(cell: dict) -> float:
+    """The carton's FOOTPRINT side - what the jaw's width gate follows. Equal
+    to the vertical size for a cube, different for a tall parcel."""
+    return float(cell.get("box_w", _box_of(cell)))
 
 
 # A move counts if the tool got within this of where it was sent. Tighter than
@@ -932,6 +956,24 @@ class _SuctionEE:
         return f"cup did not seal after 10 descents (status {self.cup.status})"
 
 
+#: Measured tool geometry per finger gripper, in metres. A linkage jaw reports
+#: its limits in radians and its pad detection is asset-specific, so the two
+#: numbers a pick actually needs - how wide it opens (`span`) and how far the
+#: pads sit below the flange (`drop`) - are recorded here the way the arm and
+#: cup tables are. `2f_85`: measured live, pads close ~0.155 m below the flange
+#: face and the jaw opens ~85 mm. An unlisted jaw falls back to the live
+#: measurement, which is right when the pads are found and honest when they are
+#: not.
+JAW_GEOMETRY = {
+    "2f_85": {"span": 0.085, "drop": 0.155},
+    "2f_140": {"span": 0.140, "drop": 0.155},
+    "hand_e": {"span": 0.050, "drop": 0.120},
+    "egk_25": {"span": 0.0265, "drop": 0.110},
+    "egu_50": {"span": 0.051, "drop": 0.130},
+    "ezu_35": {"span": 0.035, "drop": 0.120},
+}
+
+
 class _JawEE:
     """Finger jaw: closes on the carton's sides. Verified from contact forces,
     because a friction pinch has no seal to report and a jaw pushed open by a
@@ -941,19 +983,36 @@ class _JawEE:
         self.arm = arm
         self.jaw = jaw
         self.kind = key
+        self._geom = JAW_GEOMETRY.get(str(key).lower())
         self._box = None
 
     @property
     def tip_offset(self) -> float:
-        return self.jaw.tip_offset
+        """Flange to pad plane. The measured table when the asset is known,
+        the live pad measurement otherwise."""
+        if self._geom is not None:
+            return float(self._geom["drop"])
+        return float(self.jaw.tip_offset)
 
     def approach_tool_z(self, here, size: float) -> float:
         """World z to send the flange: pads straddling the box centre."""
-        return float(here[2]) + self.jaw.tip_offset
+        return float(here[2]) + self.tip_offset
 
     def hold_center_offset(self, size: float) -> float:
         """Flange to held-box centre: the pad plane, which is the box centre."""
-        return self.jaw.tip_offset
+        return self.tip_offset
+
+    def _span(self) -> float:
+        """How wide the jaw opens, in metres. The joint limit a linkage reports
+        is in radians, so a known asset uses the measured span and an unknown
+        one measures the pad gap directly rather than trusting `open_width`."""
+        if self._geom is not None:
+            return float(self._geom["span"])
+        pads = self.jaw._pad_links()
+        if len(pads) >= 2:
+            self.jaw.open(settle_steps=30)
+            return float(self.jaw._pad_gap(pads))
+        return 0.0
 
     def fits(self, size: float):
         """True only if the jaw opens wider than the box, with margin.
@@ -962,9 +1021,8 @@ class _JawEE:
         clipping it, and the drive needs travel left to squeeze. A 2F-85 opens
         about 85 mm, so it takes a parcel up to ~70 mm and refuses a carton.
         """
-        try:
-            span = float(self.jaw.open_width)
-        except Exception:  # noqa: BLE001 - unmeasurable width is not a grip promise
+        span = self._span()
+        if span <= 0.0:
             return False, "jaw opening could not be measured"
         if size + 0.008 <= span:
             return True, ""
@@ -983,14 +1041,39 @@ class _JawEE:
             if not self.holding():
                 break
 
-    def secure(self, arm, box, size: float, down) -> bool:
-        """Open, drop the pads around the box, close, and verify the grasp.
+    def _center_pads_on(self, arm, box, grip_z: float, down) -> None:
+        """Nudge the flange so the PADS, not the flange, sit over the box.
 
-        Unlike a cup, a jaw must open BEFORE it descends or the pads land on
-        the box top and shove it; and it grips the sides, so the pad plane goes
-        to the box centre, not its face. The grasp is confirmed from contact,
-        after a settle under gravity, so a jaw that closed on air or on one
-        corner is not mistaken for a hold.
+        The gripper's pad centre is not on the flange's tool axis - measured, a
+        2F-85 on a UR10 sits about 4 mm off it - so aiming the flange at the box
+        leaves the pads 4 mm to one side, and a symmetric jaw closing on a light
+        box that far off centre shoves it out from between the pads before both
+        make contact. This servos on `pad_center` to remove that offset, which
+        is a systematic error a single reading measures and cancels. Falls back
+        to doing nothing when the pads cannot be located.
+        """
+        for _ in range(3):
+            center = self.jaw.pad_center()
+            if center is None:
+                return
+            here = np.asarray(box.position, dtype=float)
+            error = here[:2] - np.asarray(center)[:2]
+            if float(np.linalg.norm(error)) <= 0.002:
+                return
+            flange = np.asarray(arm.ee_position, dtype=float)[:2] + error
+            arm.pose_to([float(flange[0]), float(flange[1]), grip_z], down, corrections=6, raise_on_fail=False)
+            arm.scene.settle(0.3)
+
+    def secure(self, arm, box, size: float, down) -> bool:
+        """Open, drop the pads around the box, centre them on it, close, verify.
+
+        Unlike a cup, a jaw must open BEFORE it descends or the pads land on the
+        box top and shove it; it grips the sides, so the pad plane goes to the
+        box centre, not its face; and it must be CENTRED on the box in the
+        closing axis, because a symmetric jaw pushes a loose box out of a grasp
+        it is a few millimetres off. The grasp is confirmed from contact after a
+        settle under gravity, so a jaw that closed on air or one corner is not
+        mistaken for a hold.
         """
         self._box = box
         self.jaw.open(settle_steps=30)
@@ -1006,13 +1089,12 @@ class _JawEE:
         )
         arm.scene.settle(0.4)
         here = np.asarray(box.position, dtype=float)
-        arm.pose_to(
-            [float(here[0]), float(here[1]), self.approach_tool_z(here, size)],
-            down,
-            corrections=8,
-            raise_on_fail=False,
-        )
-        arm.scene.settle(0.5)
+        grip_z = self.approach_tool_z(here, size)
+        arm.pose_to([float(here[0]), float(here[1]), grip_z], down, corrections=8, raise_on_fail=False)
+        arm.scene.settle(0.4)
+        # Put the pads over the box, not the flange, then close on it.
+        self._center_pads_on(arm, box, grip_z, down)
+        arm.scene.settle(0.3)
         self.jaw.close(settle_steps=45)
         for _ in range(8):
             arm.scene.settle(0.25)
@@ -1032,6 +1114,27 @@ def _ee_of(cell: dict):
     return _SuctionEE(cell["cup"])
 
 
+def _set_home(arm, home, *, settle_steps: int) -> None:
+    """Drive the arm joints to `home`, leaving any fitted gripper alone.
+
+    A bare arm's articulation is its six joints, so `home` covers all of them.
+    A finger jaw ADDS joints to that articulation - a 2F-85 makes a UR10 twelve
+    DOF - and a six-value home then raises "Expected 12 values, got 6". The arm
+    joints are the non-finger ones; when a gripper has grown the count, target
+    them by index so the jaw keeps whatever grip it is holding.
+    """
+    idx = getattr(arm, "arm_joint_indices", None)
+    try:
+        idx = list(idx) if idx is not None else None
+        dof = int(arm.dof)
+    except Exception:  # noqa: BLE001 - a handle that cannot say falls back safely
+        idx, dof = None, len(home)
+    if idx is not None and len(idx) == len(home) and len(idx) != dof:
+        arm.set_joint_positions(list(home), indices=idx, settle_steps=settle_steps)
+    else:
+        arm.set_joint_positions(list(home), settle_steps=settle_steps)
+
+
 def go_home(cell: dict, *, settle_steps: int = 90) -> None:
     """Park the arm: lift first, then swing.
 
@@ -1047,8 +1150,8 @@ def go_home(cell: dict, *, settle_steps: int = 90) -> None:
     home = list(_home_of(cell))
     lift = list(home)
     lift[0] = float(np.asarray(arm.joint_positions, dtype=float)[0])
-    arm.set_joint_positions(lift, settle_steps=settle_steps)
-    arm.set_joint_positions(home, settle_steps=settle_steps)
+    _set_home(arm, lift, settle_steps=settle_steps)
+    _set_home(arm, home, settle_steps=settle_steps)
 
 
 def pick_waiting_box(cell: dict) -> dict:
@@ -1072,7 +1175,9 @@ def pick_waiting_box(cell: dict) -> dict:
     belt.halt()
 
     size = _box_of(cell)
-    fits, why = ee.fits(size)
+    # The width gate follows the FOOTPRINT (can the jaw open around it), not the
+    # vertical size a tall parcel has.
+    fits, why = ee.fits(_box_w(cell))
     if not fits:
         # Say it plainly and up front: a jaw that cannot open around the box
         # will close on air or wedge, and either reads as bad control. The tool

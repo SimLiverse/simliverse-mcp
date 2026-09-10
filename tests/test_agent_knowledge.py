@@ -240,6 +240,22 @@ def test_the_agent_is_told_how_to_bolt_a_finger_gripper_on() -> None:
     assert hasattr(Manipulator, "rebind_gripper")
 
 
+def test_the_guide_covers_palletising_with_a_finger_jaw() -> None:
+    """A jaw grips sides not faces, refuses a box wider than it opens, and must
+    centre its pads on the box - none guessable, and the honest grasp gap is
+    said out loud rather than implied by a demo that only shows what works."""
+    import demo.ur10_palletizing as demo
+
+    text = GUIDE.read_text(encoding="utf-8")
+    for token in ('build(gripper="2f_85")', "JAW_GEOMETRY", "pad_center", "KNOWN GAP", "box_h"):
+        assert token in text, "the guide never mentions %r" % token
+    # The API the note advertises exists.
+    for name in ("_JawEE", "_SuctionEE", "_box_w", "JAW_GEOMETRY"):
+        assert hasattr(demo, name), "the guide advertises %s" % name
+    assert "gripper" in inspect.signature(demo.build).parameters
+    assert "box_h" in inspect.signature(demo.build).parameters
+
+
 def test_the_guide_states_the_working_envelope_rather_than_implying_it() -> None:
     """A demo that only says what works has not said what does not."""
     text = GUIDE.read_text(encoding="utf-8")

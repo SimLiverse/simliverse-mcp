@@ -508,6 +508,25 @@ flange that far above the object's centre; and `finger_joint` read 2.20 rad
 right after `open()` (its limit is 0.82) before closing normally — read the
 grasp off `is_grasping` and the contact list, not off that joint.
 
+**Palletising with a jaw instead of a cup.** `demo.ur10_palletizing.build(gripper="2f_85")`
+runs the same pick/place loop on a finger jaw: one `_JawEE`/`_SuctionEE`
+adapter behind `pick_waiting_box`/`place_on_slot`, so the cell does not branch
+on the tool. Three things a jaw needs that a cup does not, each a real cell
+lesson. A jaw grips a box's SIDES, so the datum is the box centre, not its top,
+and the reach is measured from a per-asset table (`JAW_GEOMETRY`: a 2F-85 opens
+~85 mm and its pads sit 0.155 m below the flange) rather than the joint limits,
+which a linkage reports in radians. A jaw can only hold a box **narrower than it
+opens** — `_JawEE.fits` refuses a 150 mm carton on an 85 mm jaw up front, so a
+finger gripper is for small parcels and a cup is the tool for cartons. And the
+pad centre is ~4 mm off the flange's tool axis, so the pick servos on
+`gripper.pad_center()` to put the pads — not the flange — over the box before
+closing, or a symmetric jaw shoves a light box out of the grasp. KNOWN GAP: a
+top-down jaw pick off the belt mounts, orients, gates and closes on the parcel
+with both inner fingers in contact, but the friction pinch does not yet reliably
+survive the lift; the grip force and approach still need work before a jaw
+palletises end to end the way the cup does. Feed non-cube parcels with
+`build(box=<footprint>, box_h=<height>)`.
+
 Suction: force limits of 500 (Isaac's tutorial value) break the seal within
 2 mm of any motion. Use `1.0e6`. **Writing any `isaac:*` attribute on a closed
 gripper releases it**, so do not "test" limits mid-grip.
