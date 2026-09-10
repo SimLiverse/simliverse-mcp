@@ -19,11 +19,18 @@ def _arc_length(centres, link):
 
 
 def test_a_taut_cable_lies_on_its_chord():
+    import math
+
+    from simliverse_sim.cable import LINK_LENGTH
+
     plan = chain_layout([0, 0, 1.5], [2, 0, 1.5], slack=0.0)
     assert plan["depth"] == 0.0
     assert np.allclose(plan["centres"][:, 2], 1.5)
-    assert plan["links"] == 16
-    assert plan["link"] == pytest.approx(2.0 / 16)
+    # The link count follows LINK_LENGTH (shorter links -> a smoother rope), so
+    # derive it rather than pin a number that a look-and-feel change would break.
+    expected = math.ceil(2.0 / LINK_LENGTH)
+    assert plan["links"] == expected
+    assert plan["link"] == pytest.approx(2.0 / expected)
 
 
 def test_slack_hangs_below_the_chord_with_the_right_length():

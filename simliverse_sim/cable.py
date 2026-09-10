@@ -53,7 +53,11 @@ from .scene import Scene
 
 #: Link length that stays stable at 32 position iterations and reads as a
 #: cable rather than a string of sausages.
-LINK_LENGTH = 0.125
+#: Default per-link length. Short, because a rope is only as smooth as its
+#: segments: at 0.125 m the links are long enough that each 60-deg bend shows a
+#: visible kink and the chain reads as loose capsules, not a rope. At ~0.05 m
+#: the curve is smooth and, with the caps overlapping (see `build`), continuous.
+LINK_LENGTH = 0.05
 #: Cone limit per joint. 60 degrees lets a chain fold back on itself over two
 #: links without a joint reaching its stop and popping.
 CONE_DEGREES = 60.0
@@ -168,7 +172,13 @@ class Cable:
         stage = scene.stage
         plan = chain_layout(start, end, slack=slack, links=links)
         link = float(plan["link"])
-        height = max(0.0, link - 2.0 * radius)
+        # Overlap the capsules. If the cylinder is `link - 2*radius` the caps
+        # just meet end to end, and any bend opens a gap between them; making the
+        # cylinder the full `link` long makes each capsule's caps reach a radius
+        # INTO its neighbours, so a bent rope stays a continuous tube with no
+        # seams. Adjacent links do not collide (their shared joint filters it),
+        # and the overlap never reaches the link beyond, so nothing self-traps.
+        height = float(link)
 
         UsdGeom.Xform.Define(stage, prim_path)
         bodies = []
