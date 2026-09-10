@@ -64,6 +64,61 @@ def robot_scenarios(robots: list[str] | None = None, *, box: float | None = None
     return out
 
 
+#: The axes a generated cell samples. Each is a real capability the harness is
+#: meant to handle; crossing them makes combinations no single scenario tested,
+#: which is the point - a cell that works only on the grid it was tuned for is
+#: not general.
+_AXES = {
+    "robot": ROBOTS,
+    "box": [0.10, 0.15, 0.20],
+    "box_mass": [0.5, 1.0],
+    "rows": [2, 3],
+    "cols": [2, 3],
+    "speed": [0.15, 0.30],
+}
+
+
+def generated_scenarios(
+    count: int = 20, *, seed: int = 0, robots: list[str] | None = None
+) -> list[tuple[str, dict[str, Any]]]:
+    """Sample `count` cells from the capability axes, laid out per arm.
+
+    Deterministic under `seed`, so a failure is reproducible and a fix can be
+    checked against the same set. Each cell is a robot's reach-aware layout with
+    the sampled box, mass, pattern and belt speed folded in - a combination the
+    fixed scenarios never enumerate, which is what tests generalisation rather
+    than memorisation.
+    """
+    import random as _random
+
+    from demo import ur10_palletizing as cell_mod
+
+    rng = _random.Random(seed)
+    pool = robots or _AXES["robot"]
+    out: list[tuple[str, dict[str, Any]]] = []
+    seen: set[tuple] = set()
+    tries = 0
+    while len(out) < count and tries < count * 20:
+        tries += 1
+        robot = rng.choice(pool)
+        box = rng.choice(_AXES["box"])
+        pick = {
+            "box_mass": rng.choice(_AXES["box_mass"]),
+            "rows": rng.choice(_AXES["rows"]),
+            "cols": rng.choice(_AXES["cols"]),
+            "speed": rng.choice(_AXES["speed"]),
+        }
+        key = (robot, box, pick["box_mass"], pick["rows"], pick["cols"], pick["speed"])
+        if key in seen:
+            continue
+        seen.add(key)
+        spec = cell_mod.layout_for(robot, box=box)
+        spec.update(pick)
+        name = "%s b%.2f m%.1f %dx%d v%.2f" % (robot, box, pick["box_mass"], pick["rows"], pick["cols"], pick["speed"])
+        out.append((name, spec))
+    return out
+
+
 def sweep(
     scenarios: list[tuple[str, dict[str, Any]]] | None = None,
     *,

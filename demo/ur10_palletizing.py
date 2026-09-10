@@ -262,9 +262,16 @@ RMP_CONFIG = {"crx10ia_l": "Fanuc_CRX10IAL"}
 #: failure that reads as a regression.
 KNOWN_GAPS = {
     "crx10ia_l": (
-        "builds, clears its shoulder (FOOTPRINT floor moves the belt to -0.57) and "
-        "reaches the carton, but the suction cup does not seal on its -Y flange - "
-        "the mount points the cup right in a render, and the seal is the open detail"
+        "clears its shoulder (FOOTPRINT moves the belt to -0.57) and drives right "
+        "(1e6), but the suction cup does not seal: the flange-axis heuristic measures "
+        "the structural offset (-Y) and mounts the cup on the SIDE of the wrist. The "
+        "tool point is tool0, offset along the flange, and its frame differs from the "
+        "mount link by a rotation that neither the mount nor down_at_yaw reconciles - "
+        "so the cup faces ~horizontal at the tool-down pose. An empirical measured-down "
+        "(search the orientation that points the cup at the floor, then aim the cup - "
+        "not the flange - at the carton) placed one to 0.2 mm in a probe; the real fix "
+        "is a per-asset tool-frame registration, and every attempt so far regressed the "
+        "UR or KR210, so it needs doing carefully in the library, not the cell"
     ),
 }
 
@@ -592,8 +599,9 @@ def build(
         "fouled": fouled,
         "pedestal": plinth,
         "base_z": base_z,
-        # The tool-down orientation for *this* flange. DOWN is the UR's; a
-        # Fanuc CRX's tool axis is -Y and needs a different quaternion.
+        # The tool-down orientation for this flange: down_at_yaw sends the
+        # measured approach axis to world -Z. A UR answers Z, a KR210 X. It is
+        # right for both; a Fanuc CRX is the one arm it is not (KNOWN_GAPS).
         "down": list(arm.down_at_yaw(0.0)),
         "clearance": clearance,
     }
