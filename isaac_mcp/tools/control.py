@@ -85,6 +85,8 @@ def register_tools(mcp: FastMCP, get_connection: "Callable[[], IsaacConnection]"
           verify_grasp(robot, obj) / verify_throw(obj, result) -> Report
           list_props(q) / find_prop(q) / spawn_prop(q, position=)
           Conveyor.build(...) / belt.dress("conveyorbelt_a05") / belt.start()
+          Conveyor.build(..., pitch=30.7, dressing="conveyorbelt_a42")  # incline
+          CurvedConveyor.build_curve(centre=, radius=, turn=, dressing="conveyorbelt_a01")
           SafetyFence.build(centre=, size=, gate=, crossings=)
           spawn_pedestal(...) / spawn_operator(...) / vision.look(scale=)
           fence_from_sketch(text) / zones_from_sketch(text)

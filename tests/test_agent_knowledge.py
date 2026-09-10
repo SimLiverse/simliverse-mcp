@@ -88,6 +88,23 @@ def test_the_guide_covers_the_incline_belt() -> None:
         assert token in text, "the guide never mentions %r" % token
 
 
+def test_the_guide_covers_the_curved_belt() -> None:
+    """A curve is a fan of tangent chord slabs; the agent needs to know it is
+    generic over any bend and dresses with the real A01 prop."""
+    text = GUIDE.read_text(encoding="utf-8")
+    for token in ("build_curve", "chord slab", "spacing_deg", "conveyorbelt_a01"):
+        assert token in text, "the guide never mentions %r" % token
+
+
+def test_the_curve_api_the_guide_advertises_exists() -> None:
+    import simliverse_sim as sim
+    from simliverse_sim.conveyor import CurvedConveyor
+
+    assert hasattr(sim, "CurvedConveyor")
+    for name in ("build_curve", "box_at_gate", "load", "dress", "start", "halt"):
+        assert hasattr(CurvedConveyor, name), "CurvedConveyor has no %s" % name
+
+
 def test_the_agent_is_told_to_look_at_more_than_one_view() -> None:
     source = _control_source()
     assert "vision.look" in source

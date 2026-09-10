@@ -175,6 +175,20 @@ belt = Conveyor.build(
   meant to sit on. And `ConveyorBelt_A05` is 2.0 m regardless of belt length,
   so one section over a 6.4 m belt left 4.4 m visibly bare. Both are fixed in
   `dress()`; a caller does not need to think about either.
+- **A curve is `CurvedConveyor.build_curve`**, generic over any bend:
+  `build_curve(centre=[x,y], radius=1.55, start_angle=-90, turn=90, ...)`
+  sweeps `turn` degrees from `start_angle` about `centre`. PhysX cannot drive
+  one curved surface along an arc, so it is a fan of short flat chord slabs,
+  each driven local-space along its own tangent; a carton crossing between
+  them is handed a velocity turned a few degrees and rides the bend. Measured
+  live: cartons followed a 1.2 m arc through the quadrant, on the deck.
+  Trade-off: a carton spans ~1.5 slabs whose tangents differ, so it travels
+  slower than belt speed — use fewer, longer segments and a higher `speed` for
+  a brisk bend. `box_at_gate()` here finds the carton at the exit **angle**,
+  and `load()` spaces cartons by **degrees** (`spacing_deg`), the natural
+  coordinate on a circle. Dress it with the real curve prop:
+  `build_curve(radius=1.55, dressing="conveyorbelt_a01")` (A01 is a two-tier
+  90-degree quadrant, R~1.55, rollers at 0.74).
 - **A halted belt is a sleeping belt.** PhysX does not wake a body because the
   surface under it started moving. `start()` nudges every tracked body; without
   it the trace reads "no carton settled at the stop" while

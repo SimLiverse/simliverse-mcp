@@ -1451,6 +1451,349 @@ class Conveyor:
         return belt
 
 
+#: The 90-degree curve props, measured live (Isaac Sim 6.0.1). Two-tier: the
+#: rollers carry at ~0.74, an upper belt at ~1.78. The arc's centreline radius
+#: is ~1.55 m, the footprint 2.07 x 2.10 m. A curve dresses a `build_curve`
+#: whose radius matches. A01/A02/A03 differ only in tier.
+CURVES: dict[str, dict[str, float]] = {
+    "conveyorbelt_a01": {"deck": 0.74, "radius": 1.55, "footprint": 2.07},
+}
+
+
+def curve_spec(prop: str) -> dict[str, float] | None:
+    return dict(CURVES[str(prop).lower().strip()]) if str(prop).lower().strip() in CURVES else None
+
+
+class CurvedConveyor:
+    """A driven 90-degree (or any-angle) bend, built from chord slabs.
+
+    PhysX has no way to give one curved surface a velocity that follows the
+    arc, so a curve is a fan of short flat slabs, each tangent to the arc and
+    each driven along its own local +X. A carton crossing from one to the next
+    is handed a velocity that has turned a few degrees, and rides the bend.
+    Measured live: a 1 kg carton followed a 1.0-1.5 m radius arc through the
+    quadrant, staying on the deck, and pressed up against a stop at the end.
+
+    This is a separate class from `Conveyor` on purpose. A straight belt has
+    one direction and one origin, and every queue calculation projects onto
+    them; an arc has neither, and threading `if curve:` through all of that
+    would make the straight path - the one that ships in every cell - harder
+    to read for a variant most cells never use.
+    """
+
+    def __init__(
+        self,
+        prim_path: str,
+        *,
+        centre: Any,
+        radius: float,
+        a0: float,
+        a1: float,
+        width: float,
+        speed: float,
+        deck_z: float,
+        segments: list[dict[str, Any]],
+        gate_path: str | None,
+        scene: Any,
+    ) -> None:
+        self.prim_path = prim_path
+        self.centre = np.asarray(centre, dtype=float)
+        self.radius = float(radius)
+        self.a0 = float(a0)
+        self.a1 = float(a1)
+        self.width = float(width)
+        self.speed = float(speed)
+        self.deck_z = float(deck_z)
+        self.segments = segments  # each: {path, angle, tangent(unit xy), yaw}
+        self.gate_path = gate_path
+        self.scene = scene
+        self._boxes: list[Any] = []
+        self.box_size: np.ndarray | None = None
+        self.dressing: list[str] = []
+
+    def __repr__(self) -> str:
+        turn = np.degrees(self.a1 - self.a0)
+        return f"<CurvedConveyor {self.prim_path} R={self.radius:.2f} turn={turn:.0f}deg segs={len(self.segments)}>"
+
+    @classmethod
+    def build_curve(
+        cls,
+        prim_path: str = "/World/Curve",
+        *,
+        centre: Any,
+        radius: float = 1.55,
+        start_angle: float = -90.0,
+        turn: float = 90.0,
+        width: float = 0.5,
+        speed: float = 0.4,
+        deck_z: float = 0.5,
+        segments: int = 8,
+        friction: float = 0.9,
+        gate: bool = True,
+        gate_height: float = 0.25,
+        dressing: str | None = None,
+        color: Any = (0.15, 0.16, 0.18),
+        scene: Any = None,
+    ) -> "CurvedConveyor":
+        """A curved belt around `centre`, from `start_angle` sweeping `turn` degrees.
+
+        Angles are measured at `centre`, in the ground plane, degrees CCW from
+        +X. The entry is at `start_angle` and the exit (and stop) at
+        `start_angle + turn`. `radius` is the centreline; the default 1.55 m
+        matches the shipped A01 curve prop, so `dressing="conveyorbelt_a01"`
+        lands over the physics.
+        """
+        from .scene import Scene as _Scene
+
+        scene = scene or _Scene.get()
+        c = np.asarray(centre, dtype=float)[:2]
+        if c.shape[0] < 2:
+            raise ConveyorError("centre needs an x and a y, got %r" % (centre,))
+        a0, a1 = np.radians(start_angle), np.radians(start_angle + turn)
+        step = (a1 - a0) / int(segments)
+        chord = 2.0 * radius * np.sin(abs(step) / 2.0)
+        deck = 0.06
+        seg_list: list[dict[str, Any]] = []
+        for i in range(int(segments)):
+            amid = a0 + (i + 0.5) * step
+            pos = c + radius * np.array([np.cos(amid), np.sin(amid)])
+            # Direction of travel around the arc (increasing angle).
+            tang = np.array([-np.sin(amid), np.cos(amid)]) * np.sign(step)
+            yaw = float(np.degrees(np.arctan2(tang[1], tang[0])))
+            path = f"{prim_path}/seg_{i:02d}"
+            scene.spawn_rigid(
+                path,
+                shape="cube",
+                # A little longer than the chord so neighbours overlap and a
+                # carton never drops into the gap between two slabs.
+                scale=[chord / 2.0 * 1.15, width / 2.0, deck / 2.0],
+                position=[float(pos[0]), float(pos[1]), deck_z - deck / 2.0],
+                orientation=[0.0, 0.0, yaw],
+                mass=0.0,
+                friction=friction,
+                restitution=0.0,
+                static=True,
+                color=color,
+            )
+            _force_kinematic(path)
+            seg_list.append({"path": path, "angle": float(amid), "tangent": tang, "yaw": yaw})
+
+        gate_path = None
+        if gate:
+            end = c + radius * np.array([np.cos(a1), np.sin(a1)])
+            etang = np.array([-np.sin(a1), np.cos(a1)]) * np.sign(step)
+            gate_path = f"{prim_path}Gate"
+            scene.spawn_rigid(
+                gate_path,
+                shape="cube",
+                scale=[0.02, width / 2.0, gate_height / 2.0],
+                position=[float(end[0] + etang[0] * 0.06), float(end[1] + etang[1] * 0.06), deck_z + gate_height / 2.0],
+                orientation=[0.0, 0.0, float(np.degrees(np.arctan2(etang[1], etang[0])))],
+                mass=0.0,
+                friction=0.4,
+                restitution=0.0,
+                static=True,
+                color=(0.55, 0.13, 0.13),
+            )
+
+        belt = cls(
+            prim_path,
+            centre=c,
+            radius=radius,
+            a0=a0,
+            a1=a1,
+            width=width,
+            speed=speed,
+            deck_z=deck_z,
+            segments=seg_list,
+            gate_path=gate_path,
+            scene=scene,
+        )
+        if dressing:
+            belt.dress(dressing)
+        belt.start()
+        return belt
+
+    def start(self) -> int:
+        """Drive every segment along its own tangent, local space. Idempotent."""
+        for seg in self.segments:
+            drive_surface(_body_of(seg["path"]), [self.speed, 0.0, 0.0], enabled=True, local=True)
+        self.wake_load()
+        return len(self.segments)
+
+    def halt(self) -> None:
+        for seg in self.segments:
+            drive_surface(_body_of(seg["path"]), [0.0, 0.0, 0.0], enabled=False)
+
+    def wake_load(self) -> int:
+        woken = 0
+        for box in self._boxes:
+            seg = self._nearest_segment(box.position)
+            try:
+                box.set_velocity(linear=[seg["tangent"][0] * _WAKE_SPEED, seg["tangent"][1] * _WAKE_SPEED, 0.0])
+                woken += 1
+            except Exception:
+                logger.debug("could not wake %s", box.prim_path, exc_info=True)
+        return woken
+
+    def _angle_of(self, point: Any) -> float:
+        p = np.asarray(point, dtype=float)[:2] - self.centre
+        return float(np.arctan2(p[1], p[0]))
+
+    def _nearest_segment(self, point: Any) -> dict[str, Any]:
+        a = self._angle_of(point)
+        return min(self.segments, key=lambda s: abs(((s["angle"] - a + np.pi) % (2 * np.pi)) - np.pi))
+
+    def load(
+        self,
+        count: int = 3,
+        *,
+        box: Any = (0.15, 0.15, 0.15),
+        mass: float = 1.0,
+        spacing_deg: float = 12.0,
+        start_offset_deg: float = 6.0,
+        friction: float = 0.9,
+        prefix: str = "Box",
+        color: Any = (0.72, 0.55, 0.33),
+    ) -> list[Any]:
+        """Queue `count` cartons along the arc from the entry end.
+
+        Spacing is angular here, not linear - the natural coordinate on a
+        circle - so the queue keeps its shape whatever the radius.
+        """
+        size = as_vec3(box, name="box").astype(float)
+        sign = np.sign(self.a1 - self.a0)
+        made = []
+        for i in range(int(count)):
+            a = self.a0 + sign * np.radians(start_offset_deg + i * spacing_deg)
+            pos = self.centre + self.radius * np.array([np.cos(a), np.sin(a)])
+            body = self.scene.spawn_box(
+                f"/World/{prefix}{i}",
+                size=[size[0], size[1], size[2]],
+                position=[float(pos[0]), float(pos[1]), self.deck_z + size[2] / 2.0 + 0.003],
+                mass=float(mass),
+                friction=float(friction),
+                restitution=0.0,
+                color=color,
+            )
+            made.append(body)
+        self._boxes = made
+        self.box_size = size
+        return made
+
+    @property
+    def boxes(self) -> list[Any]:
+        return list(self._boxes)
+
+    def track(self, objects: Any) -> list[Any]:
+        self._boxes = list(objects)
+        return self._boxes
+
+    def box_at_gate(self, *, max_speed: float = 0.03, within_deg: float = 8.0) -> Any | None:
+        """The carton settled against the stop at the arc's exit, or None.
+
+        Nearest the exit angle, on the deck, and stopped. The angular window
+        is the curve's version of the straight belt's `within`.
+        """
+        if not self._boxes:
+            return None
+        best, best_err = None, None
+        for body in self._boxes:
+            try:
+                pos = np.asarray(body.position, dtype=float)
+                speed = float(body.speed)
+            except Exception:  # noqa: BLE001
+                continue
+            if speed > max_speed:
+                continue
+            # On the arc: radius within a box, height within a box.
+            r = float(np.linalg.norm(pos[:2] - self.centre))
+            if abs(r - self.radius) > max(0.2, float(self.box_size[1]) if self.box_size is not None else 0.2):
+                continue
+            if self.box_size is not None and abs(float(pos[2]) - (self.deck_z + float(self.box_size[2]) / 2.0)) > float(
+                self.box_size[2]
+            ):
+                continue
+            err = abs(((self._angle_of(pos) - self.a1 + np.pi) % (2 * np.pi)) - np.pi)
+            if err > np.radians(within_deg):
+                continue
+            if best_err is None or err < best_err:
+                best, best_err = body, err
+        return best
+
+    def arrived(self, **kwargs: Any) -> bool:
+        return self.box_at_gate(**kwargs) is not None
+
+    def dress(self, prop: str = "conveyorbelt_a01") -> dict[str, Any]:
+        """Put a real curve prop over the chord slabs, and hide them.
+
+        The prop is a fixed-radius quadrant, so it lands cleanly only when the
+        arc's radius matches (A01 is ~1.55 m); this warns otherwise. The prop
+        is placed at the arc centre and rotated so its own quadrant sweeps from
+        the entry angle.
+        """
+        from .props import spawn_prop
+
+        spec = curve_spec(prop)
+        if spec is None:
+            raise ConveyorError("%s is not a known curve prop (%s)." % (prop, ", ".join(sorted(CURVES))))
+        if abs(self.radius - float(spec["radius"])) > 0.3:
+            logger.warning(
+                "%s is a %.2f m-radius curve but this arc is %.2f m; the rollers will not line up.",
+                prop,
+                spec["radius"],
+                self.radius,
+            )
+        # A01's own quadrant is authored from its local frame; place it at the
+        # centre and yaw it so its entry lines up with a0. Measured offset of
+        # the prop's local quadrant start is 0 (its arc runs local -Y to +X),
+        # so a yaw of a0 + 90 deg aligns it; refined live.
+        path = f"{self.prim_path}_Dressing"
+        yaw = float(np.degrees(self.a0)) + 90.0
+        spawn_prop(
+            prop,
+            prim_path=path,
+            position=[float(self.centre[0]), float(self.centre[1]), self.deck_z - float(spec["deck"])],
+            orientation=[0.0, 0.0, yaw],
+            scene=self.scene,
+        )
+        _strip_physics(self.scene, path)
+        for seg in self.segments:
+            self._hide(seg["path"])
+        self.dressing = [path]
+        return {"prim_paths": [path], "prop": prop, "radius": self.radius, "deck": float(spec["deck"])}
+
+    def _hide(self, prim_path: str) -> bool:
+        try:
+            from pxr import UsdGeom
+
+            prim = get_stage().GetPrimAtPath(prim_path)
+            if prim and prim.IsValid():
+                UsdGeom.Imageable(prim).MakeInvisible()
+                return True
+        except Exception:  # noqa: BLE001
+            logger.debug("could not hide %s", prim_path, exc_info=True)
+        return False
+
+    def describe(self) -> dict[str, Any]:
+        return {
+            "prim_path": self.prim_path,
+            "kind": "curve",
+            "centre": self.centre.round(4).tolist(),
+            "radius": round(self.radius, 4),
+            "start_angle": round(float(np.degrees(self.a0)), 2),
+            "turn": round(float(np.degrees(self.a1 - self.a0)), 2),
+            "width": self.width,
+            "speed": self.speed,
+            "deck_z": self.deck_z,
+            "segments": len(self.segments),
+            "gate_path": self.gate_path,
+            "box_size": None if self.box_size is None else self.box_size.round(4).tolist(),
+            "boxes": [b.prim_path for b in self._boxes],
+            "mechanism": "PhysxSurfaceVelocityAPI (per-chord tangent)",
+        }
+
+
 #: What the belt surface is called inside the shipped conveyor assets. Both
 #: variants measured (A01, A09) name it exactly this, and in both it is the one
 #: prim carrying RigidBodyAPI — the frame around it is a plain collider mesh.
