@@ -1379,6 +1379,40 @@ class Manipulator(Robot):
             return []
         return [str(p.GetPath()) for p in Usd.PrimRange(root) if p.HasAPI(UsdPhysics.RigidBodyAPI)]
 
+    def firm_gripper_drives(self, *, stiffness: float = 1.0e4, damping: float = 1.0e2,
+                            max_force: float = 500.0) -> list[str]:
+        """Firm up a fitted finger jaw's joint drives so it holds through a traverse.
+
+        A shipped linkage jaw's followers carry drives too weak to hold their
+        angle: left alone on a UR10e the 2F-140's knuckle and finger joints
+        wound up to 7 and 14 radians while the arm moved, and the jaw looked
+        like a broken hinge (the sketch evaluation, r2_01). `tune_drives` sets
+        gains on the arm's joints and leaves the gripper alone, so this is the
+        gripper's own call: every drive on the jaw's joints goes to these gains.
+        Measured on a 0.2 kg box: at the shipped 400 / 7 N the fingers slid
+        closed on nothing mid-traverse; at 1e4 / 500 N it rode held. Returns
+        the joints touched.
+        """
+        from pxr import Usd, UsdPhysics
+
+        gripper = getattr(self, "gripper", None)
+        names = set(gripper.joint_names) if gripper is not None and getattr(gripper, "exists", True) else set()
+        if not names:
+            return []
+        stage = get_stage()
+        root = stage.GetPrimAtPath(self.prim_path).GetParent()  # fitted jaws are siblings of the arm
+        touched: list[str] = []
+        for prim in Usd.PrimRange(root):
+            if prim.IsA(UsdPhysics.Joint) and prim.GetName() in names:
+                for kind in ("linear", "angular"):
+                    drive = UsdPhysics.DriveAPI.Get(prim, kind)
+                    if drive and drive.GetStiffnessAttr().HasAuthoredValue():
+                        drive.GetStiffnessAttr().Set(float(stiffness))
+                        drive.GetDampingAttr().Set(float(damping))
+                        drive.GetMaxForceAttr().Set(float(max_force))
+                        touched.append(prim.GetName())
+        return touched
+
     def rebind_gripper(self) -> "Gripper":
         """A fresh finger-gripper handle, after Play has rebuilt the articulation."""
         self.gripper = Gripper(self, self._gripper_indices())
