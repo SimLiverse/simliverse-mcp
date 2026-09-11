@@ -176,7 +176,11 @@ def classify_morphology(
         return Morphology.WHEELED
 
     # A standalone hand: many finger joints, no arm chain to carry it.
-    if len(groups.gripper) >= 6 and not has_arms:
+    # A six-joint jaw on a six-joint arm whose joints carry no "arm" token
+    # (a Fanuc CRX: J1..J6) is an arm with a gripper, not a hand: the joints
+    # that are not fingers, wheels, legs or rotors are what decides.
+    other = dof - len(groups.gripper) - len(groups.wheels) - len(groups.legs) - len(groups.rotors)
+    if len(groups.gripper) >= 6 and not has_arms and other < 5:
         return Morphology.DEXTEROUS_HAND
     if has_arms or dof >= 5:
         return Morphology.MANIPULATOR
