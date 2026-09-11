@@ -1292,7 +1292,10 @@ class Conveyor:
             # fixed guess, and a loose one is the lesser evil: too tight and a
             # belt whose boxes were not placed by `load()` never reports an
             # arrival at all.
-            within = 0.5 * expected if self.box_size is not None else 0.12
+            # ...with a floor: a quarter of a 6 cm parcel is 15 mm, and a
+            # parcel resting against the stop a finger's width off was never
+            # reported as arrived.
+            within = max(0.5 * expected, 0.04) if self.box_size is not None else 0.12
 
         best, best_error = None, None
         for body in self._boxes:
