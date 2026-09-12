@@ -74,7 +74,7 @@ from .assertions import (
 )
 from .cable import Cable, chain_layout, verify_cable
 from .controller import ControllerError
-from .conveyor import Conveyor, ConveyorError, CurvedConveyor, drive_surface
+from .conveyor import Conveyor, ConveyorError, CurvedConveyor, Junction, drive_surface
 from .deadplate import DeadPlate, DeadPlateError, Escapement
 from .guarding import (
     GuardingError,
@@ -130,6 +130,7 @@ __all__ = [
     "ControllerError",
     "Conveyor",
     "CurvedConveyor",
+    "Junction",
     "DeadPlate",
     "GuardingError",
     "SketchError",

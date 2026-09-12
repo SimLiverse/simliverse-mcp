@@ -1817,6 +1817,193 @@ class CurvedConveyor:
         }
 
 
+
+class Junction:
+    """The transfer square at a tee: pulls a carton to the centre, then turns it.
+
+    Under a sorter module (ConveyorBelt_A47's junction, A49) the rollers are
+    bidirectional: a carton arriving off the branch is carried ALONG THE BRANCH
+    until its centre sits on the line's centreline, and only then sent down the
+    line. Driving the whole run along the line instead pushes the carton
+    sideways the moment its front edge crosses the roller edge: it turns and
+    rides the near edge (measured 0.33 m off centre on a 0.9 m line, j41_01).
+
+    Built as one hidden kinematic slab whose surface velocity is switched on a
+    physics step, from the positions of the cartons it is told to `track()`:
+    the nearest carton over the square decides -- short of the centreline by
+    more than `centre_tol` and the square runs along `in_dir`; at or past it,
+    along `out_dir`; with nothing over the square it waits along `in_dir`.
+    """
+
+    is_junction = True
+
+    def __init__(self, prim_path, *, centre, size, in_dir, out_dir, speed, deck_z, centre_tol, scene):
+        self.prim_path = prim_path
+        self.centre = np.asarray(centre, dtype=float)[:2]
+        self.size = (float(size[0]), float(size[1]))
+        self.in_dir = _unit([in_dir[0], in_dir[1], 0.0], name="in_dir")[:2]
+        self.out_dir = _unit([out_dir[0], out_dir[1], 0.0], name="out_dir")[:2]
+        self.speed = float(speed)
+        self.deck_z = float(deck_z)
+        self.centre_tol = float(centre_tol)
+        self.scene = scene
+        self._boxes: list[Any] = []
+        self._mode: str | None = None
+        self._sub: Any = None
+        self.gate_path = None
+
+    def __repr__(self) -> str:
+        return f"<Junction {self.prim_path} at ({self.centre[0]:.2f}, {self.centre[1]:.2f}) mode={self._mode}>"
+
+    @classmethod
+    def build(
+        cls,
+        prim_path: str = "/World/Junction",
+        *,
+        centre: Any,
+        size: Any = (1.06, 0.9),
+        in_dir: Any,
+        out_dir: Any,
+        speed: float = 0.3,
+        deck_z: float = 0.769,
+        thickness: float = 0.06,
+        friction: float = 0.9,
+        centre_tol: float = 0.02,
+        color: Any = (0.15, 0.16, 0.18),
+        scene: Any = None,
+    ) -> "Junction":
+        """A hidden `size[0]` (along the line) by `size[1]` (across it) square
+        whose top is at `deck_z`, driven along `in_dir` until a tracked carton
+        is centred, then along `out_dir`. `start()` after Play, like a belt."""
+        from .scene import Scene as _Scene
+
+        scene = scene or _Scene.get()
+        c = np.asarray(centre, dtype=float)[:2]
+        out = _unit([out_dir[0], out_dir[1], 0.0], name="out_dir")
+        yaw = float(np.degrees(np.arctan2(out[1], out[0])))
+        scene.spawn_rigid(
+            prim_path,
+            shape="cube",
+            scale=[float(size[0]) / 2.0, float(size[1]) / 2.0, thickness / 2.0],
+            position=[float(c[0]), float(c[1]), deck_z - thickness / 2.0],
+            orientation=[0.0, 0.0, yaw],
+            mass=0.0,
+            friction=friction,
+            restitution=0.0,
+            static=True,
+            color=color,
+        )
+        _force_kinematic(prim_path)
+        junction = cls(prim_path, centre=c, size=size, in_dir=in_dir, out_dir=out_dir, speed=speed,
+                       deck_z=deck_z, centre_tol=centre_tol, scene=scene)
+        junction._hide()
+        return junction
+
+    def _hide(self) -> None:
+        try:
+            from pxr import UsdGeom
+
+            prim = get_stage().GetPrimAtPath(self.prim_path)
+            if prim and prim.IsValid():
+                UsdGeom.Imageable(prim).MakeInvisible()
+        except Exception:  # noqa: BLE001
+            logger.debug("could not hide %s", self.prim_path, exc_info=True)
+
+    def track(self, objects: Any) -> list[Any]:
+        """The cartons whose positions switch the square (a belt's `_boxes`)."""
+        self._boxes = list(objects)
+        return self._boxes
+
+    @staticmethod
+    def direction_for(centre, size, in_dir, out_dir, positions, centre_tol=0.02):
+        """Which way the square runs, from carton positions: 'in' or 'out'.
+
+        The carton nearest the centre that lies over the square (half a size
+        plus 0.2 m each way, so a carton whose front has just crossed on
+        counts) decides. Short of the centreline by more than `centre_tol`
+        along `in_dir`: 'in'. Otherwise 'out'. No carton: 'in'.
+        """
+        c = np.asarray(centre, dtype=float)[:2]
+        i = np.asarray(in_dir, dtype=float)[:2]
+        o = np.asarray(out_dir, dtype=float)[:2]
+        best, best_d = None, None
+        for p in positions:
+            d = np.asarray(p, dtype=float)[:2] - c
+            along_in, along_out = float(np.dot(d, i)), float(np.dot(d, o))
+            if abs(along_out) > size[0] / 2.0 + 0.2 or abs(along_in) > size[1] / 2.0 + 0.2:
+                continue
+            dist = float(np.hypot(along_in, along_out))
+            if best_d is None or dist < best_d:
+                best, best_d = along_in, dist
+        if best is None:
+            return "in"
+        return "in" if best < -float(centre_tol) else "out"
+
+    def _drive(self, mode: str) -> None:
+        if mode == self._mode:
+            return
+        vec = (self.in_dir if mode == "in" else self.out_dir) * self.speed
+        drive_surface(_body_of(self.prim_path), [float(vec[0]), float(vec[1]), 0.0], enabled=True)
+        self._mode = mode
+
+    def _on_step(self, *_args: Any) -> None:
+        positions = []
+        for box in self._boxes:
+            try:
+                pos = np.asarray(box.position, dtype=float)
+            except Exception:  # noqa: BLE001
+                continue
+            if abs(float(pos[2]) - self.deck_z) < 0.6:
+                positions.append(pos)
+        self._drive(self.direction_for(self.centre, self.size, self.in_dir, self.out_dir, positions, self.centre_tol))
+
+    def start(self) -> str:
+        """Run along `in_dir` and watch the cartons every physics step. Idempotent."""
+        self._mode = None
+        self._drive("in")
+        if self._sub is None:
+            try:
+                import omni.physx
+
+                self._sub = omni.physx.get_physx_interface().subscribe_physics_step_events(self._on_step)
+            except Exception:  # noqa: BLE001
+                logger.warning("no physics step subscription for %s; switching on scene steps only", self.prim_path)
+            try:
+                self.scene.add_step_listener(self._on_step)
+            except Exception:  # noqa: BLE001
+                pass
+        return self._mode
+
+    def halt(self) -> None:
+        drive_surface(_body_of(self.prim_path), [0.0, 0.0, 0.0], enabled=False)
+        self._mode = None
+        if self._sub is not None:
+            try:
+                self._sub.unsubscribe()
+            except Exception:  # noqa: BLE001
+                pass
+            self._sub = None
+        try:
+            self.scene.remove_step_listener(self._on_step)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def describe(self) -> dict[str, Any]:
+        return {
+            "prim_path": self.prim_path,
+            "kind": "junction",
+            "centre": self.centre.round(4).tolist(),
+            "size": list(self.size),
+            "in_dir": self.in_dir.round(4).tolist(),
+            "out_dir": self.out_dir.round(4).tolist(),
+            "speed": self.speed,
+            "deck_z": self.deck_z,
+            "mode": self._mode,
+            "boxes": [getattr(b, "prim_path", str(b)) for b in self._boxes],
+            "mechanism": "PhysxSurfaceVelocityAPI switched on physics steps",
+        }
+
+
 #: What the belt surface is called inside the shipped conveyor assets. Both
 #: variants measured (A01, A09) name it exactly this, and in both it is the one
 #: prim carrying RigidBodyAPI — the frame around it is a plain collider mesh.
