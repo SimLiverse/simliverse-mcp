@@ -1458,8 +1458,17 @@ class Conveyor:
 #: rollers carry at ~0.74, an upper belt at ~1.78. The arc's centreline radius
 #: is ~1.55 m, the footprint 2.07 x 2.10 m. A curve dresses a `build_curve`
 #: whose radius matches. A01/A02/A03 differ only in tier.
+#: The 90-degree curve props, measured off the asset files (Isaac Sim 6.0.1):
+#: all three share one footprint. The prop's ORIGIN is the entry port -- the
+#: rollers run local x 0..1.95, y -1.57..0.45 -- so the arc's centreline enters
+#: at (0, 0) heading local +X, bends clockwise round a centre at (0, -1.55) and
+#: leaves at (1.55, -1.55) heading local -Y. Rollers top out at 0.77 m like the
+#: A08's. (An earlier note had the origin at the arc centre; the bounding box
+#: says otherwise, and a prop placed at the centre stood 1.55 m off its slabs.)
 CURVES: dict[str, dict[str, float]] = {
-    "conveyorbelt_a01": {"deck": 0.74, "radius": 1.55, "footprint": 2.07},
+    "conveyorbelt_a01": {"deck": 0.769, "radius": 1.55, "footprint": 2.07},
+    "conveyorbelt_a02": {"deck": 0.769, "radius": 1.55, "footprint": 2.07},
+    "conveyorbelt_a03": {"deck": 0.769, "radius": 1.55, "footprint": 2.07},
 }
 
 
@@ -1731,9 +1740,10 @@ class CurvedConveyor:
         """Put a real curve prop over the chord slabs, and hide them.
 
         The prop is a fixed-radius quadrant, so it lands cleanly only when the
-        arc's radius matches (A01 is ~1.55 m); this warns otherwise. The prop
-        is placed at the arc centre and rotated so its own quadrant sweeps from
-        the entry angle.
+        arc's radius matches (A01-A03 are 1.55 m); this warns otherwise. The
+        prop's origin is its entry port, not the arc centre, so it is placed on
+        the arc's entry point (clockwise arcs) or exit point (anticlockwise,
+        run backwards) and yawed to the tangent there.
         """
         from .props import spawn_prop
 
@@ -1747,16 +1757,26 @@ class CurvedConveyor:
                 spec["radius"],
                 self.radius,
             )
-        # A01's own quadrant is authored from its local frame; place it at the
-        # centre and yaw it so its entry lines up with a0. Measured offset of
-        # the prop's local quadrant start is 0 (its arc runs local -Y to +X),
-        # so a yaw of a0 + 90 deg aligns it; refined live.
+        # The prop is authored with its origin at the ENTRY port and its arc
+        # bending clockwise (see CURVES). A clockwise arc (turn < 0) takes the
+        # prop as authored: origin on the entry point, local +X along the entry
+        # heading, which is a0 - 90 deg. An anticlockwise arc runs the prop
+        # backwards -- rollers do not care which way a carton crosses them --
+        # so its authored entry sits on OUR exit point and its local +X, the
+        # authored entry heading, points back along our exit tangent: a yaw of
+        # a0 (= a1 - 90) with the origin at a1.
         path = f"{self.prim_path}_Dressing"
-        yaw = float(np.degrees(self.a0)) + 90.0
+        r = float(spec["radius"])
+        if self.a1 < self.a0:
+            at = self.centre + r * np.array([np.cos(self.a0), np.sin(self.a0)])
+            yaw = float(np.degrees(self.a0)) - 90.0
+        else:
+            at = self.centre + r * np.array([np.cos(self.a1), np.sin(self.a1)])
+            yaw = float(np.degrees(self.a0))
         spawn_prop(
             prop,
             prim_path=path,
-            position=[float(self.centre[0]), float(self.centre[1]), self.deck_z - float(spec["deck"])],
+            position=[float(at[0]), float(at[1]), self.deck_z - float(spec["deck"])],
             orientation=[0.0, 0.0, yaw],
             scene=self.scene,
         )
