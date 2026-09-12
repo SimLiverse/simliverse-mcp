@@ -172,6 +172,28 @@ def _is_sided(joint_name: str) -> bool:
     return any(token in lowered for token in _SIDE_TOKENS)
 
 
+def ends_by_convention(driven_joint: str, low: float, high: float, *, prismatic: bool = False) -> "tuple[float, float] | None":
+    """(open, closed) for a linkage jaw's driven joint from the vendor
+    convention its name carries, or None when the name says nothing.
+
+    A Robotiq/OnRobot revolute `finger_joint` sits at zero open and rotates
+    positive to close (measured live on a 2F-85: close() stopped at 0.73 rad
+    on a 4 cm block). A prismatic drive (Schunk `Jaw_Drive`, a Hand-E
+    `Slider`) opens at its upper limit and closes toward zero. Asked BEFORE
+    `_ends_by_measurement`, which steps physics twenty frames per end and,
+    called from a controller inside the physics step where those steps
+    cannot run, read the same pad gap at both ends and swapped the sides
+    (the sketch evaluation, 2026-09-12: 'open' held a 2F-140 shut through
+    a descent).
+    """
+    name = (driven_joint or "").rsplit("/", 1)[-1].lower()
+    if prismatic or any(t in name for t in ("slider", "jaw_drive", "drive")):
+        return float(high), float(low)
+    if "finger" in name or "knuckle" in name:
+        return float(low), float(high)
+    return None
+
+
 def _match_motion_config(supported: Any, joints: str, asset: str, leaf: str) -> str | None:
     """Pick the RMPflow config for a robot from three normalised identifiers.
 
@@ -463,6 +485,44 @@ class Gripper:
         )
         return opened, closed
 
+    def _primary_is_prismatic(self) -> bool:
+        try:
+            from pxr import Usd, UsdPhysics
+
+            name = self.joint_names[self.joint_indices.index(self.primary_index)]
+            root = get_stage().GetPrimAtPath(self._robot.prim_path).GetParent()
+            for prim in Usd.PrimRange(root, Usd.TraverseInstanceProxies()):
+                if prim.IsA(UsdPhysics.Joint) and prim.GetName() == name:
+                    return bool(prim.IsA(UsdPhysics.PrismaticJoint))
+        except Exception:  # noqa: BLE001 -- unreadable: the name decides
+            pass
+        return False
+
+    def closing_axis(self) -> "np.ndarray | None":
+        """World-frame unit vector from one pad to the other, from the finger
+        MESHES' centres. The pad links' origins sit within 12 mm of each
+        other at the tool frame on a UR10e (measured, 2026-09-12), so an axis
+        from the origins is noise -- and a jaw aimed by it came down with its
+        fingers front and back along a belt instead of across it. None when
+        the fingers cannot be found or their meshes coincide."""
+        from pxr import Usd, UsdGeom
+
+        pads = self._pad_links()
+        if len(pads) < 2:
+            return None
+        stage = get_stage()
+        cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), ["default", "render"])
+        centres = []
+        for path in pads[:2]:
+            rng = cache.ComputeWorldBound(stage.GetPrimAtPath(path)).ComputeAlignedRange()
+            lo, hi = rng.GetMin(), rng.GetMax()
+            centres.append(np.array([(lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0, (lo[2] + hi[2]) / 2.0], dtype=float))
+        axis = centres[1] - centres[0]
+        norm = float(np.linalg.norm(axis))
+        if norm < 0.02:
+            return None
+        return axis / norm
+
     def _limits(self) -> tuple[float, float]:
         if self._open_value is None or self._closed_value is None:
             limits = self._robot.joint_limits
@@ -489,6 +549,13 @@ class Gripper:
             elif self.is_linkage:
                 primary = self.primary_index
                 low, high = limits[primary]
+                convention = ends_by_convention(
+                    self.joint_names[self.joint_indices.index(primary)], float(low), float(high),
+                    prismatic=self._primary_is_prismatic(),
+                )
+                if convention is not None:
+                    self._open_value, self._closed_value = convention
+                    return self._open_value, self._closed_value
                 try:
                     self._open_value, self._closed_value = self._ends_by_measurement(float(low), float(high))
                 except Exception as exc:  # noqa: BLE001 - measuring needs live physics
@@ -1380,7 +1447,7 @@ class Manipulator(Robot):
         return [str(p.GetPath()) for p in Usd.PrimRange(root) if p.HasAPI(UsdPhysics.RigidBodyAPI)]
 
     def firm_gripper_drives(self, *, stiffness: float = 1.0e4, damping: float = 1.0e2,
-                            max_force: float = 500.0) -> list[str]:
+                            max_force: float = 500.0, followers: str = "leave") -> list[str]:
         """Firm up a fitted finger jaw's joint drives so it holds through a traverse.
 
         A shipped linkage jaw's followers carry drives too weak to hold their
@@ -1393,24 +1460,47 @@ class Manipulator(Robot):
         closed on nothing mid-traverse; at 1e4 / 500 N it rode held. Returns
         the joints touched.
         """
+        # Only the DRIVEN joint, and from the jaw's own prim. Firming every
+        # joint (the first version) held a linkage's mimic followers at stale
+        # targets with 1e4 N/rad and the jaw jammed at [0.70, -0.88, -0.40,
+        # ...] (a 2F-140 on a UR10e, 2026-09-12); and the joint names taken
+        # from the handle before Play were empty, so nothing was firmed at all
+        # and three evaluation passes ran on the shipped 3 N/rad. Followers
+        # are left to their coupling (`followers="leave"`) or damped only
+        # (`followers="damp"`), never given a stiffness. A driven joint the
+        # asset ships without a drive is raised: a broken asset is reported,
+        # not repaired.
         from pxr import Usd, UsdPhysics
 
-        gripper = getattr(self, "gripper", None)
-        names = set(gripper.joint_names) if gripper is not None and getattr(gripper, "exists", True) else set()
-        if not names:
-            return []
         stage = get_stage()
-        root = stage.GetPrimAtPath(self.prim_path).GetParent()  # fitted jaws are siblings of the arm
+        try:
+            fitted = self._fitted_gripper() or {}
+        except Exception:  # noqa: BLE001 -- no record: the arm's siblings are searched
+            fitted = {}
+        gpath = (fitted or {}).get("prim_path")
+        root = stage.GetPrimAtPath(gpath) if gpath and stage.GetPrimAtPath(gpath).IsValid() else stage.GetPrimAtPath(self.prim_path).GetParent()
+        arm_joints = set(self.joint_names or [])
+        driven_names = {"finger_joint", "jaw_drive", "slider_1", "slider_2"}
         touched: list[str] = []
-        for prim in Usd.PrimRange(root):
-            if prim.IsA(UsdPhysics.Joint) and prim.GetName() in names:
-                for kind in ("linear", "angular"):
-                    drive = UsdPhysics.DriveAPI.Get(prim, kind)
-                    if drive and drive.GetStiffnessAttr().HasAuthoredValue():
-                        drive.GetStiffnessAttr().Set(float(stiffness))
-                        drive.GetDampingAttr().Set(float(damping))
-                        drive.GetMaxForceAttr().Set(float(max_force))
-                        touched.append(prim.GetName())
+        for prim in Usd.PrimRange(root, Usd.TraverseInstanceProxies()):
+            if not prim.IsA(UsdPhysics.Joint) or prim.IsA(UsdPhysics.FixedJoint) or prim.GetName() in arm_joints:
+                continue
+            kind = "linear" if prim.IsA(UsdPhysics.PrismaticJoint) else "angular"
+            drive = UsdPhysics.DriveAPI.Get(prim, kind)
+            if prim.GetName().lower() in driven_names:
+                if not drive or not drive.GetStiffnessAttr().HasAuthoredValue():
+                    raise MotionError(
+                        f"{self.prim_path}: the fitted jaw ships {prim.GetName()} without a drive (no stiffness "
+                        f"authored) -- a joint that cannot be driven. The asset is broken; it is not worked around."
+                    )
+                drive.GetStiffnessAttr().Set(float(stiffness))
+                drive.GetDampingAttr().Set(float(damping))
+                drive.GetMaxForceAttr().Set(float(max_force))
+                touched.append(prim.GetName())
+            elif followers == "damp" and drive and drive.GetStiffnessAttr().HasAuthoredValue():
+                drive.GetStiffnessAttr().Set(0.0)
+                drive.GetDampingAttr().Set(50.0)
+                drive.GetMaxForceAttr().Set(float(max_force))
         return touched
 
     def rebind_gripper(self) -> "Gripper":

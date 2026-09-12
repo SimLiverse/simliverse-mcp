@@ -694,6 +694,7 @@ class Robot:
                 "base_position": self.base_position.round(4).tolist(),
                 "drive_problems": self.drive_health(),
                 "asset_problems": self.asset_problems(),
+                "collision_problems": self._collision_problems(),
                 "capabilities": self.capabilities(),
             }
         except StaleArticulation as exc:
@@ -794,6 +795,45 @@ class Robot:
         problems.extend(self._inertia_problems())
         problems.extend(self._pose_feedback_problems())
         return problems
+
+    def _collision_problems(self) -> list[dict[str, str]]:
+        """Rigid links with no enabled collision geometry anywhere beneath
+        them -- instance proxies included, because Isaac's robot links keep
+        their colliders under instanced prototypes and a plain traversal
+        named every UR10e link bare while each carried an enabled convex
+        decomposition (measured on the live stage, 2026-09-12)."""
+        try:
+            from pxr import Usd, UsdPhysics
+        except Exception:  # noqa: BLE001 -- no USD: nothing to audit
+            return []
+        try:
+            root = get_stage().GetPrimAtPath(self.prim_path)
+        except Exception:  # noqa: BLE001
+            return []
+        bare: list[str] = []
+        for link in Usd.PrimRange(root, Usd.TraverseInstanceProxies()):
+            if not link.HasAPI(UsdPhysics.RigidBodyAPI):
+                continue
+            enabled = False
+            for prim in Usd.PrimRange(link, Usd.TraverseInstanceProxies()):
+                if prim.HasAPI(UsdPhysics.CollisionAPI) and bool(UsdPhysics.CollisionAPI(prim).GetCollisionEnabledAttr().Get()):
+                    enabled = True
+                    break
+            if not enabled:
+                bare.append(link.GetName())
+        if not bare:
+            return []
+        return [
+            {
+                "issue": "links with no collision geometry",
+                "detail": f"{', '.join(bare)} carry no enabled collider anywhere beneath them",
+                "consequence": (
+                    "those links pass through everything -- a belt, a rack, a carton -- and "
+                    "the run looks like a control problem. The asset is broken; report it "
+                    "rather than authoring colliders, which changes the robot being simulated."
+                ),
+            }
+        ]
 
     def _inertia_problems(self) -> list[dict[str, str]]:
         """Links PhysX had to invent an inertia tensor for.

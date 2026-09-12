@@ -287,3 +287,17 @@ def test_a_longer_name_is_not_claimed_by_a_shorter_one():
 
 def test_an_unknown_robot_matches_nothing():
     assert _match_motion_config(SUPPORTED, "a1 a2", ".../vendor/mystery/m.usd", "arm") is None
+
+
+
+def test_the_closed_end_comes_from_the_vendor_convention_before_any_measurement():
+    """A Robotiq finger_joint opens at zero and closes toward its upper limit;
+    a prismatic slider or Jaw_Drive opens at its upper limit. A name that says
+    nothing gets None, and only then is the jaw moved to measure."""
+    from simliverse_sim.robots.manipulator import ends_by_convention
+
+    assert ends_by_convention("finger_joint", 0.0, 0.82) == (0.0, 0.82)
+    assert ends_by_convention("/World/UR/Robotiq/finger_joint", 0.0, 0.70) == (0.0, 0.70)
+    assert ends_by_convention("Jaw_Drive", 0.0, 0.0265) == (0.0265, 0.0)
+    assert ends_by_convention("Slider_1", 0.0, 0.025, prismatic=True) == (0.025, 0.0)
+    assert ends_by_convention("joint_7", -1.0, 1.0) is None
