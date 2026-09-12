@@ -803,23 +803,31 @@ class Robot:
         named every UR10e link bare while each carried an enabled convex
         decomposition (measured on the live stage, 2026-09-12)."""
         try:
-            from pxr import Usd, UsdPhysics
+            from pxr import Usd, UsdGeom, UsdPhysics
         except Exception:  # noqa: BLE001 -- no USD: nothing to audit
             return []
         try:
             root = get_stage().GetPrimAtPath(self.prim_path)
         except Exception:  # noqa: BLE001
             return []
+
+        def _collides(prim) -> bool:
+            # physics:collisionEnabled defaults to True when nobody authored
+            # it: the KR210's Link1 colliders do not author it and read as
+            # "no collision" through .Get() alone (falsely refused, s30_00).
+            attr = UsdPhysics.CollisionAPI(prim).GetCollisionEnabledAttr()
+            return bool(attr.Get()) if attr and attr.HasAuthoredValue() else True
+
         bare: list[str] = []
         for link in Usd.PrimRange(root, Usd.TraverseInstanceProxies()):
             if not link.HasAPI(UsdPhysics.RigidBodyAPI):
                 continue
-            enabled = False
-            for prim in Usd.PrimRange(link, Usd.TraverseInstanceProxies()):
-                if prim.HasAPI(UsdPhysics.CollisionAPI) and bool(UsdPhysics.CollisionAPI(prim).GetCollisionEnabledAttr().Get()):
-                    enabled = True
-                    break
-            if not enabled:
+            below = list(Usd.PrimRange(link, Usd.TraverseInstanceProxies()))
+            # A frame link (tool0, a flange) draws nothing and has nothing
+            # to collide with; it is not a broken link.
+            if not any(prim.IsA(UsdGeom.Gprim) for prim in below):
+                continue
+            if not any(prim.HasAPI(UsdPhysics.CollisionAPI) and _collides(prim) for prim in below):
                 bare.append(link.GetName())
         if not bare:
             return []
