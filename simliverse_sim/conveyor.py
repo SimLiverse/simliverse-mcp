@@ -1946,14 +1946,35 @@ class Junction:
         drive_surface(_body_of(self.prim_path), [float(vec[0]), float(vec[1]), 0.0], enabled=True)
         self._mode = mode
 
+    @staticmethod
+    def _usd_position(prim_path: str) -> Any:
+        """A carton's world position straight off the stage.
+
+        Not through a physics view: a `SingleRigidPrim` made for a path that
+        an earlier cell's view still claims re-applies THAT view's default
+        pose to the new prim. Measured: a tee cell built after an elbow cell
+        had its five cartons set down on the elbow cell's first five carton
+        positions, on the floor, the moment the square first looked at them
+        (j42_06, and again with the API alone). The stage is written every
+        frame while physics runs, and that is all the square needs.
+        """
+        from pxr import Usd, UsdGeom
+
+        prim = get_stage().GetPrimAtPath(prim_path)
+        if not prim or not prim.IsValid():
+            return None
+        t = UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(Usd.TimeCode.Default()).ExtractTranslation()
+        return np.array([float(t[0]), float(t[1]), float(t[2])])
+
     def _on_step(self, *_args: Any) -> None:
         positions = []
         for box in self._boxes:
+            path = getattr(box, "prim_path", None) or str(box)
             try:
-                pos = np.asarray(box.position, dtype=float)
+                pos = self._usd_position(path)
             except Exception:  # noqa: BLE001
                 continue
-            if abs(float(pos[2]) - self.deck_z) < 0.6:
+            if pos is not None and abs(float(pos[2]) - self.deck_z) < 0.6:
                 positions.append(pos)
         self._drive(self.direction_for(self.centre, self.size, self.in_dir, self.out_dir, positions, self.centre_tol))
 
