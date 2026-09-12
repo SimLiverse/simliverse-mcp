@@ -171,6 +171,23 @@ class WheeledRobot(Robot):
 
         return PoseDriver(self, **kwargs)
 
+    def steer_step(self, position: Any, *, max_speed: float = 0.6, turn_first: float = 0.4) -> float:
+        """One tick of the turn-then-go law `drive_to` runs, without blocking:
+        for a controller that is called once per frame (a ScriptNode driving
+        a sketched route). Returns the distance still to go, metres; the
+        caller decides when that is close enough and calls `drive(0, 0)`."""
+        target = np.asarray(position, dtype=float).reshape(-1)[:2]
+        offset = target - self.base_position[:2]
+        distance = float(np.linalg.norm(offset))
+        heading = self._heading()
+        desired = float(np.arctan2(offset[1], offset[0]))
+        error = float(np.arctan2(np.sin(desired - heading), np.cos(desired - heading)))
+        if abs(error) > turn_first:
+            self.drive(linear=0.0, angular=float(np.clip(2.0 * error, -1.5, 1.5)))
+        else:
+            self.drive(linear=float(min(max_speed, distance)), angular=float(np.clip(1.5 * error, -1.0, 1.0)))
+        return distance
+
     def drive_to(
         self,
         position: Any,

@@ -176,7 +176,11 @@ def classify_morphology(
         return Morphology.WHEELED
 
     # A standalone hand: many finger joints, no arm chain to carry it.
-    if len(groups.gripper) >= 6 and not has_arms:
+    # A six-joint jaw on a six-joint arm whose joints carry no "arm" token
+    # (a Fanuc CRX: J1..J6) is an arm with a gripper, not a hand: the joints
+    # that are not fingers, wheels, legs or rotors are what decides.
+    other = dof - len(groups.gripper) - len(groups.wheels) - len(groups.legs) - len(groups.rotors)
+    if len(groups.gripper) >= 6 and not has_arms and other < 5:
         return Morphology.DEXTEROUS_HAND
     if has_arms or dof >= 5:
         return Morphology.MANIPULATOR
@@ -690,6 +694,7 @@ class Robot:
                 "base_position": self.base_position.round(4).tolist(),
                 "drive_problems": self.drive_health(),
                 "asset_problems": self.asset_problems(),
+                "collision_problems": self._collision_problems(),
                 "capabilities": self.capabilities(),
             }
         except StaleArticulation as exc:
@@ -790,6 +795,53 @@ class Robot:
         problems.extend(self._inertia_problems())
         problems.extend(self._pose_feedback_problems())
         return problems
+
+    def _collision_problems(self) -> list[dict[str, str]]:
+        """Rigid links with no enabled collision geometry anywhere beneath
+        them -- instance proxies included, because Isaac's robot links keep
+        their colliders under instanced prototypes and a plain traversal
+        named every UR10e link bare while each carried an enabled convex
+        decomposition (measured on the live stage, 2026-09-12)."""
+        try:
+            from pxr import Usd, UsdGeom, UsdPhysics
+        except Exception:  # noqa: BLE001 -- no USD: nothing to audit
+            return []
+        try:
+            root = get_stage().GetPrimAtPath(self.prim_path)
+        except Exception:  # noqa: BLE001
+            return []
+
+        def _collides(prim) -> bool:
+            # physics:collisionEnabled defaults to True when nobody authored
+            # it: the KR210's Link1 colliders do not author it and read as
+            # "no collision" through .Get() alone (falsely refused, s30_00).
+            attr = UsdPhysics.CollisionAPI(prim).GetCollisionEnabledAttr()
+            return bool(attr.Get()) if attr and attr.HasAuthoredValue() else True
+
+        bare: list[str] = []
+        for link in Usd.PrimRange(root, Usd.TraverseInstanceProxies()):
+            if not link.HasAPI(UsdPhysics.RigidBodyAPI):
+                continue
+            below = list(Usd.PrimRange(link, Usd.TraverseInstanceProxies()))
+            # A frame link (tool0, a flange) draws nothing and has nothing
+            # to collide with; it is not a broken link.
+            if not any(prim.IsA(UsdGeom.Gprim) for prim in below):
+                continue
+            if not any(prim.HasAPI(UsdPhysics.CollisionAPI) and _collides(prim) for prim in below):
+                bare.append(link.GetName())
+        if not bare:
+            return []
+        return [
+            {
+                "issue": "links with no collision geometry",
+                "detail": f"{', '.join(bare)} carry no enabled collider anywhere beneath them",
+                "consequence": (
+                    "those links pass through everything -- a belt, a rack, a carton -- and "
+                    "the run looks like a control problem. The asset is broken; report it "
+                    "rather than authoring colliders, which changes the robot being simulated."
+                ),
+            }
+        ]
 
     def _inertia_problems(self) -> list[dict[str, str]]:
         """Links PhysX had to invent an inertia tensor for.

@@ -166,6 +166,15 @@ class AerialRobot(Robot):
                 f"have RigidBodyAPI applied and physics must be running."
             ) from exc
 
+    def hold_step(self, target: Any) -> float:
+        """One control step toward `target` (x, y, z), for a controller that
+        ticks once per frame and cannot block: the same PD `fly_to` runs, one
+        step of it. Returns the distance still to go, metres. A sketched
+        drone's route controller is built on this."""
+        wanted = as_vec3(target, name="target")
+        self._position_control_step(wanted)
+        return float(np.linalg.norm(self.position - wanted))
+
     def hover(self, *, steps: int = 60) -> bool:
         """Hold altitude against gravity. Returns whether it stayed roughly put."""
         start = self.position.copy()
