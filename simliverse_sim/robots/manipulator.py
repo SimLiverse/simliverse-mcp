@@ -1521,6 +1521,17 @@ class Manipulator(Robot):
     ) -> dict[str, Any]:
         """Bolt a shipped finger gripper onto this arm's flange.
 
+        KNOWN ISSUE, measured on a UR10e (2026-09-12, the sketch evaluation's
+        jaw_experiment6..11): with a 2F-85 bolted on this way the composed
+        articulation LOCKS wrist_2 -- it stays at 0.00 rad with 1.00 rad
+        commanded, wrist_1 stops at 0.16 of 0.50 and wrist_3 follows -- while
+        the bare arm follows every command. Body masses, drive gains, sleep
+        thresholds, the followers' mimic couplings, body-to-body pair filters
+        and the subset-vs-full command path were each ruled out by measurement;
+        a KR210 hides it because its joints ship with stiffness 1e15 and an
+        unlimited max force. The sketch builder refuses a 2F jaw on a UR arm
+        until this is found; the mount joint itself is the next suspect.
+
         `asset` is a robot-library key (`2f_85`, `2f_140`, `hand_e`, `egk_25`,
         `egu_50`, `ezu_35` - `list_robots()` discovers them under
         `/Isaac/Robots/Robotiq` and `/Isaac/Robots/Schunk`) or a USD path.
